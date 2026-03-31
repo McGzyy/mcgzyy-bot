@@ -1,0 +1,32 @@
+[
+  {
+    "walletAddress": "4fdfBkB44MCwZzpN6bvJdEUoPNcNRCLbvUC8E7J4o3NP",
+    "note": "good runner / migration dev",
+    "addedById": "732566370914664499",
+    "addedByUsername": "mcgzyy",
+    "addedAt": "2026-03-29T19:47:45.166Z",
+    "isActive": true,
+    "tags": []
+  },
+  {
+    "walletAddress": "E1dUmutVwLvksdn4SVKZQvC1tFCHxL8pBgjANXd8mNsF",
+    "note": "AlphaDev migration god",
+    "addedById": "732566370914664499",
+    "addedByUsername": "mcgzyy",
+    "addedAt": "2026-03-29T20:16:20.625Z",
+    "isActive": true,
+    "tags": [],
+    "previousLaunches": [
+      {
+        "tokenName": "SPLAT",
+        "ticker": "SPLAT",
+        "contractAddress": "A8Cs8E2bY3idaTi8k4KGF1Ss8mAcFfzUTRA4f12vpump",
+        "athMarketCap": 3347,
+        "firstCalledMarketCap": 31369.29,
+        "xFromCall": 0.11,
+        "discordMessageId": "1487901273738051614",
+        "addedAt": "2026-03-29T20:47:31.729Z"
+      }
+    ]
+  }
+]

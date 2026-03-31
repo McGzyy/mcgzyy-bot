@@ -1,0 +1,9 @@
+node_modules/
+.env
+data/*.backup.json
+logs/
+dist/
+coverage/
+.DS_Store
+Thumbs.db
+.vscode/

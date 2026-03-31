@@ -1,0 +1,56 @@
+[
+  {
+    "discordUserId": "AUTO_BOT",
+    "username": "Auto Bot",
+    "displayName": "Auto Bot",
+    "previousUsernames": [],
+    "previousDisplayNames": [],
+    "xHandle": "",
+    "publicSettings": {
+      "allowPublicXTag": false,
+      "allowPublicDisplayName": true,
+      "publicAlias": "",
+      "minimumMilestoneForPublicShoutout": "4x",
+      "maxPublicMentionsPerDay": 1
+    },
+    "publicTracking": {
+      "mentionCountToday": 0,
+      "mentionCountDate": null,
+      "lastPublicMentionAt": null
+    },
+    "createdAt": "2026-03-30T01:51:56.855Z",
+    "updatedAt": "2026-03-31T04:43:18.077Z",
+    "aliases": [
+      "id:AUTO_BOT",
+      "username:auto bot",
+      "display:auto bot"
+    ]
+  },
+  {
+    "discordUserId": "732566370914664499",
+    "username": "mcgzyy",
+    "displayName": "McGzyy",
+    "previousUsernames": [],
+    "previousDisplayNames": [],
+    "xHandle": "",
+    "publicSettings": {
+      "allowPublicXTag": false,
+      "allowPublicDisplayName": true,
+      "publicAlias": "",
+      "minimumMilestoneForPublicShoutout": "4x",
+      "maxPublicMentionsPerDay": 1
+    },
+    "publicTracking": {
+      "mentionCountToday": 0,
+      "mentionCountDate": null,
+      "lastPublicMentionAt": null
+    },
+    "createdAt": "2026-03-30T03:19:10.628Z",
+    "updatedAt": "2026-03-31T04:28:25.479Z",
+    "aliases": [
+      "id:732566370914664499",
+      "username:mcgzyy",
+      "display:mcgzyy"
+    ]
+  }
+]

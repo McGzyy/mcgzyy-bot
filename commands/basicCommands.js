@@ -1517,5 +1517,7 @@ module.exports = {
   isLikelySolanaCA,
   applyTrackedCallState,
   resolveTrackedCallCallerContext,
-  buildTrackedCallCallerContextFromDiscordMessage
+  buildTrackedCallCallerContextFromDiscordMessage,
+  runQuickCa,
+  normalizeRealDataToScan
 };

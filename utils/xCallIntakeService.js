@@ -5,6 +5,10 @@
 
 const { getXVerifiedTrustStatus } = require('./xInteractionTrust');
 const {
+  X_INTAKE_NOT_IN_GUILD_MESSAGE,
+  validateXIntakeGuildTrust
+} = require('./xIntakeGuildTrust');
+const {
   applyTrackedCallState,
   runQuickCa,
   normalizeRealDataToScan,
@@ -51,15 +55,32 @@ function buildCallerContextFromVerifiedProfile(profile) {
 /**
  * End-to-end: verified X author + tweet body → optional tracked call (same pipeline as Discord !call).
  *
- * Trust: getXVerifiedTrustStatus(authorHandle) must return allowed (mod-linked verified handle in Discord).
+ * Trust: (1) getXVerifiedTrustStatus(authorHandle) — mod-verified X ↔ Discord profile.
+ *        (2) validateXIntakeGuildTrust — linked user must be in the configured Discord server (unless skipGuildMembershipCheck).
+ *
+ * Pass options.guild (e.g. message.guild) and/or options.client + DISCORD_GUILD_ID / X_INTAKE_GUILD_ID, or rely on a single cached guild.
  *
  * @param {{ authorHandle: string, tweetText: string }} payload
- * @param {{ dryRun?: boolean, skipTokenFetch?: boolean }} [options] — dryRun skips applyTrackedCallState; skipTokenFetch (with dryRun) skips Birdeye/token fetch
+ * @param {{
+ *   dryRun?: boolean,
+ *   skipTokenFetch?: boolean,
+ *   client?: import('discord.js').Client,
+ *   guild?: import('discord.js').Guild,
+ *   skipGuildMembershipCheck?: boolean,
+ *   requiredRoleIds?: string[]
+ * }} [options]
  * @returns {Promise<object>}
  */
 async function processVerifiedXMentionCallIntake(payload, options = {}) {
   const { authorHandle, tweetText } = payload || {};
-  const { dryRun = false, skipTokenFetch = false } = options;
+  const {
+    dryRun = false,
+    skipTokenFetch = false,
+    client = null,
+    guild = null,
+    skipGuildMembershipCheck = false,
+    requiredRoleIds = null
+  } = options;
 
   const trust = getXVerifiedTrustStatus(authorHandle);
   if (!trust.allowed) {
@@ -69,9 +90,51 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       reason: trust.reason,
       replyMessage: trust.replyMessage,
       trust,
+      guildTrust: null,
       contractAddress: null,
       callerContext: null
     };
+  }
+
+  const discordUserIdForGuild = trust.discordUserId || trust.profile?.discordUserId || null;
+  if (!str(discordUserIdForGuild)) {
+    return {
+      success: false,
+      reason: 'missing_discord_user_id_for_guild_check',
+      trust,
+      guildTrust: null,
+      contractAddress: null,
+      callerContext: null
+    };
+  }
+
+  let guildTrust = null;
+  if (!skipGuildMembershipCheck) {
+    guildTrust = await validateXIntakeGuildTrust({
+      client,
+      guild,
+      discordUserId: discordUserIdForGuild,
+      requiredRoleIds
+    });
+
+    if (!guildTrust.ok) {
+      const replyMessage =
+        guildTrust.reason === 'not_in_guild'
+          ? X_INTAKE_NOT_IN_GUILD_MESSAGE
+          : null;
+
+      return {
+        success: false,
+        trustDenied: false,
+        guildTrustDenied: true,
+        reason: guildTrust.reason,
+        replyMessage,
+        trust,
+        guildTrust,
+        contractAddress: null,
+        callerContext: null
+      };
+    }
   }
 
   const ca = extractFirstSolanaCaFromText(tweetText);
@@ -80,6 +143,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       success: false,
       reason: 'no_solana_ca_in_text',
       trust,
+      guildTrust,
       contractAddress: null,
       callerContext: null
     };
@@ -90,6 +154,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       success: false,
       reason: 'invalid_solana_ca',
       trust,
+      guildTrust,
       contractAddress: ca,
       callerContext: null
     };
@@ -101,6 +166,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       success: false,
       reason: 'missing_discord_user_on_profile',
       trust,
+      guildTrust,
       contractAddress: ca,
       callerContext: null
     };
@@ -112,6 +178,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       dryRun: true,
       reason: 'dry_run_trust_and_ca_ok',
       trust,
+      guildTrust,
       contractAddress: ca,
       callerContext
     };
@@ -127,6 +194,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       reason: 'token_fetch_failed',
       error: err?.message || String(err),
       trust,
+      guildTrust,
       contractAddress: ca,
       callerContext
     };
@@ -138,6 +206,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       dryRun: true,
       reason: 'dry_run_full',
       trust,
+      guildTrust,
       contractAddress: ca,
       callerContext,
       scanPreview: {
@@ -160,6 +229,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     success: true,
     reason: 'tracked',
     trust,
+    guildTrust,
     contractAddress: ca,
     callerContext,
     intakeSource: X_CALL_INTAKE_SOURCE,

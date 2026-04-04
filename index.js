@@ -2029,70 +2029,6 @@ if (lowerContent.startsWith('!resetstats')) {
         return;
       }
 
-     if (lowerContent === '!pendingapprovals') {
-  const isModOrAdmin = message.member?.permissions?.has('ManageGuild');
-
-  if (!isModOrAdmin) {
-    await replyText(message, '❌ Only mods/admins can use this command.');
-    return;
-  }
-
-  const pendingX = getPendingXVerifications(10);
-  const pendingBot = getPendingApprovals(25);
-
-  const xLines = pendingX.map((profile, index) => {
-    const displayName =
-      profile.preferredPublicName ||
-      profile.username ||
-      profile.discordUsername ||
-      `User ${index + 1}`;
-
-    const handle = profile?.xVerification?.requestedHandle
-      ? `@${String(profile.xVerification.requestedHandle).replace(/^@/, '')}`
-      : 'Unknown';
-
-    let minutes = 0;
-    if (profile?.xVerification?.requestedAt) {
-      const diff =
-        Date.now() - new Date(profile.xVerification.requestedAt).getTime();
-      minutes = Math.floor(diff / 60000);
-    }
-
-    return `${index + 1}. **${displayName}** • ${handle} • ${minutes}m ago`;
-  });
-
-  const rankedBot = [...pendingBot]
-    .map(call => {
-      const entry = Number(call.firstCalledMarketCap || call.marketCap || 0);
-      const current = Number(call.latestMarketCap || call.marketCap || 0);
-      const mult = entry > 0 ? current / entry : 0;
-
-      return { call, mult };
-    })
-    .sort((a, b) => b.mult - a.mult)
-    .slice(0, 5);
-
-  const botLines = rankedBot.map((item, index) => {
-    const call = item.call;
-    const token = call.tokenName || 'Unknown';
-    const ticker = call.ticker ? `$${call.ticker}` : '';
-
-    return `${index + 1}. **${token}** ${ticker} • **${item.mult.toFixed(2)}x**`;
-  });
-
-  await message.reply({
-    content:
-      `📋 **Pending Approvals**\n\n` +
-      `🔗 **Pending X Verifications**\n` +
-      (xLines.length ? xLines.join('\n') : 'None') +
-      `\n\n🔥 **Top Pending Bot Approval Coins**\n` +
-      (botLines.length ? botLines.join('\n') : 'None'),
-    allowedMentions: { repliedUser: false }
-  });
-
-  return;
-}
-
 if (lowerContent.startsWith('!setminmc ')) {
   if (message.author.id !== process.env.BOT_OWNER_ID) {
     await replyText(message, '❌ Only the bot owner can use this command.');
@@ -2491,9 +2427,17 @@ if (lowerContent === '!pendingapprovals') {
     return;
   }
 
-  const pendingX = getPendingXVerifications(10);
-  const pendingBot = getPendingApprovals(25).filter(
-    c => String(c.approvalStatus || '').toLowerCase() === 'pending'
+  const X_LIST_CAP = 8;
+  const BOT_LIST_CAP = 8;
+
+  const pendingX = getPendingXVerifications(X_LIST_CAP);
+
+  const pendingBot = getPendingApprovals(50).filter(
+    c =>
+      c.callSourceType === 'bot_call' &&
+      String(c.approvalStatus || '').toLowerCase() === 'pending' &&
+      c.isActive !== false &&
+      String(c.lifecycleStatus || 'active').toLowerCase() !== 'archived'
   );
 
   const xLines = pendingX.map((profile, index) => {
@@ -2526,7 +2470,7 @@ if (lowerContent === '!pendingapprovals') {
       return { call, mult };
     })
     .sort((a, b) => b.mult - a.mult)
-    .slice(0, 5);
+    .slice(0, BOT_LIST_CAP);
 
   const botLines = rankedBot.map((item, index) => {
     const call = item.call;

@@ -97,6 +97,8 @@ const { describeXPostForTrackedCall } = require('./utils/xPostPreview');
 const {
   upsertUserProfile,
   ensureUserProfileOnGuildJoin,
+  previewMemberProfileBackfill,
+  runMemberProfileBackfill,
   getUserProfileByDiscordId,
   setPublicCreditMode,
   startXVerification,
@@ -2435,6 +2437,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
       `• \`!scanner on\` / \`!scanner off\` — Start or stop scanner + monitor + auto-call\n` +
       `• \`!verifyx @user\` — Approve a member’s pending X verification (requires **Manage Server**)\n` +
       `• \`!resetbotstats\` — Reset bot-call stat exclusions on tracked data\n` +
+      `• \`!backfillprofiles\` — Preview members missing bot profiles; \`!backfillprofiles run\` creates them once\n` +
       `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
       `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
       `• \`!truebotstats\` — Bot stats including reset/excluded calls\n\n`;
@@ -2630,6 +2633,65 @@ if (lowerContent === '!monitorstatus') {
 
   return;
 }
+
+if (lowerContent === '!backfillprofiles' || lowerContent.startsWith('!backfillprofiles ')) {
+  const isModOrAdmin = message.member?.permissions?.has('ManageGuild');
+
+  if (!isModOrAdmin) {
+    await replyText(message, '❌ Only members with **Manage Server** can run profile backfill.');
+    return;
+  }
+
+  const guild = message.guild;
+  if (!guild) {
+    await replyText(message, '❌ Run this in a server channel.');
+    return;
+  }
+
+  const sub = content.replace(/^!backfillprofiles\s*/i, '').trim().toLowerCase();
+
+  if (sub === 'run') {
+    const pre = await previewMemberProfileBackfill(guild);
+    if (pre.error) {
+      await replyText(message, '❌ Could not read this server.');
+      return;
+    }
+    if (pre.missing === 0) {
+      await replyText(
+        message,
+        `📋 Nothing to do — **0** missing profiles (humans: **${pre.totalHumans}**, bots skipped: **${pre.skippedBots}**).`
+      );
+      return;
+    }
+
+    const result = await runMemberProfileBackfill(guild);
+    await replyText(
+      message,
+      `✅ **Profile backfill complete**\n` +
+        `• Created: **${result.created}**\n` +
+        `• Humans scanned: **${result.totalHumans}** (already had a profile: **${result.hadProfile}**)\n` +
+        `• Bots skipped: **${result.skippedBots}**`
+    );
+    return;
+  }
+
+  const preview = await previewMemberProfileBackfill(guild);
+  if (preview.error) {
+    await replyText(message, '❌ Could not read this server.');
+    return;
+  }
+
+  await replyText(
+    message,
+    `📋 **Profile backfill preview** (no changes yet)\n` +
+      `• Humans in server: **${preview.totalHumans}**\n` +
+      `• Missing profiles (would create): **${preview.missing}**\n` +
+      `• Bots skipped: **${preview.skippedBots}**\n\n` +
+      `To create missing profiles once: \`!backfillprofiles run\``
+  );
+  return;
+}
+
 if (lowerContent === '!resetmonitor') {
   const isModOrAdmin = message.member?.permissions?.has('ManageGuild');
 

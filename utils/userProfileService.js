@@ -473,6 +473,38 @@ function snapshotGuildRoleIds(member) {
 }
 
 /**
+ * Build a new lightweight guild-member profile object (does not save). Caller must ensure id not already stored.
+ */
+function buildMissingGuildMemberProfile(member, { joinedAtIso, lastSeenAtIso }) {
+  if (!member?.user || member.user.bot) return null;
+
+  const id = String(member.user.id);
+  const discordDisplay =
+    normalizeString(member.displayName) ||
+    normalizeString(member.user.globalName) ||
+    normalizeString(member.user.username) ||
+    '';
+
+  const profile = createEmptyProfile({
+    discordUserId: id,
+    username: member.user.username || '',
+    displayName: discordDisplay
+  });
+
+  profile.discordDisplayName = discordDisplay;
+  profile.joinedAt = joinedAtIso;
+  profile.lastSeenAt = lastSeenAtIso;
+  profile.guildMember = true;
+  profile.rolesSnapshot = snapshotGuildRoleIds(member);
+  profile.xVerifiedAt = null;
+
+  ensureMemberMetaShape(profile);
+  profile.aliases = buildAliasSet(profile);
+
+  return profile;
+}
+
+/**
  * Create a minimal profile when a user joins the server. No-op if a profile already exists for that Discord id.
  */
 function ensureUserProfileOnGuildJoin(member) {
@@ -483,27 +515,11 @@ function ensureUserProfileOnGuildJoin(member) {
     if (getUserProfileByDiscordId(id)) return null;
 
     const now = new Date().toISOString();
-    const discordDisplay =
-      normalizeString(member.displayName) ||
-      normalizeString(member.user.globalName) ||
-      normalizeString(member.user.username) ||
-      '';
-
-    const profile = createEmptyProfile({
-      discordUserId: id,
-      username: member.user.username || '',
-      displayName: discordDisplay
+    const profile = buildMissingGuildMemberProfile(member, {
+      joinedAtIso: now,
+      lastSeenAtIso: now
     });
-
-    profile.discordDisplayName = discordDisplay;
-    profile.joinedAt = now;
-    profile.lastSeenAt = now;
-    profile.guildMember = true;
-    profile.rolesSnapshot = snapshotGuildRoleIds(member);
-    profile.xVerifiedAt = null;
-
-    ensureMemberMetaShape(profile);
-    profile.aliases = buildAliasSet(profile);
+    if (!profile) return null;
 
     const profiles = loadUserProfiles();
     profiles.push(profile);
@@ -514,6 +530,101 @@ function ensureUserProfileOnGuildJoin(member) {
     console.error('[UserProfiles] ensureUserProfileOnGuildJoin failed:', error.message);
     return null;
   }
+}
+
+/**
+ * Count humans missing profiles (after refreshing member cache). Does not write.
+ */
+async function previewMemberProfileBackfill(guild) {
+  if (!guild) {
+    return { error: 'no_guild', totalHumans: 0, missing: 0, skippedBots: 0 };
+  }
+
+  await guild.members.fetch().catch(err => {
+    console.error('[UserProfiles] previewMemberProfileBackfill fetch failed:', err.message);
+  });
+
+  const profiles = loadUserProfiles();
+  const existing = new Set(
+    profiles.map(p => String(p.discordUserId || '')).filter(Boolean)
+  );
+
+  let skippedBots = 0;
+  let totalHumans = 0;
+  let missing = 0;
+
+  for (const member of guild.members.cache.values()) {
+    if (member.user?.bot) {
+      skippedBots++;
+      continue;
+    }
+    totalHumans++;
+    if (!existing.has(String(member.user.id))) {
+      missing++;
+    }
+  }
+
+  return { totalHumans, missing, skippedBots };
+}
+
+/**
+ * One-shot create missing member profiles (same shape as join). Single save at end.
+ * @param {import('discord.js').Guild} guild
+ */
+async function runMemberProfileBackfill(guild) {
+  if (!guild) {
+    return { error: 'no_guild', created: 0, totalHumans: 0, hadProfile: 0, skippedBots: 0 };
+  }
+
+  await guild.members.fetch().catch(err => {
+    console.error('[UserProfiles] runMemberProfileBackfill fetch failed:', err.message);
+  });
+
+  const profiles = loadUserProfiles();
+  const existing = new Set(
+    profiles.map(p => String(p.discordUserId || '')).filter(Boolean)
+  );
+
+  const now = new Date().toISOString();
+  let skippedBots = 0;
+  let totalHumans = 0;
+  const toAdd = [];
+
+  for (const member of guild.members.cache.values()) {
+    if (member.user?.bot) {
+      skippedBots++;
+      continue;
+    }
+    totalHumans++;
+    const id = String(member.user.id);
+    if (existing.has(id)) continue;
+
+    const joinedIso =
+      member.joinedAt instanceof Date && !Number.isNaN(member.joinedAt.getTime())
+        ? member.joinedAt.toISOString()
+        : now;
+
+    const profile = buildMissingGuildMemberProfile(member, {
+      joinedAtIso: joinedIso,
+      lastSeenAtIso: now
+    });
+    if (profile) {
+      toAdd.push(profile);
+      existing.add(id);
+    }
+  }
+
+  if (toAdd.length) {
+    profiles.push(...toAdd);
+    saveUserProfiles(profiles);
+  }
+
+  return {
+    created: toAdd.length,
+    totalHumans,
+    hadProfile: totalHumans - toAdd.length,
+    skippedBots
+  };
 }
 
 /**
@@ -834,6 +945,8 @@ module.exports = {
   upsertUserProfile,
   updateUserProfile,
   ensureUserProfileOnGuildJoin,
+  previewMemberProfileBackfill,
+  runMemberProfileBackfill,
 
    // x verification
   getPendingXVerifications,

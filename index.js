@@ -111,6 +111,7 @@ const {
 } = require('./utils/userProfileService');
 
 const { processVerifiedXMentionCallIntake } = require('./utils/xCallIntakeService');
+const { startXMentionIngestionScaffold } = require('./utils/xMentionIngestionScaffold');
 
 const client = new Client({
   intents: [
@@ -1289,6 +1290,8 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
 }
 
   await ensureVerifyXPrompt(firstGuild);
+
+  startXMentionIngestionScaffold(client);
 
   setInterval(() => {
     cleanupExpiredApprovals().catch(err => {

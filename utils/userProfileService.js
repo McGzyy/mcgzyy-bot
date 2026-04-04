@@ -192,6 +192,24 @@ function getUserProfileByDiscordId(discordUserId) {
   ) || null;
 }
 
+/**
+ * Mod-verified X handle → profile (for future X mention intake / lookups).
+ * If data ever contains duplicate verified handles, the first match wins.
+ */
+function getUserProfileByVerifiedXHandle(handle) {
+  const h = normalizeXHandle(handle);
+  if (!h) return null;
+
+  const profiles = loadUserProfiles();
+  return (
+    profiles.find(
+      profile =>
+        profile.isXVerified === true &&
+        normalizeXHandle(profile.verifiedXHandle || '') === h
+    ) || null
+  );
+}
+
 function getUserProfileByUsername(username) {
   const normalized = normalizeLower(username);
   if (!normalized) return null;
@@ -716,6 +734,7 @@ module.exports = {
   // profile CRUD
   getAllUserProfiles,
   getUserProfileByDiscordId,
+  getUserProfileByVerifiedXHandle,
   getUserProfileByUsername,
   getUserProfileByDisplayName,
   findUserProfile,

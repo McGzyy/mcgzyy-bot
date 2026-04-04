@@ -3,11 +3,7 @@
  * Same layout; footers differ slightly (brand vs light discovery).
  */
 
-const {
-  getPreferredPublicName,
-  getUserProfileByDiscordId,
-  resolvePublicCallerName
-} = require('./userProfileService');
+const { resolvePublicCallerName } = require('./userProfileService');
 
 function formatUsd(value) {
   const num = Number(value);
@@ -167,6 +163,7 @@ function buildXPostTextMonitor(trackedCall, milestoneX, isReply = false) {
 module.exports = {
   buildXPostTextApproval,
   buildXPostTextMonitor,
+  resolveMilestonePostCallerCredit,
   resolveCallerApproval,
   resolveCallerMonitor,
   formatAthMc

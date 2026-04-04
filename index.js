@@ -96,6 +96,7 @@ const { describeXPostForTrackedCall } = require('./utils/xPostPreview');
 
 const {
   upsertUserProfile,
+  ensureUserProfileOnGuildJoin,
   getUserProfileByDiscordId,
   setPublicCreditMode,
   startXVerification,
@@ -110,6 +111,7 @@ const {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
   ]
@@ -1177,6 +1179,14 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
       console.error('[ApprovalQueue] Interval cleanup failed:', err.message);
     });
   }, 60 * 1000);
+});
+
+client.on('guildMemberAdd', (member) => {
+  try {
+    ensureUserProfileOnGuildJoin(member);
+  } catch (err) {
+    console.error('[UserProfiles] guildMemberAdd failed:', err.message);
+  }
 });
 
 client.on('interactionCreate', async (interaction) => {

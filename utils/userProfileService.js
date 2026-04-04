@@ -141,6 +141,22 @@ function getDefaultXVerification() {
   };
 }
 
+/** Backfill member-oriented fields for legacy rows and after partial updates. */
+function ensureMemberMetaShape(profile) {
+  if (!profile || typeof profile !== 'object') return profile;
+
+  if (profile.discordDisplayName == null || normalizeString(profile.discordDisplayName) === '') {
+    profile.discordDisplayName = normalizeString(profile.displayName || '');
+  }
+  if (profile.joinedAt === undefined) profile.joinedAt = null;
+  if (profile.lastSeenAt === undefined) profile.lastSeenAt = null;
+  profile.guildMember = profile.guildMember === true;
+  if (!Array.isArray(profile.rolesSnapshot)) profile.rolesSnapshot = [];
+  if (profile.xVerifiedAt === undefined) profile.xVerifiedAt = null;
+
+  return profile;
+}
+
 function createEmptyProfile({
   discordUserId = null,
   username = '',
@@ -148,10 +164,14 @@ function createEmptyProfile({
 } = {}) {
   const now = new Date().toISOString();
 
+  const disp = normalizeString(displayName);
+
   const profile = {
     discordUserId: discordUserId ? String(discordUserId) : null,
     username: normalizeString(username),
-    displayName: normalizeString(displayName),
+    displayName: disp,
+    /** Guild server display name snapshot (kept in sync with displayName on upsert when provided). */
+    discordDisplayName: disp,
 
     previousUsernames: [],
     previousDisplayNames: [],
@@ -160,6 +180,13 @@ function createEmptyProfile({
     verifiedXHandle: '',
     isXVerified: false,
     xVerification: getDefaultXVerification(),
+    /** ISO time when X verification completed; set only when you extend verification flow. */
+    xVerifiedAt: null,
+
+    joinedAt: null,
+    lastSeenAt: null,
+    guildMember: false,
+    rolesSnapshot: [],
 
     publicSettings: getDefaultPublicSettings(),
     publicTracking: getDefaultPublicTracking(),
@@ -298,6 +325,8 @@ function upsertUserProfile({
       username: normalizedUsername,
       displayName: normalizedDisplayName
     });
+    ensureMemberMetaShape(newProfile);
+    newProfile.aliases = buildAliasSet(newProfile);
 
     profiles.push(newProfile);
     saveUserProfiles(profiles);
@@ -337,8 +366,18 @@ function upsertUserProfile({
     discordUserId: normalizedDiscordId || existing.discordUserId || null,
     username: normalizedUsername || existing.username || '',
     displayName: normalizedDisplayName || existing.displayName || '',
+    discordDisplayName:
+      normalizedDisplayName ||
+      normalizeString(existing.discordDisplayName || '') ||
+      existing.displayName ||
+      '',
     previousUsernames,
     previousDisplayNames,
+    joinedAt: existing.joinedAt ?? null,
+    lastSeenAt: existing.lastSeenAt ?? null,
+    guildMember: existing.guildMember === true,
+    rolesSnapshot: Array.isArray(existing.rolesSnapshot) ? [...existing.rolesSnapshot] : [],
+    xVerifiedAt: existing.xVerifiedAt != null ? existing.xVerifiedAt : null,
     xHandle: normalizeXHandle(existing.xHandle || ''),
     verifiedXHandle: normalizeXHandle(existing.verifiedXHandle || ''),
     isXVerified: !!existing.isXVerified,
@@ -358,6 +397,7 @@ function upsertUserProfile({
     updatedAt: new Date().toISOString()
   };
 
+  ensureMemberMetaShape(updated);
   updated.aliases = buildAliasSet(updated);
 
   profiles[existingIndex] = updated;
@@ -415,12 +455,65 @@ function updateUserProfile(discordUserId, updates = {}) {
     updatedAt: new Date().toISOString()
   };
 
+  ensureMemberMetaShape(updated);
   updated.aliases = buildAliasSet(updated);
 
   profiles[index] = updated;
   saveUserProfiles(profiles);
 
   return updated;
+}
+
+function snapshotGuildRoleIds(member) {
+  if (!member?.roles?.cache) return [];
+  return member.roles.cache
+    .filter(role => role.id !== member.guild?.id)
+    .map(role => role.id)
+    .slice(0, 50);
+}
+
+/**
+ * Create a minimal profile when a user joins the server. No-op if a profile already exists for that Discord id.
+ */
+function ensureUserProfileOnGuildJoin(member) {
+  try {
+    if (!member?.user || member.user.bot) return null;
+
+    const id = String(member.user.id);
+    if (getUserProfileByDiscordId(id)) return null;
+
+    const now = new Date().toISOString();
+    const discordDisplay =
+      normalizeString(member.displayName) ||
+      normalizeString(member.user.globalName) ||
+      normalizeString(member.user.username) ||
+      '';
+
+    const profile = createEmptyProfile({
+      discordUserId: id,
+      username: member.user.username || '',
+      displayName: discordDisplay
+    });
+
+    profile.discordDisplayName = discordDisplay;
+    profile.joinedAt = now;
+    profile.lastSeenAt = now;
+    profile.guildMember = true;
+    profile.rolesSnapshot = snapshotGuildRoleIds(member);
+    profile.xVerifiedAt = null;
+
+    ensureMemberMetaShape(profile);
+    profile.aliases = buildAliasSet(profile);
+
+    const profiles = loadUserProfiles();
+    profiles.push(profile);
+    saveUserProfiles(profiles);
+
+    return profile;
+  } catch (error) {
+    console.error('[UserProfiles] ensureUserProfileOnGuildJoin failed:', error.message);
+    return null;
+  }
 }
 
 /**
@@ -740,6 +833,7 @@ module.exports = {
   findUserProfile,
   upsertUserProfile,
   updateUserProfile,
+  ensureUserProfileOnGuildJoin,
 
    // x verification
   getPendingXVerifications,

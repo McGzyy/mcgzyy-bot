@@ -872,9 +872,94 @@ function getMilestoneLabel(current, firstCalled) {
   return null;
 }
 
-async function applyTrackedCallState(contractAddress, message, marketCap, liveScanData, options = {}) {
+/**
+ * Caller fields for tracked-call intake (Discord message or plain object for non-Discord sources).
+ * @typedef {{ discordUserId: string, username: string, displayName: string }} TrackedCallCallerContext
+ */
+
+function isDiscordMessageLike(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    value.author &&
+    typeof value.author.id === 'string'
+  );
+}
+
+/**
+ * Build caller context from a Discord.js message (same rules as legacy applyTrackedCallState).
+ * @returns {TrackedCallCallerContext|null}
+ */
+function buildTrackedCallCallerContextFromDiscordMessage(message) {
+  if (!message?.author?.id) return null;
+
+  return {
+    discordUserId: String(message.author.id),
+    username: message.author.username || '',
+    displayName:
+      message.member?.displayName ||
+      message.author.globalName ||
+      message.author.username ||
+      ''
+  };
+}
+
+/**
+ * Normalize Discord message or explicit context for saveTrackedCall / reactivateTrackedCall.
+ * @param {import('discord.js').Message | TrackedCallCallerContext} messageOrContext
+ * @returns {TrackedCallCallerContext|null}
+ */
+function resolveTrackedCallCallerContext(messageOrContext) {
+  if (isDiscordMessageLike(messageOrContext)) {
+    return buildTrackedCallCallerContextFromDiscordMessage(messageOrContext);
+  }
+
+  if (!messageOrContext || typeof messageOrContext !== 'object') return null;
+
+  const discordUserId =
+    messageOrContext.discordUserId != null ? String(messageOrContext.discordUserId).trim() : '';
+  if (!discordUserId) return null;
+
+  const username = normalizeString(messageOrContext.username) || 'Unknown';
+  const displayName =
+    normalizeString(messageOrContext.displayName) ||
+    normalizeString(messageOrContext.username) ||
+    username;
+
+  return { discordUserId, username, displayName };
+}
+
+/**
+ * Apply scan + caller to tracked-call storage.
+ * @param {string} contractAddress
+ * @param {import('discord.js').Message | TrackedCallCallerContext} messageOrCallerContext — Discord message or { discordUserId, username, displayName }
+ * @param {number} marketCap
+ * @param {object} liveScanData
+ * @param {object} [options]
+ * @param {'user_call'|'watch_only'|'bot_call'} [options.callSourceType]
+ * @param {string} [options.intakeSource] — e.g. `discord_message`, `x_mention` (for future logging / persistence)
+ */
+async function applyTrackedCallState(
+  contractAddress,
+  messageOrCallerContext,
+  marketCap,
+  liveScanData,
+  options = {}
+) {
   let wasNewCall = false;
   let wasReactivated = false;
+
+  const caller = resolveTrackedCallCallerContext(messageOrCallerContext);
+  if (!caller) {
+    console.error('[TrackedCalls] applyTrackedCallState: missing or invalid caller context');
+    return {
+      trackedCall: getTrackedCall(contractAddress),
+      wasNewCall: false,
+      wasReactivated: false
+    };
+  }
+
+  const { discordUserId, username, displayName } = caller;
 
   const existingCall = getTrackedCall(contractAddress);
 
@@ -905,9 +990,9 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
         bundleHoldingPercent: liveScanData?.bundleHoldingPercent ?? null,
         sniperPercent: liveScanData?.sniperPercent ?? null
       },
-      message.author.id,
-      message.author.username,
-      message.member?.displayName || message.author.globalName || message.author.username,
+      discordUserId,
+      username,
+      displayName,
       { callSourceType }
     );
     wasNewCall = true;
@@ -941,9 +1026,9 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
           bundleHoldingPercent: liveScanData?.bundleHoldingPercent ?? existingCall.bundleHoldingPercent ?? null,
           sniperPercent: liveScanData?.sniperPercent ?? existingCall.sniperPercent ?? null
         },
-        message.author.id,
-        message.author.username,
-        message.member?.displayName || message.author.globalName || message.author.username,
+        discordUserId,
+        username,
+        displayName,
         { callSourceType }
       );
       wasReactivated = true;
@@ -967,9 +1052,9 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
           bundleHoldingPercent: liveScanData?.bundleHoldingPercent ?? existingCall.bundleHoldingPercent ?? null,
           sniperPercent: liveScanData?.sniperPercent ?? existingCall.sniperPercent ?? null
         },
-        message.author.id,
-        message.author.username,
-        message.member?.displayName || message.author.globalName || message.author.username,
+        discordUserId,
+        username,
+        displayName,
         { callSourceType: 'user_call' }
       );
     } else {
@@ -1429,5 +1514,8 @@ module.exports = {
   buildDisabledActionButtons,
   handleCallCommand,
   handleWatchCommand,
-  isLikelySolanaCA
+  isLikelySolanaCA,
+  applyTrackedCallState,
+  resolveTrackedCallCallerContext,
+  buildTrackedCallCallerContextFromDiscordMessage
 };

@@ -1,6 +1,6 @@
 /**
- * Shared X milestone post copy — approval path (index) vs monitor auto-post path.
- * Keeps live posts and previews in sync with the two historical templates.
+ * Shared X milestone post copy — approval path (mod Approve) vs monitor auto-post path.
+ * Same layout; footers differ slightly (brand vs light discovery).
  */
 
 const {
@@ -13,6 +13,16 @@ function formatUsd(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 'N/A';
   return `$${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+/** Keep credits single-line and bounded for X. */
+function sanitizeCreditLine(label, raw) {
+  const s = String(raw == null ? '' : raw)
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const body = s.length ? s : '—';
+  return `${label} · ${body.slice(0, 100)}`;
 }
 
 function resolveCallerApproval(trackedCall) {
@@ -75,62 +85,83 @@ function formatAthMc(trackedCall) {
   );
 }
 
-/** Same template as legacy index.js / mod-approval first post. */
-function buildXPostTextApproval(trackedCall, milestoneX, isReply = false) {
-  const ticker = trackedCall.ticker || 'UNKNOWN';
-  const ca = trackedCall.contractAddress;
-  const caller = resolveCallerApproval(trackedCall);
-  const athMc = formatAthMc(trackedCall);
-
-  if (!isReply) {
-    return [
-      `📊 $${ticker} just reached ${milestoneX}x from call.`,
-      ``,
-      `Called by: ${caller}`,
-      `ATH Market Cap: ${athMc}`,
-      `Contract: ${ca}`,
-      ``,
-      `Tracked by MCGZYY Bot`
-    ].join('\n');
+function headlinePair(trackedCall) {
+  const name = (trackedCall.tokenName || trackedCall.ticker || 'Token').trim() || 'Token';
+  let ticker = String(trackedCall.ticker || 'UNKNOWN').trim();
+  if (!ticker.startsWith('$')) {
+    ticker = `$${ticker}`;
   }
-
-  return [
-    `📈 $${ticker} has now reached ${milestoneX}x from call.`,
-    ``,
-    `ATH Market Cap: ${athMc}`,
-    `CA: In OP`
-  ].join('\n');
+  return { name, ticker };
 }
 
-/** Same template as monitoringEngine auto-milestone posts. */
-function buildXPostTextMonitor(trackedCall, milestoneX, isReply = false) {
-  const tokenName = trackedCall.tokenName || 'Unknown Token';
-  const ticker = trackedCall.ticker || 'UNKNOWN';
-  const ca = trackedCall.contractAddress;
-  const caller = resolveCallerMonitor(trackedCall, 'Unknown');
+/**
+ * @param {'approval'|'monitor'} variant
+ * @param {string} creditRaw — already resolved per path
+ * @param {{ omitCallerOnReply?: boolean }} opts — approval replies stay compact (legacy)
+ */
+function buildMilestoneXBody(trackedCall, milestoneX, isReply, variant, creditRaw, opts = {}) {
+  const { omitCallerOnReply = false } = opts;
+  const { name, ticker } = headlinePair(trackedCall);
+  const display = name.toUpperCase() === String(ticker).replace(/^\$/, '').toUpperCase()
+    ? ticker
+    : `${name} (${ticker})`;
+
   const athMc = formatAthMc(trackedCall);
+  const ca = trackedCall.contractAddress;
+  const creditLine = sanitizeCreditLine('Caller', creditRaw);
+
+  const footer =
+    variant === 'approval'
+      ? 'Tracked · MCGZYY'
+      : '#Solana · MCGZYY';
 
   if (!isReply) {
     return [
-      `🚨 ${tokenName} ($${ticker}) just hit ${milestoneX}x from call`,
-      ``,
-      `👤 Called by: ${caller}`,
-      `📈 ATH MC: ${athMc}`,
-      `📍 CA: ${ca}`,
-      ``,
-      `#Solana #Crypto #Memecoin`
+      `${display} · +${milestoneX}x from first call`,
+      '',
+      creditLine,
+      `ATH MC · ${athMc}`,
+      `CA · ${ca}`,
+      '',
+      footer
     ].join('\n');
   }
 
-  return [
-    `📈 UPDATE: ${tokenName} ($${ticker}) has now reached ${milestoneX}x`,
-    ``,
-    `👤 Original caller: ${caller}`,
-    `📈 ATH MC: ${athMc}`,
-    `📍 CA: ${ca}`,
-    ``,
-    `#Solana #Crypto #Memecoin`
-  ].join('\n');
+  const replyLines =
+    omitCallerOnReply
+      ? [
+          `${display} · +${milestoneX}x update`,
+          '',
+          `ATH MC · ${athMc}`,
+          `CA · see original post`,
+          '',
+          footer
+        ]
+      : [
+          `${display} · +${milestoneX}x update`,
+          '',
+          creditLine,
+          `ATH MC · ${athMc}`,
+          `CA · see original post`,
+          '',
+          footer
+        ];
+
+  return replyLines.join('\n');
+}
+
+/** Mod-approval first post + replies (index.js). */
+function buildXPostTextApproval(trackedCall, milestoneX, isReply = false) {
+  const credit = resolveCallerApproval(trackedCall);
+  return buildMilestoneXBody(trackedCall, milestoneX, isReply, 'approval', credit, {
+    omitCallerOnReply: true
+  });
+}
+
+/** Monitor loop milestone posts (user + bot calls once xApproved). */
+function buildXPostTextMonitor(trackedCall, milestoneX, isReply = false) {
+  const credit = resolveCallerMonitor(trackedCall, 'Unknown');
+  return buildMilestoneXBody(trackedCall, milestoneX, isReply, 'monitor', credit);
 }
 
 module.exports = {

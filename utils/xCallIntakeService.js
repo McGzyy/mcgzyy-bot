@@ -14,6 +14,11 @@ const {
   normalizeRealDataToScan,
   isLikelySolanaCA
 } = require('../commands/basicCommands');
+const {
+  isXIntakeTweetProcessed,
+  markXIntakeTweetProcessed,
+  normalizeTweetDedupeId
+} = require('./xIntakeDedupeService');
 
 const X_CALL_INTAKE_SOURCE = 'x_mention';
 
@@ -60,14 +65,20 @@ function buildCallerContextFromVerifiedProfile(profile) {
  *
  * Pass options.guild (e.g. message.guild) and/or options.client + DISCORD_GUILD_ID / X_INTAKE_GUILD_ID, or rely on a single cached guild.
  *
- * @param {{ authorHandle: string, tweetText: string }} payload
+ * Dedupe: pass `tweetId` (or `eventId`) on payload or options. If set, already-processed IDs short-circuit before intake.
+ * Successful **tracked** applies (not dry-run) record the id. Omit id to skip dedupe (e.g. tests).
+ *
+ * @param {{ authorHandle: string, tweetText: string, tweetId?: string, eventId?: string }} payload
  * @param {{
  *   dryRun?: boolean,
  *   skipTokenFetch?: boolean,
  *   client?: import('discord.js').Client,
  *   guild?: import('discord.js').Guild,
  *   skipGuildMembershipCheck?: boolean,
- *   requiredRoleIds?: string[]
+ *   requiredRoleIds?: string[],
+ *   tweetId?: string,
+ *   eventId?: string,
+ *   skipDedupeCheck?: boolean
  * }} [options]
  * @returns {Promise<object>}
  */
@@ -79,8 +90,31 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     client = null,
     guild = null,
     skipGuildMembershipCheck = false,
-    requiredRoleIds = null
+    requiredRoleIds = null,
+    skipDedupeCheck = false
   } = options;
+
+  const dedupeId = normalizeTweetDedupeId(
+    payload?.tweetId ||
+      payload?.eventId ||
+      options.tweetId ||
+      options.eventId ||
+      ''
+  );
+
+  if (!skipDedupeCheck && dedupeId && isXIntakeTweetProcessed(dedupeId)) {
+    return {
+      success: false,
+      duplicate: true,
+      alreadyProcessed: true,
+      reason: 'already_processed',
+      tweetId: dedupeId,
+      trust: null,
+      guildTrust: null,
+      contractAddress: null,
+      callerContext: null
+    };
+  }
 
   const trust = getXVerifiedTrustStatus(authorHandle);
   if (!trust.allowed) {
@@ -225,9 +259,14 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     { callSourceType: 'user_call', intakeSource: X_CALL_INTAKE_SOURCE }
   );
 
+  if (!skipDedupeCheck && dedupeId) {
+    markXIntakeTweetProcessed(dedupeId);
+  }
+
   return {
     success: true,
     reason: 'tracked',
+    tweetId: dedupeId || undefined,
     trust,
     guildTrust,
     contractAddress: ca,

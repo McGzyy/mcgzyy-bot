@@ -68,8 +68,6 @@ const {
 const {
   getTrackedCall,
   setApprovalStatus,
-  setApprovalMessageMeta,
-  markApprovalRequested,
   clearApprovalRequest,
   getAllTrackedCalls,
   getRecentBotCalls,
@@ -89,10 +87,8 @@ const {
 } = require('./utils/scannerSettingsService');
 
 const {
-  getApprovalTriggerX,
   getHighestEligibleApprovalMilestone,
-  computeApprovalAthX,
-  shouldCreateApprovalRequest
+  computeApprovalAthX
 } = require('./utils/approvalMilestoneService');
 
 const {
@@ -125,7 +121,6 @@ const X_VERIFY_CHANNEL_NAME = 'verify-x';
 const X_VERIFIED_ROLE_NAME = 'X Verified';
 const MOD_CHANNEL_NAME = 'mod-chat';
 
-const APPROVAL_EXPIRY_MINUTES = 20;
 const BOT_SETTINGS_PATH = path.join(__dirname, 'data', 'botSettings.json');
 
 function loadBotSettings() {
@@ -253,19 +248,6 @@ function getBotCallsChannel(guild) {
       typeof ch.isTextBased === 'function' &&
       ch.isTextBased() &&
       ch.name === 'bot-calls'
-  ) || null;
-}
-
-function getApprovalChannel(guild) {
-  if (!guild) return null;
-
-  return guild.channels.cache.find(
-    ch =>
-      ch &&
-      ch.isTextBased &&
-      typeof ch.isTextBased === 'function' &&
-      ch.isTextBased() &&
-      (ch.name === 'coin-approval' || ch.name === 'coin-approvals')
   ) || null;
 }
 
@@ -804,44 +786,6 @@ async function deleteApprovalMessage(guild, trackedCall) {
   }
 }
 
-async function postApprovalReview(guild, trackedCall, scan = null, triggerX = 0) {
-  try {
-    const approvalChannel = getApprovalChannel(guild);
-    if (!approvalChannel) return null;
-
-    if (trackedCall.approvalMessageId) {
-      await deleteApprovalMessage(guild, trackedCall);
-      clearApprovalRequest(trackedCall.contractAddress);
-    }
-
-    const expiresAt = new Date(Date.now() + APPROVAL_EXPIRY_MINUTES * 60 * 1000).toISOString();
-    const refreshed = markApprovalRequested(trackedCall.contractAddress, triggerX, expiresAt);
-
-    const embed = buildApprovalStatusEmbed(refreshed, scan);
-    const buttons = buildApprovalButtons(trackedCall.contractAddress);
-    const modChannel = getModChannel(guild);
-
-    const sent = await approvalChannel.send({
-      embeds: [embed],
-      components: buttons
-    });
-
-    setApprovalMessageMeta(trackedCall.contractAddress, sent.id, approvalChannel.id);
-
-    if (modChannel && modChannel.id !== approvalChannel.id) {
-      await modChannel.send({
-        embeds: [embed],
-        components: buttons
-      });
-    }
-
-    return sent.id;
-  } catch (error) {
-    console.error('[ApprovalQueue] Failed to post approval review:', error.message);
-    return null;
-  }
-}
-
 async function cleanupExpiredApprovals() {
   try {
     const guild = client.guilds.cache.first();
@@ -867,14 +811,6 @@ async function cleanupExpiredApprovals() {
   } catch (error) {
     console.error('[ApprovalQueue] Cleanup error:', error.message);
   }
-}
-
-async function maybeQueueApproval(guild, trackedCall, scan = null) {
-  const { shouldSend, triggerX } = shouldCreateApprovalRequest(trackedCall);
-  if (!shouldSend) return false;
-
-  await postApprovalReview(guild, trackedCall, scan, triggerX);
-  return true;
 }
 
 async function refreshApprovalMessage(guild, contractAddress, forceLocked = false) {

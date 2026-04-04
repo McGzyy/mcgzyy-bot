@@ -110,6 +110,8 @@ const {
   isLikelyXHandle
 } = require('./utils/userProfileService');
 
+const { processVerifiedXMentionCallIntake } = require('./utils/xCallIntakeService');
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -243,6 +245,118 @@ async function replyText(message, content) {
     content,
     allowedMentions: { repliedUser: false }
   });
+}
+
+function buildTestXIntakeResultEmbed(result, { applyMode, authorHandle, tweetId, tweetTextSample }) {
+  const duplicate = !!(result.duplicate || result.alreadyProcessed);
+  const color = duplicate
+    ? 0x94a3b8
+    : result.success
+      ? applyMode
+        ? 0x22c55e
+        : 0xf59e0b
+      : 0xef4444;
+
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(applyMode ? '🧪 X intake test — LIVE APPLY' : '🧪 X intake test — dry-run')
+    .setTimestamp();
+
+  embed.addFields(
+    { name: 'X handle', value: `\`${authorHandle}\``, inline: true },
+    { name: 'Tweet / dedupe ID', value: `\`${tweetId}\``, inline: true },
+    {
+      name: 'Mode',
+      value: applyMode ? '**Writes** `trackedCalls` + dedupe id' : '**No write** (preview only)',
+      inline: true
+    }
+  );
+
+  if (tweetTextSample) {
+    const clip =
+      tweetTextSample.length > 900 ? `${tweetTextSample.slice(0, 900)}…` : tweetTextSample;
+    embed.addFields({ name: 'Tweet text', value: clip || '—', inline: false });
+  }
+
+  if (duplicate) {
+    embed.addFields({
+      name: 'Duplicate',
+      value: '**Yes** — `already_processed` (pipeline not run)',
+      inline: false
+    });
+    embed.setFooter({ text: 'Use a fresh tweetId or clear dedupe store to re-test.' });
+    return embed;
+  }
+
+  const xTrustLine = result.trust
+    ? result.trust.allowed
+      ? '✅ Linked verified profile'
+      : `❌ \`${result.trust.reason}\`${result.replyMessage ? `\n${result.replyMessage}` : ''}`
+    : '—';
+
+  embed.addFields({ name: 'X trust', value: xTrustLine, inline: false });
+
+  let guildLine = '—';
+  if (result.guildTrustDenied && result.guildTrust) {
+    guildLine =
+      `❌ \`${result.guildTrust.reason}\`` +
+      (result.replyMessage ? `\n${result.replyMessage}` : '');
+  } else if (result.guildTrust && result.guildTrust.ok === true) {
+    guildLine = '✅ Linked user is in this server';
+  } else if (result.guildTrust && result.guildTrust.ok === false) {
+    guildLine = `❌ \`${result.guildTrust.reason}\``;
+  } else if (result.reason === 'missing_discord_user_id_for_guild_check') {
+    guildLine = '❌ Linked profile has no `discordUserId`';
+  } else if (result.trustDenied || (result.trust && !result.trust.allowed)) {
+    guildLine = '— (skipped after X trust)';
+  }
+
+  embed.addFields({ name: 'Guild trust', value: guildLine, inline: false });
+
+  embed.addFields({
+    name: 'Extracted CA',
+    value: result.contractAddress ? `\`${result.contractAddress}\`` : '—',
+    inline: true
+  });
+
+  embed.addFields({
+    name: 'Pipeline',
+    value: `\`${result.reason || 'unknown'}\`${result.error ? `\n\`${String(result.error).slice(0, 400)}\`` : ''}`,
+    inline: false
+  });
+
+  if (result.callerContext?.discordUserId) {
+    embed.addFields({
+      name: 'Caller context',
+      value: `\`${result.callerContext.discordUserId}\` · ${result.callerContext.displayName || result.callerContext.username}`,
+      inline: false
+    });
+  }
+
+  if (result.scanPreview) {
+    const t = result.scanPreview.ticker || '?';
+    embed.addFields({
+      name: 'Would apply (scan)',
+      value: `**${result.scanPreview.tokenName}** (${t}) · MC **${result.scanPreview.marketCap}**`,
+      inline: false
+    });
+  }
+
+  if (applyMode && result.success && result.reason === 'tracked') {
+    embed.addFields({
+      name: 'Tracked call',
+      value:
+        `**Created:** ${result.wasNewCall ? 'yes (new row / first call)' : 'no'} · **Reactivated:** ${result.wasReactivated ? 'yes' : 'no'}`,
+      inline: false
+    });
+    embed.setFooter({ text: 'Dedupe id stored — repeat same tweetId returns already_processed.' });
+  } else if (result.dryRun && result.success) {
+    embed.setFooter({
+      text: 'Dry-run: no tracked-call write, dedupe id not recorded. Owner: !testxintake apply …'
+    });
+  }
+
+  return embed;
 }
 
 function getBotCallsChannel(guild) {
@@ -2438,6 +2552,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
       `• \`!verifyx @user\` — Approve a member’s pending X verification (requires **Manage Server**)\n` +
       `• \`!resetbotstats\` — Reset bot-call stat exclusions on tracked data\n` +
       `• \`!backfillprofiles\` — Preview members missing bot profiles; \`!backfillprofiles run\` creates them once\n` +
+      `• \`!testxintake\` — Simulate X mention intake (dry-run); owner \`apply\` for real write\n` +
       `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
       `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
       `• \`!truebotstats\` — Bot stats including reset/excluded calls\n\n`;
@@ -2630,6 +2745,81 @@ if (lowerContent === '!monitorstatus') {
       `• Scanner: **${scannerState}**`,
     allowedMentions: { repliedUser: false }
   });
+
+  return;
+}
+
+if (lowerContent.startsWith('!testxintake')) {
+  const isOwner = message.author.id === process.env.BOT_OWNER_ID;
+  const isMod = message.member?.permissions?.has('ManageGuild');
+
+  if (!isOwner && !isMod) {
+    await replyText(message, '❌ **Manage Server** or bot owner only.');
+    return;
+  }
+
+  if (!message.guild) {
+    await replyText(message, '❌ Run this in a server channel.');
+    return;
+  }
+
+  let rest = content.replace(/^!testxintake\s*/i, '').trim();
+  let applyMode = false;
+
+  if (/^apply(\s|$)/i.test(rest)) {
+    if (!isOwner) {
+      await replyText(
+        message,
+        '❌ **`apply`** is **bot owner only**.\nDefault is dry-run (mods with **Manage Server** can use that).'
+      );
+      return;
+    }
+    applyMode = true;
+    rest = rest.replace(/^apply\s+/i, '').trim();
+  }
+
+  const parts = rest.split(/\s+/);
+  if (parts.length < 3) {
+    await replyText(
+      message,
+      '❌ **Usage**\n' +
+        '`!testxintake <xHandle> <tweetId> <tweet text…>` — **dry-run** (default)\n' +
+        '`!testxintake apply <xHandle> <tweetId> <tweet text…>` — **owner only**: real tracked call + dedupe\n\n' +
+        '• `tweetId` must be **unique** per real run (dedupe store).\n' +
+        '• Dry-run does **not** write `trackedCalls` or dedupe; `apply` does.'
+    );
+    return;
+  }
+
+  const authorHandle = parts[0];
+  const tweetId = parts[1];
+  const tweetText = parts.slice(2).join(' ');
+
+  try {
+    const result = await processVerifiedXMentionCallIntake(
+      { authorHandle, tweetText, tweetId },
+      {
+        client,
+        guild: message.guild,
+        dryRun: !applyMode
+      }
+    );
+
+    const embed = buildTestXIntakeResultEmbed(result, {
+      applyMode,
+      authorHandle,
+      tweetId,
+      tweetTextSample: tweetText
+    });
+
+    await message.reply({
+      embeds: [embed],
+      allowedMentions: { repliedUser: false }
+    });
+  } catch (err) {
+    console.error('[testxintake]', err);
+    await replyText(message, `❌ Test failed: ${err.message}`);
+  }
 
   return;
 }

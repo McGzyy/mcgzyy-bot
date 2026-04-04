@@ -46,6 +46,12 @@ function formatValue(value, fallback = 'Unknown') {
   return String(value);
 }
 
+/** Same semantics as userProfileService.normalizeString — used by resolveTrackedCallCallerContext (X intake plain object). */
+function normalizeString(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
 function yesNo(value) {
   return value ? 'Yes' : 'No';
 }

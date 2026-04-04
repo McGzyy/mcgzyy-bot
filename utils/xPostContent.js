@@ -21,27 +21,11 @@ function sanitizeCreditLine(label, raw) {
   return `${label} · ${body.slice(0, 100)}`;
 }
 
-function resolveCallerApproval(trackedCall) {
-  if (!trackedCall) return 'Unknown';
-
-  return (
-    getPreferredPublicName(
-      getUserProfileByDiscordId(
-        trackedCall.firstCallerDiscordId || trackedCall.firstCallerId || ''
-      )
-    ) ||
-    trackedCall.firstCallerPublicName ||
-    trackedCall.firstCallerDisplayName ||
-    trackedCall.firstCallerUsername ||
-    (trackedCall.callSourceType === 'bot_call'
-      ? 'McGBot'
-      : trackedCall.callSourceType === 'watch_only'
-        ? 'No caller credit'
-        : 'Unknown')
-  );
-}
-
-function resolveCallerMonitor(trackedCall, fallback = 'Unknown') {
+/**
+ * Single credit resolver for milestone X posts (approval + monitor builders).
+ * Uses resolvePublicCallerName for verified_x_tag / discord_name / anonymous.
+ */
+function resolveMilestonePostCallerCredit(trackedCall, fallback = 'Unknown') {
   if (!trackedCall) return fallback;
 
   if (trackedCall.callSourceType === 'bot_call') {
@@ -68,6 +52,14 @@ function resolveCallerMonitor(trackedCall, fallback = 'Unknown') {
       trackedCall.firstCallerUsername ||
       fallback
   });
+}
+
+function resolveCallerApproval(trackedCall) {
+  return resolveMilestonePostCallerCredit(trackedCall, 'Unknown');
+}
+
+function resolveCallerMonitor(trackedCall, fallback = 'Unknown') {
+  return resolveMilestonePostCallerCredit(trackedCall, fallback);
 }
 
 function formatAthMc(trackedCall) {

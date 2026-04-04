@@ -1,6 +1,9 @@
 /**
  * X mention → tracked call intake (plumbing only).
  * No live polling/streaming and no X API replies here — call processVerifiedXMentionCallIntake from a future worker or test harness.
+ *
+ * After intake, use decideXMentionIntakeReply(result, { authorHandle }) from ./xIntakeReplyPolicy
+ * (re-exported below) when wiring createPost to ingestion.
  */
 
 const { getXVerifiedTrustStatus } = require('./xInteractionTrust');
@@ -19,6 +22,10 @@ const {
   markXIntakeTweetProcessed,
   normalizeTweetDedupeId
 } = require('./xIntakeDedupeService');
+const {
+  decideXMentionIntakeReply,
+  buildXMentionSuccessReplyText
+} = require('./xIntakeReplyPolicy');
 
 const X_CALL_INTAKE_SOURCE = 'x_mention';
 
@@ -282,5 +289,7 @@ module.exports = {
   X_CALL_INTAKE_SOURCE,
   extractFirstSolanaCaFromText,
   buildCallerContextFromVerifiedProfile,
-  processVerifiedXMentionCallIntake
+  processVerifiedXMentionCallIntake,
+  decideXMentionIntakeReply,
+  buildXMentionSuccessReplyText
 };

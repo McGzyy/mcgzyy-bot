@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 const axios = require('axios');
 
+const { isXPostDryRunEnabled } = require('./xPostPreview');
+
 const X_API_BASE = 'https://api.x.com/2';
 
 function percentEncode(str) {
@@ -58,6 +60,20 @@ function buildOAuthHeader(method, url, extraParams = {}) {
 }
 
 async function createPost(text, replyToId = null) {
+  if (isXPostDryRunEnabled()) {
+    console.log('[XPoster] DRY RUN — skipped live API', {
+      wouldReplyToTweetId: replyToId || null,
+      charLength: String(text || '').length
+    });
+    return {
+      success: true,
+      dryRun: true,
+      id: null,
+      text,
+      wouldReplyToTweetId: replyToId || null
+    };
+  }
+
   const url = `${X_API_BASE}/tweets`;
 
   const body = {

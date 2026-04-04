@@ -91,6 +91,9 @@ const {
   computeApprovalAthX
 } = require('./utils/approvalMilestoneService');
 
+const { buildXPostTextApproval } = require('./utils/xPostContent');
+const { describeXPostForTrackedCall } = require('./utils/xPostPreview');
+
 const {
   upsertUserProfile,
   getUserProfileByDiscordId,
@@ -680,39 +683,6 @@ if (trackedCall.callSourceType === 'bot_call') {
   return embed;
 }
 
-function buildXPostText(trackedCall, milestoneX, isReply = false) {
-  const ticker = trackedCall.ticker || 'UNKNOWN';
-  const ca = trackedCall.contractAddress;
-  const caller = getPreferredPublicName(getUserProfileByDiscordId(trackedCall.firstCallerDiscordId || trackedCall.firstCallerId || '')) || trackedCall.firstCallerPublicName || trackedCall.firstCallerDisplayName || trackedCall.firstCallerUsername || (trackedCall.callSourceType === 'bot_call' ? 'McGBot' : trackedCall.callSourceType === 'watch_only' ? 'No caller credit' : 'Unknown');
-  const athMc = formatUsd(
-    trackedCall.ath ||
-    trackedCall.athMc ||
-    trackedCall.athMarketCap ||
-    trackedCall.latestMarketCap ||
-    trackedCall.firstCalledMarketCap ||
-    0
-  );
-
-  if (!isReply) {
-    return [
-      `📊 $${ticker} just reached ${milestoneX}x from call.`,
-      ``,
-      `Called by: ${caller}`,
-      `ATH Market Cap: ${athMc}`,
-      `Contract: ${ca}`,
-      ``,
-      `Tracked by MCGZYY Bot`
-    ].join('\n');
-  }
-
-  return [
-    `📈 $${ticker} has now reached ${milestoneX}x from call.`,
-    ``,
-    `ATH Market Cap: ${athMc}`,
-    `CA: In OP`
-  ].join('\n');
-}
-
 async function publishApprovedCoinToX(contractAddress) {
   const trackedCall = getTrackedCall(contractAddress);
   if (!trackedCall) return { success: false, reason: 'missing_call' };
@@ -734,14 +704,26 @@ async function publishApprovedCoinToX(contractAddress) {
 
   const hasOriginal = !!trackedCall.xOriginalPostId;
 
-  const postText = buildXPostText(trackedCall, milestoneX, hasOriginal);
+  const postText = buildXPostTextApproval(trackedCall, milestoneX, hasOriginal);
   const result = await createPost(postText, hasOriginal ? trackedCall.xOriginalPostId : null);
 
-  if (!result.success || !result.id) {
+  if (!result.success || (!result.dryRun && !result.id)) {
     return {
       success: false,
       reason: 'x_post_failed',
       error: result.error || null
+    };
+  }
+
+  if (result.dryRun) {
+    return {
+      success: true,
+      dryRun: true,
+      milestoneX,
+      reply: hasOriginal,
+      postId: null,
+      bodyPreview: postText,
+      wouldReplyToTweetId: hasOriginal ? trackedCall.xOriginalPostId : null
     };
   }
 
@@ -1434,9 +1416,13 @@ let updated = null;
 
         let publishLine = '';
         if (xResult.success) {
-          publishLine = xResult.reply
-            ? `\n📤 Posted update reply to X at **${xResult.milestoneX}x**`
-            : `\n📤 Posted original X thread at **${xResult.milestoneX}x**`;
+          if (xResult.dryRun) {
+            publishLine = `\n🧪 **X dry-run** (no live post) — would send **${xResult.milestoneX}x** as ${xResult.reply ? 'a reply' : 'an original'}`;
+          } else {
+            publishLine = xResult.reply
+              ? `\n📤 Posted update reply to X at **${xResult.milestoneX}x**`
+              : `\n📤 Posted original X thread at **${xResult.milestoneX}x**`;
+          }
         } else {
           publishLine = `\n⚠️ X post not sent: \`${xResult.reason}\``;
         }
@@ -1767,10 +1753,132 @@ saveBotSettings(BOT_SETTINGS);
         const result = await createPost('Test post from McGBot 🚀');
 
         if (result.success) {
-          await replyText(message, `✅ Posted to X\nPost ID: ${result.id}`);
+          if (result.dryRun) {
+            await replyText(
+              message,
+              '🧪 **X dry-run** — live API skipped (`X_POST_DRY_RUN` / `X_POST_PREVIEW`).'
+            );
+          } else {
+            await replyText(message, `✅ Posted to X\nPost ID: ${result.id}`);
+          }
         } else {
           await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
         }
+
+        return;
+      }
+
+      if (lowerContent.startsWith('!xpostpreview')) {
+        if (message.author.id !== process.env.BOT_OWNER_ID) {
+          await replyText(message, '❌ Only the bot owner can use this command.');
+          return;
+        }
+
+        const rest = content.slice('!xpostpreview'.length).trim();
+        const parts = rest.split(/\s+/).filter(Boolean);
+
+        if (!parts.length) {
+          await replyText(
+            message,
+            '❌ Usage: `!xpostpreview <contract> [optionalMilestoneX]` — preview milestone X copy (no API).'
+          );
+          return;
+        }
+
+        const ca = parts[0];
+        if (!isLikelySolanaCA(ca)) {
+          await replyText(message, '❌ That does not look like a Solana contract address.');
+          return;
+        }
+
+        let forceMilestoneX = null;
+        if (parts[1] != null) {
+          const m = Number(parts[1]);
+          if (!Number.isFinite(m) || m < 1) {
+            await replyText(message, '❌ Optional milestone must be a number ≥ 1.');
+            return;
+          }
+          forceMilestoneX = m;
+        }
+
+        const tc = getTrackedCall(ca);
+        if (!tc) {
+          await replyText(message, '❌ No tracked call for that contract.');
+          return;
+        }
+
+        const info = describeXPostForTrackedCall(tc, { forceMilestoneX });
+
+        const embed = new EmbedBuilder()
+          .setColor(0x1d9bf0)
+          .setTitle(`X milestone preview — ${info.tokenName || 'Unknown'} ($${info.ticker || '?'})`)
+          .addFields(
+            {
+              name: 'Post kind',
+              value:
+                info.postKind === 'reply'
+                  ? `Reply (in_reply_to_tweet_id = **xOriginalPostId**)\n\`${info.replyToTweetId || 'missing — would be original'}\``
+                  : 'Original tweet (no xOriginalPostId yet)',
+              inline: false
+            },
+            {
+              name: 'Milestone / state',
+              value: [
+                `ATH multiple: **${info.currentAthMultiple.toFixed(2)}x**`,
+                `Preview milestone: **${info.milestoneX || '—'}x**`,
+                `xApproved: **${info.xApproved ? 'yes' : 'no'}**`,
+                `This rung already in xPostedMilestones: **${info.alreadyPostedThisMilestone ? 'yes' : 'no'}**`,
+                `Posted rungs: ${info.postedMilestones.length ? info.postedMilestones.map(x => `${x}x`).join(', ') : 'none'}`,
+                `Trigger X: **${info.approvalTriggerX}x** · Ladder: \`${info.ladder.join(', ')}\``
+              ].join('\n'),
+              inline: false
+            },
+            {
+              name: 'Caller credit (approval path)',
+              value: info.callerCreditApproval.slice(0, 1024) || '—',
+              inline: true
+            },
+            {
+              name: 'Caller credit (monitor path)',
+              value: info.callerCreditMonitor.slice(0, 1024) || '—',
+              inline: true
+            },
+            {
+              name: 'Threading',
+              value: info.threading.explanation.slice(0, 1024),
+              inline: false
+            }
+          )
+          .setFooter({
+            text: `Live posting blocked when env dry-run is ON: ${info.dryRunEnvActive ? 'yes' : 'no'}`
+          });
+
+        await message.reply({
+          embeds: [embed],
+          allowedMentions: { repliedUser: false }
+        });
+
+        const escFence = (s) => String(s || '').replace(/```/g, '`\u200b``');
+        const sendBodyChunks = async (label, body) => {
+          const text = body || '(no body — no eligible milestone for preview)';
+          const limit = 1800;
+          const chunks = [];
+          for (let i = 0; i < text.length; i += limit) {
+            chunks.push(text.slice(i, i + limit));
+          }
+          let n = 0;
+          for (const chunk of chunks) {
+            n += 1;
+            const suffix = chunks.length > 1 ? ` (${n}/${chunks.length})` : '';
+            await message.channel.send({
+              content: `**${label}${suffix}**\n\`\`\`\n${escFence(chunk)}\n\`\`\``,
+              allowedMentions: { parse: [] }
+            });
+          }
+        };
+
+        await sendBodyChunks('Body — mod approval (index.js)', info.bodyApprovalTemplate);
+        await sendBodyChunks('Body — monitor auto-post (monitoringEngine)', info.bodyMonitorTemplate);
 
         return;
       }
@@ -2330,7 +2438,8 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
       `📊 **Scanner thresholds**\n` +
       `• \`!setminmc\` / \`!setminliq\` / \`!setminvol5m\` / \`!setminvol1h\`\n` +
       `• \`!setmintxns5m\` / \`!setmintxns1h\` / \`!setapprovalx <number>\`\n` +
-      `• \`!setapprovalladder\` — Custom approval milestone rungs (comma-separated)\n\n` +
+      `• \`!setapprovalladder\` — Custom approval milestone rungs (comma-separated)\n` +
+      `• \`!xpostpreview <CA> [milestoneX]\` — Milestone X copy preview (no API); optional rung override\n\n` +
 
       `🧪 **Sanity filters**\n` +
       `• \`!setsanityminmc\` / \`!setsanityminliq\` / \`!setsanityminliqratio\` / \`!setsanitymaxliqratio\`\n` +

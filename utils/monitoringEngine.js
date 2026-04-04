@@ -19,6 +19,7 @@ const {
 const { enqueueAlert } = require('./alertQueue');
 const { createPost } = require('./xPoster');
 const { resolvePublicCallerName } = require('./userProfileService');
+const { buildXPostTextMonitor } = require('./xPostContent');
 const {
   determineLifecycleStatus,
   getLifecycleChangeReason
@@ -117,44 +118,6 @@ function getPublicCallerLabel(trackedCall, fallback = 'Unknown') {
  * =========================
  */
 
-function buildXPostText(trackedCall, milestoneX, isReply = false) {
-  const tokenName = trackedCall.tokenName || 'Unknown Token';
-  const ticker = trackedCall.ticker || 'UNKNOWN';
-  const ca = trackedCall.contractAddress;
-  const caller = getPublicCallerLabel(trackedCall, 'Unknown');
-
-  const athMc = formatUsd(
-    trackedCall.ath ||
-    trackedCall.athMc ||
-    trackedCall.athMarketCap ||
-    trackedCall.latestMarketCap ||
-    trackedCall.firstCalledMarketCap ||
-    0
-  );
-
-  if (!isReply) {
-    return [
-      `🚨 ${tokenName} ($${ticker}) just hit ${milestoneX}x from call`,
-      ``,
-      `👤 Called by: ${caller}`,
-      `📈 ATH MC: ${athMc}`,
-      `📍 CA: ${ca}`,
-      ``,
-      `#Solana #Crypto #Memecoin`
-    ].join('\n');
-  }
-
-  return [
-    `📈 UPDATE: ${tokenName} ($${ticker}) has now reached ${milestoneX}x`,
-    ``,
-    `👤 Original caller: ${caller}`,
-    `📈 ATH MC: ${athMc}`,
-    `📍 CA: ${ca}`,
-    ``,
-    `#Solana #Crypto #Memecoin`
-  ].join('\n');
-}
-
 async function maybePublishApprovedMilestoneToX(trackedCall) {
   try {
     if (!trackedCall || !trackedCall.xApproved) {
@@ -189,17 +152,30 @@ async function maybePublishApprovedMilestoneToX(trackedCall) {
 
     const hasOriginal = !!trackedCall.xOriginalPostId;
 
-    const postText = buildXPostText(trackedCall, milestoneX, hasOriginal);
+    const postText = buildXPostTextMonitor(trackedCall, milestoneX, hasOriginal);
     const result = await createPost(
       postText,
       hasOriginal ? trackedCall.xOriginalPostId : null
     );
 
-    if (!result.success || !result.id) {
+    if (!result.success || (!result.dryRun && !result.id)) {
       return {
         success: false,
         reason: 'x_post_failed',
         error: result.error || null
+      };
+    }
+
+    if (result.dryRun) {
+      console.log(
+        `[X AutoThread] DRY RUN — would post ${hasOriginal ? 'reply' : 'original'} for ${trackedCall.tokenName || trackedCall.contractAddress} at ${milestoneX}x`
+      );
+      return {
+        success: true,
+        dryRun: true,
+        milestoneX,
+        reply: hasOriginal,
+        postId: null
       };
     }
 

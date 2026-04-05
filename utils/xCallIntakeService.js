@@ -15,7 +15,9 @@ const {
   applyTrackedCallState,
   runQuickCa,
   normalizeRealDataToScan,
-  isLikelySolanaCA
+  isLikelySolanaCA,
+  buildUserCallAnnouncementPayload,
+  announceNewUserCallInUserCallsChannel
 } = require('../commands/basicCommands');
 const {
   isXIntakeTweetProcessed,
@@ -41,6 +43,48 @@ function str(v) {
 function extractFirstSolanaCaFromText(text) {
   const match = String(text || '').match(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/);
   return match ? match[0] : null;
+}
+
+/**
+ * Hashtag labels only (no leading #), lowercased. Matches `#tag` where tag is [A-Za-z0-9_]+;
+ * trailing punctuation (e.g. `#call.`) ends the tag at `.` — not plain words like "call" or "calling".
+ * @param {string} text
+ * @returns {Set<string>}
+ */
+function extractXMentionHashtagLabels(text) {
+  const set = new Set();
+  const s = String(text || '');
+  const re = /#([a-zA-Z0-9_]+)/g;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    set.add(m[1].toLowerCase());
+  }
+  return set;
+}
+
+/**
+ * Hashtag-only intent: `#call` ⇒ user_call; `#watch` ⇒ watch_only; both ⇒ watch_only; else watch_only.
+ * Plain words like "call" / "calling" do nothing.
+ * @returns {{ callSourceType: 'user_call' | 'watch_only', intentReason: string }}
+ */
+function resolveXMentionCallIntent(tweetText) {
+  const tags = extractXMentionHashtagLabels(tweetText);
+  const hasCallTag = tags.has('call');
+  const hasWatchTag = tags.has('watch');
+
+  if (hasWatchTag && hasCallTag) {
+    return {
+      callSourceType: 'watch_only',
+      intentReason: 'both_hashtag_watch_and_call_watch_priority'
+    };
+  }
+  if (hasCallTag) {
+    return { callSourceType: 'user_call', intentReason: 'hashtag_call' };
+  }
+  if (hasWatchTag) {
+    return { callSourceType: 'watch_only', intentReason: 'hashtag_watch' };
+  }
+  return { callSourceType: 'watch_only', intentReason: 'default_watch_no_hashtag' };
 }
 
 /**
@@ -213,6 +257,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     };
   }
 
+  const intent = resolveXMentionCallIntent(tweetText);
+
   if (dryRun && skipTokenFetch) {
     return {
       success: true,
@@ -221,13 +267,16 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       trust,
       guildTrust,
       contractAddress: ca,
-      callerContext
+      callerContext,
+      callSourceType: intent.callSourceType,
+      intentReason: intent.intentReason
     };
   }
 
   let scan;
+  let realData;
   try {
-    const realData = await runQuickCa(ca);
+    realData = await runQuickCa(ca);
     scan = normalizeRealDataToScan(realData);
   } catch (err) {
     return {
@@ -250,6 +299,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       guildTrust,
       contractAddress: ca,
       callerContext,
+      callSourceType: intent.callSourceType,
+      intentReason: intent.intentReason,
       scanPreview: {
         tokenName: scan.tokenName,
         ticker: scan.ticker,
@@ -263,8 +314,27 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     callerContext,
     scan.marketCap || 0,
     scan,
-    { callSourceType: 'user_call', intakeSource: X_CALL_INTAKE_SOURCE }
+    { callSourceType: intent.callSourceType, intakeSource: X_CALL_INTAKE_SOURCE }
   );
+
+  if (
+    intent.callSourceType === 'user_call' &&
+    applyResult.wasNewCall === true &&
+    guild
+  ) {
+    try {
+      const announcePayload = buildUserCallAnnouncementPayload(
+        realData,
+        scan,
+        applyResult.trackedCall,
+        applyResult.wasNewCall,
+        applyResult.wasReactivated
+      );
+      await announceNewUserCallInUserCallsChannel(guild, announcePayload);
+    } catch (err) {
+      console.error('[XIntake] #user-calls mirror failed:', err.message);
+    }
+  }
 
   if (!skipDedupeCheck && dedupeId) {
     markXIntakeTweetProcessed(dedupeId);
@@ -279,6 +349,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     contractAddress: ca,
     callerContext,
     intakeSource: X_CALL_INTAKE_SOURCE,
+    callSourceType: intent.callSourceType,
+    intentReason: intent.intentReason,
     trackedCall: applyResult.trackedCall,
     wasNewCall: applyResult.wasNewCall,
     wasReactivated: applyResult.wasReactivated
@@ -288,6 +360,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
 module.exports = {
   X_CALL_INTAKE_SOURCE,
   extractFirstSolanaCaFromText,
+  extractXMentionHashtagLabels,
+  resolveXMentionCallIntent,
   buildCallerContextFromVerifiedProfile,
   processVerifiedXMentionCallIntake,
   decideXMentionIntakeReply,

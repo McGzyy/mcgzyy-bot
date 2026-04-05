@@ -118,11 +118,11 @@ function getSafeAth(coin, scan) {
  * =========================
  */
 
-function getOriginalCallerLabel(coin, fallback = 'Auto Bot') {
+function getOriginalCallerLabel(coin, fallback = 'McGBot') {
   if (!coin) return fallback;
 
   if (coin.callSourceType === 'bot_call') {
-    return 'Auto Bot';
+    return 'McGBot';
   }
 
   if (coin.callSourceType === 'watch_only') {
@@ -159,7 +159,7 @@ function buildCoinHeader(name, ticker) {
 function createAutoCallEmbed(scan, profileName = 'balanced') {
   const quickTradeLinks = buildQuickTradeLinksLine(scan.contractAddress, scan.pairAddress);
   const socialLinks = buildSocialLinksLine(scan);
-  const originalCaller = getOriginalCallerLabel(scan, 'Auto Bot');
+  const originalCaller = getOriginalCallerLabel(scan, 'McGBot');
 
   const isManual = String(profileName || '').toLowerCase() === 'manual';
   const callTypeLine = isManual ? '📌 **MANUAL CALL**' : '🚨 **AUTO CALL**';
@@ -238,7 +238,7 @@ function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent) {
 
   const firstCalledMc = getSafeFirstCalledMc(coin);
   const currentMc = getSafeLatestMc(coin, scan);
-  const originalCaller = getOriginalCallerLabel(coin, 'Auto Bot');
+  const originalCaller = getOriginalCallerLabel(coin, 'McGBot');
 
   const quickTradeLinks = buildQuickTradeLinksLine(contractAddress, pairAddress);
   const socialLinks = buildSocialLinksLine(scan);

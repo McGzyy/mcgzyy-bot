@@ -1,0 +1,7 @@
+Project setup checklist:
+
+- [x] VS Code installed
+- [x] Node.js installed
+- [x] Git installed
+- [x] Terminal working
+- [ ] Discord Developer account ready

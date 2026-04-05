@@ -21,6 +21,10 @@ const { createPost } = require('./xPoster');
 const { resolvePublicCallerName } = require('./userProfileService');
 const { buildXPostTextMonitor } = require('./xPostContent');
 const {
+  isMilestoneChartAttachmentEnabled,
+  fetchTokenChartImageBuffer
+} = require('./tokenChartImage');
+const {
   determineLifecycleStatus,
   getLifecycleChangeReason
 } = require('./lifecycleEngine');
@@ -153,10 +157,13 @@ async function maybePublishApprovedMilestoneToX(trackedCall) {
     const hasOriginal = !!trackedCall.xOriginalPostId;
 
     const postText = buildXPostTextMonitor(trackedCall, milestoneX, hasOriginal);
-    const result = await createPost(
-      postText,
-      hasOriginal ? trackedCall.xOriginalPostId : null
-    );
+    let chartBuf = null;
+    if (isMilestoneChartAttachmentEnabled()) {
+      chartBuf = await fetchTokenChartImageBuffer(trackedCall);
+    }
+    const result = await createPost(postText, hasOriginal ? trackedCall.xOriginalPostId : null, {
+      chartImageBuffer: chartBuf
+    });
 
     if (!result.success || (!result.dryRun && !result.id)) {
       return {

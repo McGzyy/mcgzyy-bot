@@ -1,8 +1,8 @@
 [
   {
     "discordUserId": "AUTO_BOT",
-    "username": "Auto Bot",
-    "displayName": "Auto Bot",
+    "username": "McGBot",
+    "displayName": "McGBot",
     "previousUsernames": [],
     "previousDisplayNames": [],
     "xHandle": "",
@@ -23,6 +23,8 @@
     "updatedAt": "2026-03-31T09:27:46.998Z",
     "aliases": [
       "id:AUTO_BOT",
+      "username:mcgbot",
+      "display:mcgbot",
       "username:auto bot",
       "display:auto bot"
     ],
@@ -56,7 +58,7 @@
       "lastPublicMentionAt": null
     },
     "createdAt": "2026-03-30T03:19:10.628Z",
-    "updatedAt": "2026-04-01T08:10:46.160Z",
+    "updatedAt": "2026-04-05T01:25:01.651Z",
     "aliases": [
       "id:732566370914664499",
       "username:mcgzyy",
@@ -66,10 +68,16 @@
     "isXVerified": true,
     "xVerification": {
       "requestedHandle": "McGzyy",
-      "requestedAt": "2026-03-31T09:31:30.203Z",
-      "verificationCode": "MCGZYY-MCGZYY-112829",
+      "requestedAt": "2026-04-01T10:03:18.471Z",
+      "verificationCode": "",
       "status": "verified"
-    }
+    },
+    "discordDisplayName": "McGzyy",
+    "joinedAt": null,
+    "lastSeenAt": null,
+    "guildMember": false,
+    "rolesSnapshot": [],
+    "xVerifiedAt": null
   },
   {
     "discordUserId": "1236736719353548900",
@@ -98,7 +106,7 @@
       "lastPublicMentionAt": null
     },
     "createdAt": "2026-04-01T03:23:48.701Z",
-    "updatedAt": "2026-04-01T06:39:38.337Z",
+    "updatedAt": "2026-04-03T02:19:15.852Z",
     "aliases": [
       "id:1236736719353548900",
       "username:.trader.dave.",

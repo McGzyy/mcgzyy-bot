@@ -43,4 +43,4 @@ const scanSafetyConfig = {
   }
 };
 
-module.exports = { scanSafetyConfig };
+module.exports = { scanSafetyConfig };d

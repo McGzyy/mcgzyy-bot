@@ -1,0 +1,9 @@
+{
+  "minMarketCap": 15000,
+  "minLiquidity": 3500,
+  "minVolume5m": 400,
+  "minVolume1h": 2500,
+  "minTxns5m": 4,
+  "minTxns1h": 20,
+  "approvalTriggerX": 4
+}

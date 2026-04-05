@@ -14,6 +14,10 @@ const {
   resolveCallerApproval,
   resolveCallerMonitor
 } = require('./xPostContent');
+const {
+  isMilestoneChartAttachmentEnabled,
+  buildQuickChartSpec
+} = require('./tokenChartImage');
 
 function isXPostDryRunEnabled() {
   const v = String(process.env.X_POST_DRY_RUN || process.env.X_POST_PREVIEW || '').toLowerCase();
@@ -74,7 +78,9 @@ function describeXPostForTrackedCall(trackedCall, options = {}) {
     callerCreditMonitor: resolveCallerMonitor(trackedCall, 'Unknown'),
     bodyApprovalTemplate: textApproval,
     bodyMonitorTemplate: textMonitor,
-    dryRunEnvActive: isXPostDryRunEnabled()
+    dryRunEnvActive: isXPostDryRunEnabled(),
+    milestoneChartAttachmentEnabled: isMilestoneChartAttachmentEnabled(),
+    chartSpecCanBuild: !!buildQuickChartSpec(trackedCall)
   };
 }
 

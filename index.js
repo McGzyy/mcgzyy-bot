@@ -92,7 +92,11 @@ const {
 } = require('./utils/approvalMilestoneService');
 
 const { buildXPostTextApproval } = require('./utils/xPostContent');
-const { describeXPostForTrackedCall } = require('./utils/xPostPreview');
+const {
+  isMilestoneChartAttachmentEnabled,
+  fetchTokenChartImageBuffer
+} = require('./utils/tokenChartImage');
+const { describeXPostForTrackedCall, isXPostDryRunEnabled } = require('./utils/xPostPreview');
 
 const {
   upsertUserProfile,
@@ -111,7 +115,11 @@ const {
 } = require('./utils/userProfileService');
 
 const { processVerifiedXMentionCallIntake } = require('./utils/xCallIntakeService');
-const { startXMentionIngestionScaffold } = require('./utils/xMentionIngestionScaffold');
+const {
+  startXMentionIngestionScaffold,
+  runInjectedMentionOnce,
+  logXMentionIngestionReadyDiagnostics
+} = require('./utils/xMentionIngestionScaffold');
 
 const client = new Client({
   intents: [
@@ -326,6 +334,14 @@ function buildTestXIntakeResultEmbed(result, { applyMode, authorHandle, tweetId,
     inline: false
   });
 
+  if (result.callSourceType) {
+    embed.addFields({
+      name: 'X mention → applyTrackedCallState',
+      value: `\`${result.callSourceType}\`${result.intentReason ? ` · \`${result.intentReason}\`` : ''}`,
+      inline: false
+    });
+  }
+
   if (result.callerContext?.discordUserId) {
     embed.addFields({
       name: 'Caller context',
@@ -354,6 +370,275 @@ function buildTestXIntakeResultEmbed(result, { applyMode, authorHandle, tweetId,
   } else if (result.dryRun && result.success) {
     embed.setFooter({
       text: 'Dry-run: no tracked-call write, dedupe id not recorded. Owner: !testxintake apply …'
+    });
+  }
+
+  return embed;
+}
+
+function parseTestXmentionContent(content) {
+  let rest = content.replace(/^!testxmention\s*/i, '').trim();
+  let applyMode = false;
+
+  if (/^apply(\s|$)/i.test(rest)) {
+    applyMode = true;
+    rest = rest.replace(/^apply\s+/i, '').trim();
+  }
+
+  const parts = rest.split(/\s+/);
+  if (parts.length < 3) {
+    return { error: 'usage' };
+  }
+
+  const authorHandle = parts[0];
+  const tweetId = parts[1];
+  let idx = 2;
+  let replyToTweetId;
+
+  if (parts[idx] && /^(?:to|reply):/i.test(parts[idx])) {
+    const m = parts[idx].match(/^(?:to|reply):(\d+)$/i);
+    if (!m) {
+      return { error: 'bad_reply' };
+    }
+    replyToTweetId = m[1];
+    idx++;
+  }
+
+  const tweetText = parts.slice(idx).join(' ');
+  if (!tweetText) {
+    return { error: 'usage' };
+  }
+
+  return { authorHandle, tweetId, tweetText, replyToTweetId, applyMode };
+}
+
+function describeInjectReplyOutcome(replyOutcome, dryRunIntake) {
+  if (!replyOutcome) {
+    return '—';
+  }
+
+  if (replyOutcome.attempted === true) {
+    if (replyOutcome.out?.dryRun) {
+      return '**Simulated** — X poster dry-run / preview (`X_POST_DRY_RUN` or equivalent): no live tweet id.';
+    }
+    if (replyOutcome.posted) {
+      return '**Posted** reply on X.';
+    }
+    const errBit = replyOutcome.out?.error || replyOutcome.out?.message || '';
+    return `**Attempted** X API — **not posted**${errBit ? `\n\`${String(errBit).slice(0, 400)}\`` : ''}`;
+  }
+
+  if (replyOutcome.reason === 'no_reply_plan') {
+    return '**No post** — reply policy did not request a reply for this outcome.';
+  }
+
+  if (replyOutcome.reason === 'env_gate') {
+    return '**Held** — `X_MENTION_POST_REPLIES` is not enabled (no real reply).';
+  }
+
+  if (replyOutcome.reason === 'reply_step_not_requested') {
+    return '**Skipped** — reply step was not requested for this run.';
+  }
+
+  if (replyOutcome.reason === 'dry_run_intake' || dryRunIntake) {
+    const lines = ['**Skipped** — inject **dry-run**: `maybePostIntakeReply` not called.'];
+    if (replyOutcome.policyShouldReply) {
+      const envOk = replyOutcome.xMentionPostRepliesEnv;
+      const xDry = isXPostDryRunEnabled();
+      let hypo = 'If you used owner **`apply`** with the same payload: ';
+      if (!envOk) {
+        hypo += 'reply still **held** until `X_MENTION_POST_REPLIES`. ';
+      } else if (xDry) {
+        hypo += 'X poster would **simulate** (dry-run env). ';
+      } else {
+        hypo += 'would **attempt** a live reply to `targetReplyId`. ';
+      }
+      lines.push(hypo.trim());
+    } else {
+      lines.push('Policy **would not** post a reply for this intake path.');
+    }
+    return lines.join('\n');
+  }
+
+  return `\`${replyOutcome.reason || 'unknown'}\`\n${replyOutcome.note || ''}`.trim();
+}
+
+function buildTestXMentionInjectEmbed(
+  injectResult,
+  { applyMode, authorHandle, tweetId, tweetTextSample, replyToTweetId }
+) {
+  if (!injectResult?.ok) {
+    const msg =
+      injectResult?.error === 'invalid_candidate'
+        ? 'Invalid candidate (need handle, numeric tweet id, and tweet text).'
+        : 'Inject failed.';
+    return new EmbedBuilder()
+      .setColor(0xef4444)
+      .setTitle('🧪 X mention ingest inject — error')
+      .setDescription(msg)
+      .setTimestamp();
+  }
+
+  const { bundle, replyOutcome } = injectResult;
+  const { result, plan, targetReplyId, dryRun } = bundle;
+  const duplicate = !!(result.duplicate || result.alreadyProcessed);
+
+  const color = duplicate
+    ? 0x94a3b8
+    : result.success
+      ? applyMode
+        ? 0x22c55e
+        : 0xf59e0b
+      : 0xef4444;
+
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(
+      applyMode
+        ? '🧪 X mention ingest — LIVE apply + reply step'
+        : '🧪 X mention ingest — dry-run (scaffold path)'
+    )
+    .setTimestamp();
+
+  embed.addFields(
+    { name: 'X handle', value: `\`${authorHandle}\``, inline: true },
+    { name: 'Tweet / dedupe id', value: `\`${tweetId}\``, inline: true },
+    {
+      name: 'Pipeline',
+      value:
+        `Intake **${dryRun ? 'dry-run' : 'live'}** · same as \`processSingleCandidate\` → \`decideXMentionIntakeReply\`${applyMode ? ' → `maybePostIntakeReply`' : ''}`,
+      inline: false
+    }
+  );
+
+  if (replyToTweetId) {
+    embed.addFields({
+      name: 'Reply target (in_reply_to)',
+      value: `\`${replyToTweetId}\` (falls back to tweet id if omitted)`,
+      inline: false
+    });
+  }
+
+  embed.addFields({
+    name: 'createPost reply id',
+    value: `\`${targetReplyId}\``,
+    inline: true
+  });
+
+  if (tweetTextSample) {
+    const clip =
+      tweetTextSample.length > 700 ? `${tweetTextSample.slice(0, 700)}…` : tweetTextSample;
+    embed.addFields({ name: 'Tweet text', value: clip || '—', inline: false });
+  }
+
+  if (duplicate) {
+    embed.addFields({
+      name: 'Dedupe',
+      value: '`already_processed` — intake short-circuited',
+      inline: false
+    });
+    embed.addFields({
+      name: 'Reply decision',
+      value: `\`${plan.case}\` · shouldReply **${plan.shouldReply ? 'yes' : 'no'}**`,
+      inline: false
+    });
+    embed.addFields({
+      name: 'X reply step',
+      value: describeInjectReplyOutcome(replyOutcome, dryRun),
+      inline: false
+    });
+    embed.setFooter({ text: 'Use a fresh tweetId for a full pipeline test.' });
+    return embed;
+  }
+
+  const xTrustLine = result.trust
+    ? result.trust.allowed
+      ? '✅ Linked verified profile'
+      : `❌ \`${result.trust.reason}\`${result.replyMessage ? `\n${result.replyMessage}` : ''}`
+    : '—';
+
+  embed.addFields({ name: 'X trust', value: xTrustLine, inline: false });
+
+  let guildLine = '—';
+  if (result.guildTrustDenied && result.guildTrust) {
+    guildLine =
+      `❌ \`${result.guildTrust.reason}\`` +
+      (result.replyMessage ? `\n${result.replyMessage}` : '');
+  } else if (result.guildTrust && result.guildTrust.ok === true) {
+    guildLine = '✅ Linked user is in this server';
+  } else if (result.guildTrust && result.guildTrust.ok === false) {
+    guildLine = `❌ \`${result.guildTrust.reason}\``;
+  } else if (result.reason === 'missing_discord_user_id_for_guild_check') {
+    guildLine = '❌ Linked profile has no `discordUserId`';
+  } else if (result.trustDenied || (result.trust && !result.trust.allowed)) {
+    guildLine = '— (skipped after X trust)';
+  }
+
+  embed.addFields({ name: 'Guild trust', value: guildLine, inline: false });
+
+  embed.addFields({
+    name: 'Intake result',
+    value:
+      `success **${result.success ? 'yes' : 'no'}** · \`${result.reason || 'unknown'}\`` +
+      (result.error ? `\n\`${String(result.error).slice(0, 300)}\`` : ''),
+    inline: false
+  });
+
+  if (result.callSourceType) {
+    embed.addFields({
+      name: 'applyTrackedCallState',
+      value: `\`${result.callSourceType}\`${result.intentReason ? ` · \`${result.intentReason}\`` : ''}`,
+      inline: false
+    });
+  }
+
+  embed.addFields({
+    name: 'Extracted CA',
+    value: result.contractAddress ? `\`${result.contractAddress}\`` : '—',
+    inline: true
+  });
+
+  if (result.scanPreview) {
+    const t = result.scanPreview.ticker || '?';
+    embed.addFields({
+      name: 'Scan preview',
+      value: `**${result.scanPreview.tokenName}** (${t}) · MC **${result.scanPreview.marketCap}**`,
+      inline: false
+    });
+  }
+
+  const policyTextClip =
+    plan.text && plan.text.length > 400 ? `${plan.text.slice(0, 400)}…` : plan.text || '—';
+
+  embed.addFields({
+    name: 'Reply decision',
+    value:
+      `case \`${plan.case}\` · shouldReply **${plan.shouldReply ? 'yes' : 'no'}**` +
+      (plan.shouldReply ? `\nPreview:\n${policyTextClip}` : ''),
+    inline: false
+  });
+
+  embed.addFields({
+    name: 'X reply step',
+    value: describeInjectReplyOutcome(replyOutcome, dryRun),
+    inline: false
+  });
+
+  if (applyMode && result.success && result.reason === 'tracked') {
+    embed.addFields({
+      name: 'Tracked call',
+      value: `**New:** ${result.wasNewCall ? 'yes' : 'no'} · **Reactivated:** ${result.wasReactivated ? 'yes' : 'no'}`,
+      inline: false
+    });
+  }
+
+  if (!applyMode) {
+    embed.setFooter({
+      text: 'Default is dry-run. Owner: !testxmention apply … — replies only if X_MENTION_POST_REPLIES + X poster not in dry-run.'
+    });
+  } else {
+    embed.setFooter({
+      text: 'Live apply wrote dedupe when tracked; reply gated by X_MENTION_POST_REPLIES and X poster env.'
     });
   }
 
@@ -824,7 +1109,13 @@ async function publishApprovedCoinToX(contractAddress) {
   const hasOriginal = !!trackedCall.xOriginalPostId;
 
   const postText = buildXPostTextApproval(trackedCall, milestoneX, hasOriginal);
-  const result = await createPost(postText, hasOriginal ? trackedCall.xOriginalPostId : null);
+  let chartBuf = null;
+  if (isMilestoneChartAttachmentEnabled()) {
+    chartBuf = await fetchTokenChartImageBuffer(trackedCall);
+  }
+  const result = await createPost(postText, hasOriginal ? trackedCall.xOriginalPostId : null, {
+    chartImageBuffer: chartBuf
+  });
 
   if (!result.success || (!result.dryRun && !result.id)) {
     return {
@@ -1291,6 +1582,7 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
 
   await ensureVerifyXPrompt(firstGuild);
 
+  logXMentionIngestionReadyDiagnostics();
   startXMentionIngestionScaffold(client);
 
   setInterval(() => {
@@ -1976,6 +2268,13 @@ saveBotSettings(BOT_SETTINGS);
               name: 'Threading',
               value: info.threading.explanation.slice(0, 1024),
               inline: false
+            },
+            {
+              name: 'Chart attachment (milestone posts)',
+              value:
+                `Env **X_MILESTONE_CHART_ENABLED**: ${info.milestoneChartAttachmentEnabled ? 'on' : 'off'}\n` +
+                `QuickChart spec buildable: **${info.chartSpecCanBuild ? 'yes' : 'no'}** (needs ATH MC)`,
+              inline: false
             }
           )
           .setFooter({
@@ -2556,6 +2855,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
       `• \`!resetbotstats\` — Reset bot-call stat exclusions on tracked data\n` +
       `• \`!backfillprofiles\` — Preview members missing bot profiles; \`!backfillprofiles run\` creates them once\n` +
       `• \`!testxintake\` — Simulate X mention intake (dry-run); owner \`apply\` for real write\n` +
+      `• \`!testxmention\` — Inject fake mention through **ingestion scaffold** (dry-run); owner \`apply\` + reply step\n` +
       `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
       `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
       `• \`!truebotstats\` — Bot stats including reset/excluded calls\n\n`;
@@ -2822,6 +3122,84 @@ if (lowerContent.startsWith('!testxintake')) {
   } catch (err) {
     console.error('[testxintake]', err);
     await replyText(message, `❌ Test failed: ${err.message}`);
+  }
+
+  return;
+}
+
+if (lowerContent.startsWith('!testxmention')) {
+  const isOwner = message.author.id === process.env.BOT_OWNER_ID;
+  const isMod = message.member?.permissions?.has('ManageGuild');
+
+  if (!isOwner && !isMod) {
+    await replyText(message, '❌ **Manage Server** or bot owner only.');
+    return;
+  }
+
+  if (!message.guild) {
+    await replyText(message, '❌ Run this in a server channel.');
+    return;
+  }
+
+  const parsed = parseTestXmentionContent(content);
+
+  if (parsed.error === 'bad_reply') {
+    await replyText(
+      message,
+      '❌ Invalid `to:` / `reply:` token. Use `to:1234567890` (digits only), e.g. after tweet id.'
+    );
+    return;
+  }
+
+  if (parsed.error === 'usage') {
+    await replyText(
+      message,
+      '❌ **Usage**\n' +
+        '`!testxmention <xHandle> <tweetId> [to:<parentTweetId>] <tweet text…>` — **dry-run** (default; full scaffold path)\n' +
+        '`!testxmention apply <xHandle> <tweetId> [to:<parentTweetId>] <tweet text…>` — **owner only**: live intake + `maybePostIntakeReply` (still gated by `X_MENTION_POST_REPLIES` and X poster dry-run)\n\n' +
+        '• Same flow as mention ingestion: `processSingleCandidate` → reply policy → optional X reply.\n' +
+        '• Default does **not** write tracked calls / dedupe; **`apply`** is owner-only.\n' +
+        '• Real X replies require **`X_MENTION_POST_REPLIES`** (and X poster not in dry-run).'
+    );
+    return;
+  }
+
+  if (parsed.applyMode && !isOwner) {
+    await replyText(
+      message,
+      '❌ **`apply`** is **bot owner only**.\nDefault inject is dry-run (mods with **Manage Server** can use that).'
+    );
+    return;
+  }
+
+  const candidate = {
+    authorHandle: parsed.authorHandle,
+    tweetText: parsed.tweetText,
+    tweetId: parsed.tweetId,
+    ...(parsed.replyToTweetId ? { replyToTweetId: parsed.replyToTweetId } : {})
+  };
+
+  try {
+    const injectResult = await runInjectedMentionOnce(client, message.guild, candidate, {
+      dryRun: !parsed.applyMode,
+      attemptReplyAfterIntake: parsed.applyMode === true
+    });
+
+    const embed = buildTestXMentionInjectEmbed(injectResult, {
+      applyMode: parsed.applyMode,
+      authorHandle: parsed.authorHandle,
+      tweetId: parsed.tweetId,
+      tweetTextSample: parsed.tweetText,
+      replyToTweetId: parsed.replyToTweetId
+    });
+
+    await message.reply({
+      embeds: [embed],
+      allowedMentions: { repliedUser: false }
+    });
+  } catch (err) {
+    console.error('[testxmention]', err);
+    await replyText(message, `❌ Inject failed: ${err.message}`);
   }
 
   return;

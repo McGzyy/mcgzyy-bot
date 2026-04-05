@@ -335,7 +335,7 @@ function getBotStats() {
   const totalCalls = calls.length;
 
   return {
-    username: 'Auto Bot',
+    username: 'McGBot',
     totalCalls,
     avgX: totalCalls ? totalX / totalCalls : 0,
     avgAth: totalCalls ? totalAth / totalCalls : 0,
@@ -378,7 +378,7 @@ function getBotStatsRaw() {
   const resetExcludedCount = calls.filter(call => call.excludedFromStats === true).length;
 
   return {
-    username: 'Auto Bot',
+    username: 'McGBot',
     totalCalls,
     avgX: totalCalls ? totalX / totalCalls : 0,
     avgAth: totalCalls ? totalAth / totalCalls : 0,

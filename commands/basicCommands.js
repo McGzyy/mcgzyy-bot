@@ -1063,6 +1063,34 @@ async function applyTrackedCallState(
         displayName,
         { callSourceType: 'user_call' }
       );
+      // First attributed user call on this row — same signal as a brand-new row for X reply policy (wasNewCall).
+      wasNewCall = true;
+    } else if (existingCall.callSourceType === 'bot_call' && callSourceType === 'user_call') {
+      saveTrackedCall(
+        {
+          contractAddress,
+          marketCap: marketCap || 0,
+          tokenName: liveScanData?.tokenName || existingCall.tokenName,
+          ticker: liveScanData?.ticker || existingCall.ticker,
+          latestMarketCap: marketCap || existingCall.latestMarketCap || 0,
+          entryScore: liveScanData?.entryScore || existingCall.entryScore || 0,
+          grade: liveScanData?.grade || existingCall.grade || 'N/A',
+          alertType: liveScanData?.alertType || existingCall.alertType || 'N/A',
+          ath: liveScanData?.ath || existingCall.ath || marketCap || 0,
+          percentFromAth: liveScanData?.percentFromAth || existingCall.percentFromAth || 0,
+          migrated: liveScanData?.migrated || existingCall.migrated || false,
+          holders: liveScanData?.holders ?? existingCall.holders ?? null,
+          top10HolderPercent: liveScanData?.top10HolderPercent ?? existingCall.top10HolderPercent ?? null,
+          devHoldingPercent: liveScanData?.devHoldingPercent ?? existingCall.devHoldingPercent ?? null,
+          bundleHoldingPercent: liveScanData?.bundleHoldingPercent ?? existingCall.bundleHoldingPercent ?? null,
+          sniperPercent: liveScanData?.sniperPercent ?? existingCall.sniperPercent ?? null
+        },
+        discordUserId,
+        username,
+        displayName,
+        { callSourceType: 'user_call' }
+      );
+      wasNewCall = true;
     } else {
       updateTrackedCallData(contractAddress, {
         tokenName: liveScanData?.tokenName || existingCall.tokenName,
@@ -1153,6 +1181,87 @@ async function handleDeepScanReply(message, contractAddress, withButtons = false
   return message.reply(payload);
 }
 
+/**
+ * Same content + embed as `!call` / `handleCallCommand` (for channel mirror + X intake).
+ * @returns {{ content: string, embeds: import('discord.js').EmbedBuilder[] }}
+ */
+function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated) {
+  const performancePercent = trackedCall
+    ? calculatePerformance(scan.marketCap || 0, trackedCall.firstCalledMarketCap)
+    : null;
+
+  const milestoneHit = trackedCall
+    ? getMilestoneLabel(scan.marketCap || 0, trackedCall.firstCalledMarketCap)
+    : null;
+
+  const { greenFlags, redFlags } = buildScanFlags(realData);
+
+  const embed = createTraderScanEmbed(
+    {
+      ...scan,
+      greenFlags,
+      redFlags,
+      riskLevel: scan.riskLevel || 'Low',
+      firstCallerUsername: trackedCall?.firstCallerUsername,
+      firstCallerDisplayName: trackedCall?.firstCallerDisplayName,
+      firstCallerDiscordId: trackedCall?.firstCallerDiscordId,
+      firstCalledMarketCap: trackedCall?.firstCalledMarketCap,
+      lifecycleStatus: trackedCall?.lifecycleStatus,
+      callSourceType: trackedCall?.callSourceType,
+      isNewCall: wasNewCall,
+      isReactivated: wasReactivated,
+      performancePercent,
+      milestoneHit,
+      isNewMilestone: false
+    },
+    {
+      showTrackedMeta: true
+    }
+  );
+
+  return {
+    content: '📍 Coin officially called and now being tracked.',
+    embeds: [embed]
+  };
+}
+
+/**
+ * Post the same announcement as `!call` to #user-calls (new user calls only).
+ * @param {import('discord.js').Guild|null} guild
+ * @param {{ content: string, embeds: unknown[] }} payload
+ * @returns {Promise<{ posted: boolean, reason?: string }>}
+ */
+async function announceNewUserCallInUserCallsChannel(guild, payload) {
+  if (!guild?.channels?.cache) {
+    return { posted: false, reason: 'no_guild' };
+  }
+
+  const ch = guild.channels.cache.find(
+    c =>
+      c &&
+      typeof c.isTextBased === 'function' &&
+      c.isTextBased() &&
+      String(c.name || '').toLowerCase() === 'user-calls'
+  );
+
+  if (!ch) {
+    console.warn('[UserCalls] No #user-calls text channel in guild:', guild.name || guild.id);
+    return { posted: false, reason: 'no_channel' };
+  }
+
+  try {
+    await ch.send({
+      content: payload.content,
+      embeds: payload.embeds,
+      allowedMentions: { parse: [] }
+    });
+    return { posted: true };
+  } catch (err) {
+    console.error('[UserCalls] Send failed:', err.message);
+    return { posted: false, reason: err.message };
+  }
+}
+
 async function handleCallCommand(message, contractAddress, source = 'command') {
   const realData = await runQuickCa(contractAddress);
   const scan = normalizeRealDataToScan(realData);
@@ -1165,40 +1274,19 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     { callSourceType: 'user_call' }
   );
 
-  const performancePercent = trackedCall
-    ? calculatePerformance(scan.marketCap || 0, trackedCall.firstCalledMarketCap)
-    : null;
+  const payload = buildUserCallAnnouncementPayload(
+    realData,
+    scan,
+    trackedCall,
+    wasNewCall,
+    wasReactivated
+  );
 
-  const milestoneHit = trackedCall
-    ? getMilestoneLabel(scan.marketCap || 0, trackedCall.firstCalledMarketCap)
-    : null;
+  await message.reply(payload);
 
-  const { greenFlags, redFlags } = buildScanFlags(realData);
-
-  const embed = createTraderScanEmbed({
-    ...scan,
-    greenFlags,
-    redFlags,
-    riskLevel: scan.riskLevel || 'Low',
-    firstCallerUsername: trackedCall?.firstCallerUsername,
-    firstCallerDisplayName: trackedCall?.firstCallerDisplayName,
-    firstCallerDiscordId: trackedCall?.firstCallerDiscordId,
-    firstCalledMarketCap: trackedCall?.firstCalledMarketCap,
-    lifecycleStatus: trackedCall?.lifecycleStatus,
-    callSourceType: trackedCall?.callSourceType,
-    isNewCall: wasNewCall,
-    isReactivated: wasReactivated,
-    performancePercent,
-    milestoneHit,
-    isNewMilestone: false
-  }, {
-    showTrackedMeta: true
-  });
-
-  return message.reply({
-    content: '📍 Coin officially called and now being tracked.',
-    embeds: [embed]
-  });
+  if (wasNewCall && trackedCall?.callSourceType === 'user_call') {
+    await announceNewUserCallInUserCallsChannel(message.guild, payload);
+  }
 }
 
 async function handleWatchCommand(message, contractAddress, source = 'command') {
@@ -1520,6 +1608,8 @@ module.exports = {
   buildDisabledActionButtons,
   handleCallCommand,
   handleWatchCommand,
+  buildUserCallAnnouncementPayload,
+  announceNewUserCallInUserCallsChannel,
   isLikelySolanaCA,
   applyTrackedCallState,
   resolveTrackedCallCallerContext,

@@ -1118,6 +1118,23 @@ function applyReferralMutationAndLog({
   return { ok: true, before, after };
 }
 
+function getReferralCreditedMonths(profile) {
+  return Number(profile?.referral?.rewards?.creditedMonths || 0) || 0;
+}
+
+function setReferralCreditedMonths(profile, months) {
+  const current = profile?.referral || {};
+  const rewards = current.rewards || {};
+  const next = {
+    ...(current || {}),
+    rewards: {
+      ...(rewards || {}),
+      creditedMonths: Math.max(0, Math.floor(Number(months) || 0))
+    }
+  };
+  return next;
+}
+
 function isSignatureAlreadyClaimed(txSignature) {
   const sig = String(txSignature || '').trim();
   if (!sig) return false;
@@ -4173,6 +4190,273 @@ saveBotSettings(BOT_SETTINGS);
         return;
       }
 
+      if (lowerContent.startsWith('!referralrewardstatus')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!referralrewardstatus @user`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const credited = getReferralCreditedMonths(profile);
+        const r = profile.referral || {};
+        const conv = r.conversion || {};
+        const m = profile.membership || {};
+
+        await replyText(
+          message,
+          [
+            `🎟️ **Referral Reward Credits** — <@${userId}>`,
+            '',
+            `**Credited months (available):** **${credited}**`,
+            '',
+            `**Referral conversion:** \`${String(conv.status || 'none')}\``,
+            `**Converted at:** ${formatIsoDateTime(conv.convertedAt)}`,
+            '',
+            `**Membership status:** \`${String(m.status || 'none')}\` • **Tier:** \`${String(m.tier || 'basic')}\``,
+            `**Expires:** ${formatIsoDateTime(m.expiresAt)}`
+          ].join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!grantreferralreward')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!grantreferralreward @user <months>`');
+          return;
+        }
+
+        const parts = content.split(/\s+/).filter(Boolean);
+        const months = parsePositiveInt(parts[2], 0);
+        if (!months) {
+          await replyText(message, '❌ Usage: `!grantreferralreward @user <months>`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const before = getReferralCreditedMonths(profile);
+        const afterTotal = before + months;
+        const nextReferral = setReferralCreditedMonths(profile, afterTotal);
+
+        const res = applyReferralMutationAndLog({
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          referralPatch: nextReferral,
+          eventType: 'referral_reward_granted',
+          eventData: {
+            months,
+            creditedBefore: before,
+            creditedAfter: afterTotal
+          }
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            `✅ Referral reward credit granted to <@${userId}>`,
+            `**Added:** ${months} month(s)`,
+            `**New credited total:** **${afterTotal}** month(s)`
+          ].join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!applyreferralreward')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!applyreferralreward @user <months?>`');
+          return;
+        }
+
+        const parts = content.split(/\s+/).filter(Boolean);
+        const requestedMonthsRaw = parts[2];
+        const requestedMonths = requestedMonthsRaw ? parsePositiveInt(requestedMonthsRaw, 0) : 1; // default = 1 month
+        if (!requestedMonths) {
+          await replyText(message, '❌ Usage: `!applyreferralreward @user <months?>`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const credited = getReferralCreditedMonths(profile);
+        if (credited <= 0) {
+          await replyText(message, `ℹ️ <@${userId}> has no credited referral months to apply.`);
+          return;
+        }
+
+        if (requestedMonths > credited) {
+          await replyText(
+            message,
+            `❌ Insufficient credits. Requested **${requestedMonths}**, available **${credited}**.`
+          );
+          return;
+        }
+
+        const nowMs = Date.now();
+        const currentM = profile.membership || {};
+        const tier = normalizeMembershipTier(currentM.tier) || SOL_MEMBERSHIP_TIER || 'premium';
+        const status = String(currentM.status || 'none').toLowerCase();
+        const nextStatus = (status === 'trial' || status === 'comped' || status === 'active') ? status : 'active';
+        const newExpiresAt = computeMembershipExtension(nowMs, currentM.expiresAt, requestedMonths);
+
+        // Membership event + role sync
+        const mRes = await applyMembershipChangeAndSync({
+          guild: message.guild,
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          membershipPatch: {
+            status: nextStatus,
+            tier,
+            expiresAt: newExpiresAt,
+            source: String(currentM.source || '') ? currentM.source : 'referral_credit'
+          },
+          eventType: 'membership_referral_credit_applied',
+          eventData: { months: requestedMonths }
+        });
+
+        if (!mRes.ok) {
+          await replyText(message, `❌ Failed: \`${mRes.reason}\``);
+          return;
+        }
+
+        // Consume credits + referral log
+        const creditedAfter = credited - requestedMonths;
+        const nextReferral = setReferralCreditedMonths(profile, creditedAfter);
+        const rRes = applyReferralMutationAndLog({
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          referralPatch: nextReferral,
+          eventType: 'referral_reward_consumed',
+          eventData: {
+            months: requestedMonths,
+            creditedBefore: credited,
+            creditedAfter
+          }
+        });
+
+        if (!rRes.ok) {
+          // Membership already applied; keep output clear for ops.
+          await replyText(
+            message,
+            `⚠️ Membership applied, but failed to decrement credits: \`${rRes.reason}\`. Please check \`!referralrewardstatus\`.`
+          );
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            `✅ Applied referral reward credits for <@${userId}>`,
+            `**Applied:** ${requestedMonths} month(s)`,
+            `**Credits remaining:** **${creditedAfter}** month(s)`,
+            `**New expiry:** ${formatIsoDateTime(mRes.after.expiresAt)}`,
+            mRes.roleSync.ok
+              ? `**Role sync:** \`${mRes.roleSync.action}\`${mRes.roleSync.roleName ? ` (\`${mRes.roleSync.roleName}\`)` : ''}`
+              : `**Role sync:** \`skip\` (${mRes.roleSync.reason || 'error'})`
+          ].join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!rewardreferrer')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const referredUserId = parseMentionedUserIdFromContent(message);
+        if (!referredUserId) {
+          await replyText(message, '❌ Usage: `!rewardreferrer @referredUser`');
+          return;
+        }
+
+        const referredProfile = getUserProfileByDiscordId(referredUserId);
+        if (!referredProfile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const referrerId = String(referredProfile?.referral?.referredByUserId || '').trim();
+        if (!referrerId) {
+          await replyText(message, `ℹ️ <@${referredUserId}> has no referrer attribution.`);
+          return;
+        }
+
+        const referrerProfile = getUserProfileByDiscordId(referrerId);
+        if (!referrerProfile) {
+          await replyText(message, '❌ Referrer does not have a profile yet.');
+          return;
+        }
+
+        const before = getReferralCreditedMonths(referrerProfile);
+        const afterTotal = before + 1;
+        const nextReferral = setReferralCreditedMonths(referrerProfile, afterTotal);
+
+        const res = applyReferralMutationAndLog({
+          actorUserId: message.author.id,
+          targetUserId: referrerId,
+          referralPatch: nextReferral,
+          eventType: 'referral_reward_granted',
+          eventData: {
+            months: 1,
+            creditedBefore: before,
+            creditedAfter: afterTotal,
+            referredUserId
+          }
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            `✅ Rewarded referrer for <@${referredUserId}>`,
+            `**Referrer:** <@${referrerId}>`,
+            `**Added:** 1 month`,
+            `**New credited total:** **${afterTotal}** month(s)`
+          ].join('\n')
+        );
+        return;
+      }
+
       if (lowerContent.startsWith('!verifyx ')) {
         if (!message.member?.permissions?.has('ManageGuild')) {
           await replyText(message, '❌ You need **Manage Server** permission to use this command.');
@@ -4658,7 +4942,11 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
       `• \`!referralstatus @user\` — View referral attribution (read-only)\n` +
       `• \`!setreferrer @user @referrer\` — Set referral attribution\n` +
       `• \`!clearreferrer @user\` — Clear referral attribution\n` +
-      `• \`!markreferralconverted @user <status>\` — Update conversion status (manual)\n\n`;
+      `• \`!markreferralconverted @user <status>\` — Update conversion status (manual)\n` +
+      `• \`!referralrewardstatus @user\` — View referral reward credits\n` +
+      `• \`!grantreferralreward @user <months>\` — Add free-month credits\n` +
+      `• \`!applyreferralreward @user <months?>\` — Consume credits → extend membership\n` +
+      `• \`!rewardreferrer @referredUser\` — Grant 1 month to referrer (helper)\n\n`;
   }
 
   // BOT OWNER ONLY

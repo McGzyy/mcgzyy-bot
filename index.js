@@ -137,6 +137,8 @@ const {
 
 const { getModQueuesSnapshot } = require('./utils/modQueueService');
 const { logMembershipEvent, hasTxSignatureInMembershipEvents } = require('./utils/membershipEventLog');
+const { syncMembershipRole } = require('./utils/membershipRoleSync');
+const { logReferralEvent } = require('./utils/referralEventLog');
 const { parseProCallCommandArgs } = require('./utils/proCallText');
 const { extractFirstSolanaCaFromText } = require('./utils/solanaAddress');
 
@@ -1012,6 +1014,108 @@ function computeMembershipExtension(nowMs, currentExpiresAt, months) {
   const monthsSafe = Number.isFinite(m) && m > 0 ? Math.floor(m) : 1;
   const days = 30 * monthsSafe;
   return new Date(base + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function normalizeMembershipTier(raw) {
+  const t = String(raw || '').trim().toLowerCase();
+  if (t === 'basic' || t === 'premium' || t === 'pro') return t;
+  return '';
+}
+
+function parsePositiveInt(raw, fallback = 0) {
+  const n = Number(String(raw || '').trim());
+  if (!Number.isFinite(n)) return fallback;
+  const i = Math.floor(n);
+  if (i <= 0) return fallback;
+  return i;
+}
+
+async function applyMembershipChangeAndSync({
+  guild,
+  actorUserId,
+  targetUserId,
+  membershipPatch,
+  eventType,
+  eventData
+}) {
+  const profile = getUserProfileByDiscordId(targetUserId);
+  if (!profile) {
+    return { ok: false, reason: 'no_profile' };
+  }
+
+  const before = profile.membership || {};
+  const nowIso = new Date().toISOString();
+
+  const updated = updateUserProfile(targetUserId, {
+    membership: {
+      ...membershipPatch,
+      // Keep a minimal invariant: if a status is set but startsAt missing, fill it.
+      startsAt: membershipPatch?.startsAt ?? before.startsAt ?? nowIso
+    }
+  });
+  if (!updated) {
+    return { ok: false, reason: 'profile_update_failed' };
+  }
+
+  const after = updated.membership || membershipPatch || {};
+  const roleSync = await syncMembershipRole(guild, targetUserId, after);
+
+  if (eventType) {
+    logMembershipEvent(eventType, {
+      actorUserId,
+      targetUserId,
+      data: {
+        ...eventData,
+        before,
+        after,
+        roleSync: {
+          ok: roleSync.ok,
+          action: roleSync.action,
+          roleName: roleSync.roleName || null,
+          reason: roleSync.reason || null
+        }
+      }
+    });
+  }
+
+  return { ok: true, before, after, roleSync };
+}
+
+function normalizeReferralConversionStatus(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === 'none' || s === 'joined' || s === 'paid' || s === 'refunded') return s;
+  return '';
+}
+
+function applyReferralMutationAndLog({
+  actorUserId,
+  targetUserId,
+  referralPatch,
+  eventType,
+  eventData
+}) {
+  const profile = getUserProfileByDiscordId(targetUserId);
+  if (!profile) return { ok: false, reason: 'no_profile' };
+
+  const before = profile.referral || {};
+  const updated = updateUserProfile(targetUserId, { referral: referralPatch });
+  if (!updated) return { ok: false, reason: 'profile_update_failed' };
+
+  const after = updated.referral || referralPatch || {};
+
+  if (eventType) {
+    logReferralEvent(eventType, {
+      actorUserId,
+      targetUserId,
+      data: {
+        ...eventData,
+        before,
+        after
+      }
+    });
+  }
+
+  return { ok: true, before, after };
 }
 
 function isSignatureAlreadyClaimed(txSignature) {
@@ -2265,6 +2369,18 @@ client.on('interactionCreate', async (interaction) => {
           }
         });
 
+        // Entitlement-driven role sync (no channel gating in v1).
+        const roleSync = await syncMembershipRole(
+          interaction.guild,
+          userId,
+          {
+            status: 'active',
+            tier: String(expected.tier || SOL_MEMBERSHIP_TIER),
+            expiresAt: newExpiresAt,
+            source: 'sol_payment'
+          }
+        );
+
         logMembershipEvent('membership_started_or_extended', {
           actorUserId: interaction.user.id,
           targetUserId: userId,
@@ -2286,6 +2402,9 @@ client.on('interactionCreate', async (interaction) => {
             `**Tier:** \`${String(expected.tier || SOL_MEMBERSHIP_TIER)}\``,
             `**New expiry:** ${formatIsoDateTime(newExpiresAt)}`,
             `**Handled by:** <@${interaction.user.id}>`,
+            roleSync.ok
+              ? `**Role sync:** \`${roleSync.action}\`${roleSync.roleName ? ` (\`${roleSync.roleName}\`)` : ''}`
+              : `**Role sync:** \`skip\` (${roleSync.reason || 'error'})`,
             '',
             `**Tx:** \`${txSignature.slice(0, 180)}\``,
             proof.explorerUrl ? `**Explorer:** ${proof.explorerUrl}` : null
@@ -3494,6 +3613,566 @@ saveBotSettings(BOT_SETTINGS);
         return;
       }
 
+      if (lowerContent.startsWith('!syncmemberrole')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!syncmemberrole @user`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const result = await syncMembershipRole(message.guild, userId, profile.membership);
+        if (!result.ok) {
+          await replyText(
+            message,
+            `⚠️ Role sync failed/skip: \`${result.reason || 'unknown'}\`${result.roleName ? ` (role: \`${result.roleName}\`)` : ''}`
+          );
+          return;
+        }
+
+        await replyText(
+          message,
+          `✅ Role sync: \`${result.action}\`${result.roleName ? ` (role: \`${result.roleName}\`)` : ''} for <@${userId}>`
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!grantmembership')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!grantmembership @user <tier> <months>`');
+          return;
+        }
+
+        const parts = content.split(/\s+/).filter(Boolean);
+        const tier = normalizeMembershipTier(parts[2]);
+        const months = parsePositiveInt(parts[3], 0);
+
+        if (!tier || !months) {
+          await replyText(message, '❌ Usage: `!grantmembership @user <basic|premium|pro> <months>`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const nowMs = Date.now();
+        const current = profile.membership || {};
+        const newExpiresAt = computeMembershipExtension(nowMs, current.expiresAt, months);
+
+        const res = await applyMembershipChangeAndSync({
+          guild: message.guild,
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          membershipPatch: {
+            status: 'active',
+            tier,
+            expiresAt: newExpiresAt,
+            source: 'manual'
+          },
+          eventType: 'membership_manual_grant',
+          eventData: { tier, months }
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            `✅ Membership granted to <@${userId}>`,
+            `**Status:** \`${res.after.status}\` • **Tier:** \`${res.after.tier}\` • **Expiry:** ${formatIsoDateTime(res.after.expiresAt)}`,
+            res.roleSync.ok
+              ? `**Role sync:** \`${res.roleSync.action}\`${res.roleSync.roleName ? ` (\`${res.roleSync.roleName}\`)` : ''}`
+              : `**Role sync:** \`skip\` (${res.roleSync.reason || 'error'})`
+          ].join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!extendmembership')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!extendmembership @user <months>`');
+          return;
+        }
+
+        const parts = content.split(/\s+/).filter(Boolean);
+        const months = parsePositiveInt(parts[2], 0);
+        if (!months) {
+          await replyText(message, '❌ Usage: `!extendmembership @user <months>`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const nowMs = Date.now();
+        const current = profile.membership || {};
+        const newExpiresAt = computeMembershipExtension(nowMs, current.expiresAt, months);
+
+        // Preserve tier; if missing/invalid, default to premium.
+        const tier = normalizeMembershipTier(current.tier) || SOL_MEMBERSHIP_TIER || 'premium';
+        const status = String(current.status || 'none').toLowerCase();
+        const nextStatus = (status === 'trial' || status === 'comped' || status === 'active') ? status : 'active';
+
+        const res = await applyMembershipChangeAndSync({
+          guild: message.guild,
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          membershipPatch: {
+            status: nextStatus,
+            tier,
+            expiresAt: newExpiresAt,
+            source: String(current.source || 'manual') || 'manual'
+          },
+          eventType: 'membership_manual_extend',
+          eventData: { months }
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            `✅ Membership extended for <@${userId}>`,
+            `**Status:** \`${res.after.status}\` • **Tier:** \`${res.after.tier}\` • **Expiry:** ${formatIsoDateTime(res.after.expiresAt)}`,
+            res.roleSync.ok
+              ? `**Role sync:** \`${res.roleSync.action}\`${res.roleSync.roleName ? ` (\`${res.roleSync.roleName}\`)` : ''}`
+              : `**Role sync:** \`skip\` (${res.roleSync.reason || 'error'})`
+          ].join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!compmembership')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!compmembership @user <tier> <months?>`');
+          return;
+        }
+
+        const parts = content.split(/\s+/).filter(Boolean);
+        const tier = normalizeMembershipTier(parts[2]);
+        const months = parsePositiveInt(parts[3], 1);
+        if (!tier) {
+          await replyText(message, '❌ Usage: `!compmembership @user <basic|premium|pro> <months?>`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const nowMs = Date.now();
+        const current = profile.membership || {};
+        const newExpiresAt = computeMembershipExtension(nowMs, current.expiresAt, months);
+
+        const res = await applyMembershipChangeAndSync({
+          guild: message.guild,
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          membershipPatch: {
+            status: 'comped',
+            tier,
+            expiresAt: newExpiresAt,
+            source: 'comped'
+          },
+          eventType: 'membership_manual_comp',
+          eventData: { tier, months }
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            `🎁 Membership comped for <@${userId}>`,
+            `**Status:** \`${res.after.status}\` • **Tier:** \`${res.after.tier}\` • **Expiry:** ${formatIsoDateTime(res.after.expiresAt)}`,
+            res.roleSync.ok
+              ? `**Role sync:** \`${res.roleSync.action}\`${res.roleSync.roleName ? ` (\`${res.roleSync.roleName}\`)` : ''}`
+              : `**Role sync:** \`skip\` (${res.roleSync.reason || 'error'})`
+          ].join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!cancelmembership')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!cancelmembership @user`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const current = profile.membership || {};
+        const tier = normalizeMembershipTier(current.tier) || SOL_MEMBERSHIP_TIER || 'premium';
+
+        const res = await applyMembershipChangeAndSync({
+          guild: message.guild,
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          membershipPatch: {
+            status: 'cancelled',
+            tier,
+            expiresAt: current.expiresAt || null,
+            source: String(current.source || 'manual') || 'manual'
+          },
+          eventType: 'membership_manual_cancel',
+          eventData: {}
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            `🛑 Membership cancelled for <@${userId}>`,
+            `**Status:** \`${res.after.status}\` • **Tier:** \`${res.after.tier}\` • **Expiry:** ${formatIsoDateTime(res.after.expiresAt)}`,
+            res.roleSync.ok
+              ? `**Role sync:** \`${res.roleSync.action}\`${res.roleSync.roleName ? ` (\`${res.roleSync.roleName}\`)` : ''}`
+              : `**Role sync:** \`skip\` (${res.roleSync.reason || 'error'})`
+          ].join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!removemembership')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!removemembership @user`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const res = await applyMembershipChangeAndSync({
+          guild: message.guild,
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          membershipPatch: {
+            status: 'none',
+            tier: 'basic',
+            startsAt: null,
+            expiresAt: null,
+            source: 'manual',
+            notes: ''
+          },
+          eventType: 'membership_manual_remove',
+          eventData: {}
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            `🧹 Membership cleared for <@${userId}>`,
+            `**Status:** \`${res.after.status}\` • **Tier:** \`${res.after.tier}\``,
+            res.roleSync.ok
+              ? `**Role sync:** \`${res.roleSync.action}\`${res.roleSync.roleName ? ` (\`${res.roleSync.roleName}\`)` : ''}`
+              : `**Role sync:** \`skip\` (${res.roleSync.reason || 'error'})`
+          ].join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!referralstatus')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!referralstatus @user`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const r = profile.referral || {};
+        const conv = r.conversion || {};
+        const rewards = r.rewards || {};
+
+        const lines = [
+          `🔗 **Referral Status** — <@${userId}>`,
+          '',
+          `**Referred by:** ${r.referredByUserId ? `<@${r.referredByUserId}>` : 'None'}`,
+          r.codeUsed ? `**Code used:** \`${String(r.codeUsed).slice(0, 64)}\`` : null,
+          `**Attributed at:** ${formatIsoDateTime(r.attributedAt)}`,
+          '',
+          `**Conversion:** \`${String(conv.status || 'none')}\``,
+          `**Converted at:** ${formatIsoDateTime(conv.convertedAt)}`,
+          `**Rewards credited (months):** ${Number(rewards.creditedMonths || 0)}`
+        ].filter(Boolean);
+
+        await replyText(message, lines.join('\n'));
+        return;
+      }
+
+      if (lowerContent.startsWith('!setreferrer')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const mentionedUsers = message.mentions?.users;
+        const target = mentionedUsers?.at?.(0) || mentionedUsers?.first?.() || null;
+        const referrer = mentionedUsers?.at?.(1) || (mentionedUsers?.size > 1 ? Array.from(mentionedUsers.values())[1] : null);
+
+        if (!target?.id || !referrer?.id) {
+          await replyText(message, '❌ Usage: `!setreferrer @user @referrer`');
+          return;
+        }
+
+        if (String(target.id) === String(referrer.id)) {
+          await replyText(message, '❌ Self-referral is not allowed.');
+          return;
+        }
+
+        const targetProfile = getUserProfileByDiscordId(target.id);
+        const referrerProfile = getUserProfileByDiscordId(referrer.id);
+        if (!targetProfile) {
+          await replyText(message, '❌ Target user does not have a profile yet.');
+          return;
+        }
+        if (!referrerProfile) {
+          await replyText(message, '❌ Referrer does not have a profile yet.');
+          return;
+        }
+
+        const existing = targetProfile.referral || {};
+        const nowIso = new Date().toISOString();
+        const prevReferrer = existing.referredByUserId ? String(existing.referredByUserId) : '';
+        const nextReferrer = String(referrer.id);
+
+        const changed = prevReferrer !== nextReferrer;
+
+        const res = applyReferralMutationAndLog({
+          actorUserId: message.author.id,
+          targetUserId: target.id,
+          referralPatch: {
+            referredByUserId: nextReferrer,
+            attributedAt: nowIso,
+            codeUsed: existing.codeUsed || null,
+            conversion: existing.conversion || {},
+            rewards: existing.rewards || {}
+          },
+          eventType: 'referral_attributed',
+          eventData: {
+            referrerUserId: nextReferrer,
+            previousReferrerUserId: prevReferrer || null
+          }
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            changed ? `✅ Referrer set for <@${target.id}>` : `ℹ️ Referrer unchanged for <@${target.id}>`,
+            `**Referrer:** <@${nextReferrer}>`,
+            `**Attributed at:** ${formatIsoDateTime(nowIso)}`
+          ].join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!clearreferrer')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!clearreferrer @user`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const existing = profile.referral || {};
+        const prevReferrer = existing.referredByUserId ? String(existing.referredByUserId) : '';
+
+        if (!prevReferrer && !existing.attributedAt && !existing.codeUsed) {
+          await replyText(message, `ℹ️ <@${userId}> has no referral attribution to clear.`);
+          return;
+        }
+
+        const res = applyReferralMutationAndLog({
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          referralPatch: {
+            referredByUserId: null,
+            attributedAt: null,
+            codeUsed: null,
+            conversion: existing.conversion || {},
+            rewards: existing.rewards || {}
+          },
+          eventType: 'referral_cleared',
+          eventData: {
+            previousReferrerUserId: prevReferrer || null
+          }
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          `🧹 Cleared referral attribution for <@${userId}>${prevReferrer ? ` (was <@${prevReferrer}>)` : ''}.`
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!markreferralconverted')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!markreferralconverted @user <none|joined|paid|refunded>`');
+          return;
+        }
+
+        const parts = content.split(/\s+/).filter(Boolean);
+        const status = normalizeReferralConversionStatus(parts[2]);
+        if (!status) {
+          await replyText(message, '❌ Usage: `!markreferralconverted @user <none|joined|paid|refunded>`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const existing = profile.referral || {};
+        const nowIso = new Date().toISOString();
+
+        const nextConvertedAt =
+          status === 'none'
+            ? null
+            : existing?.conversion?.convertedAt || nowIso;
+
+        const res = applyReferralMutationAndLog({
+          actorUserId: message.author.id,
+          targetUserId: userId,
+          referralPatch: {
+            ...(existing || {}),
+            conversion: {
+              ...(existing.conversion || {}),
+              status,
+              convertedAt: nextConvertedAt
+            }
+          },
+          eventType: 'referral_conversion_updated',
+          eventData: {
+            status,
+            convertedAt: nextConvertedAt
+          }
+        });
+
+        if (!res.ok) {
+          await replyText(message, `❌ Failed: \`${res.reason}\``);
+          return;
+        }
+
+        await replyText(
+          message,
+          [
+            `✅ Referral conversion updated for <@${userId}>`,
+            `**Status:** \`${status}\``,
+            `**Converted at:** ${formatIsoDateTime(nextConvertedAt)}`
+          ].join('\n')
+        );
+        return;
+      }
+
       if (lowerContent.startsWith('!verifyx ')) {
         if (!message.member?.permissions?.has('ManageGuild')) {
           await replyText(message, '❌ You need **Manage Server** permission to use this command.');
@@ -3968,7 +4647,18 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
       `• \`!truebotstats\` — Bot stats including reset/excluded calls\n` +
       `• \`!topcallercheck @user\` — Read-only Top Caller eligibility (Discord-ID-linked calls; draft thresholds)\n` +
       `• \`!approvetopcaller @user\` — Set caller trust to **top_caller**\n` +
-      `• \`!removetopcaller @user\` — Clear **top_caller** → **approved**\n\n`;
+      `• \`!removetopcaller @user\` — Clear **top_caller** → **approved**\n` +
+      `• \`!memberstatus @user\` — View membership/referral state (read-only)\n` +
+      `• \`!syncmemberrole @user\` — Force one-time membership role sync\n` +
+      `• \`!grantmembership @user <tier> <months>\` — Manual grant + extend window\n` +
+      `• \`!extendmembership @user <months>\` — Manual extension\n` +
+      `• \`!compmembership @user <tier> <months?>\` — Gifted/comped access\n` +
+      `• \`!cancelmembership @user\` — Cancel entitlement (removes role)\n` +
+      `• \`!removemembership @user\` — Clear entitlement back to defaults\n` +
+      `• \`!referralstatus @user\` — View referral attribution (read-only)\n` +
+      `• \`!setreferrer @user @referrer\` — Set referral attribution\n` +
+      `• \`!clearreferrer @user\` — Clear referral attribution\n` +
+      `• \`!markreferralconverted @user <status>\` — Update conversion status (manual)\n\n`;
   }
 
   // BOT OWNER ONLY

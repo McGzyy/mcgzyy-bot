@@ -58,7 +58,7 @@
       "lastPublicMentionAt": null
     },
     "createdAt": "2026-03-30T03:19:10.628Z",
-    "updatedAt": "2026-04-06T07:08:57.778Z",
+    "updatedAt": "2026-04-06T10:56:15.882Z",
     "aliases": [
       "id:732566370914664499",
       "username:mcgzyy",
@@ -70,14 +70,76 @@
       "requestedHandle": "McGzyy",
       "requestedAt": "2026-04-01T10:03:18.471Z",
       "verificationCode": "",
-      "status": "verified"
+      "status": "verified",
+      "deniedAt": null,
+      "deniedReason": "",
+      "reviewChannelId": null,
+      "reviewMessageId": null,
+      "reviewPostedAt": null,
+      "reviewResolvedAt": null
     },
     "discordDisplayName": "McGzyy",
     "joinedAt": null,
     "lastSeenAt": null,
     "guildMember": false,
     "rolesSnapshot": [],
-    "xVerifiedAt": null
+    "xVerifiedAt": null,
+    "callerTrustLevel": "none",
+    "topCallerReview": {
+      "dismissedUntil": null,
+      "reviewChannelId": null,
+      "reviewMessageId": null,
+      "reviewPostedAt": null,
+      "reviewResolvedAt": null
+    },
+    "membership": {
+      "status": "active",
+      "tier": "premium",
+      "startsAt": "2026-04-06T10:48:22.700Z",
+      "expiresAt": "2026-05-06T10:48:22.700Z",
+      "source": "sol_payment",
+      "grants": {
+        "referralCreditsMonths": 0
+      },
+      "notes": ""
+    },
+    "referral": {
+      "referredByUserId": null,
+      "codeUsed": null,
+      "attributedAt": null,
+      "conversion": {
+        "status": "none",
+        "convertedAt": null
+      },
+      "rewards": {
+        "creditedMonths": 0
+      }
+    },
+    "payments": {
+      "solMembership": {
+        "status": "approved",
+        "createdAt": "2026-04-06T10:47:31.082Z",
+        "submittedAt": "2026-04-06T10:47:31.082Z",
+        "resolvedAt": "2026-04-06T10:48:22.700Z",
+        "expected": {
+          "walletAddress": "YOUR_SOL_WALLET_ADDRESS_HERE",
+          "amountSol": 0.5,
+          "tier": "premium",
+          "months": 1,
+          "priceLabel": "0.5 SOL for 1 month(s)",
+          "validUntil": "2026-04-06T12:47:31.082Z"
+        },
+        "proof": {
+          "txSignature": "5Ywz7Qm3z2rR9XK7Zk9h8P6fQp3vW8cYt2bN4aD6sF7gH1jK3lM9nP2qR4tV6xZ8c",
+          "explorerUrl": "https://solscan.io/tx/5Ywz7Qm3z2rR9XK7Zk9h8P6fQp3vW8cYt2bN4aD6sF7gH1jK3lM9nP2qR4tV6xZ8c",
+          "note": "this is a test note"
+        },
+        "review": {
+          "handledByUserId": "732566370914664499",
+          "decisionReason": ""
+        }
+      }
+    }
   },
   {
     "discordUserId": "1236736719353548900",

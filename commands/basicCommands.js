@@ -797,7 +797,7 @@ function collectGroupedTraderDetailsFields(scan) {
   const fields = [];
 
   fields.push({
-    name: '🧾 Contract',
+    name: '🧾 CA',
     value: `\`${formatValue(scan.contractAddress, 'Unknown')}\``,
     inline: false
   });
@@ -808,8 +808,8 @@ function collectGroupedTraderDetailsFields(scan) {
     scan.telegram ? `[Telegram](${scan.telegram})` : null
   ]);
   fields.push({
-    name: '🔗 Socials',
-    value: links || '*No links listed*',
+    name: '🔗 Links',
+    value: links || '*—*',
     inline: false
   });
 
@@ -820,9 +820,9 @@ function collectGroupedTraderDetailsFields(scan) {
         : '';
     const redPart =
       scan.redFlags && scan.redFlags.length ? `**Red**\n${formatReasonList(scan.redFlags)}` : '';
-    const gap = greenPart && redPart ? '\n\n' : '';
+    const gap = greenPart && redPart ? '\n' : '';
     fields.push({
-      name: '🚦 Scanner flags',
+      name: '🚦 Flags',
       value: `${greenPart}${gap}${redPart}`,
       inline: false
     });
@@ -837,7 +837,7 @@ function collectGroupedTraderDetailsFields(scan) {
   addLineIfMeaningful(snap, 'Holders', scan.holders, (v) => String(v), { type: 'number', allowZero: false });
   if (snap.length) {
     fields.push({
-      name: '💧 Market snapshot',
+      name: '💧 Market',
       value: snap.join(' · '),
       inline: false
     });
@@ -856,10 +856,8 @@ function collectGroupedTraderDetailsFields(scan) {
   }
 
   fields.push({
-    name: '⚖️ Desk read',
-    value:
-      `**${formatValue(scan.status)}** · **${formatValue(scan.conviction)}**\n` +
-      `Entry **${scan.entryScore}/100** · Grade **${formatValue(scan.grade)}**`,
+    name: '⚖️ Read',
+    value: `**${formatValue(scan.status)}** · ${formatValue(scan.conviction)} · **${scan.entryScore}/100** · **${formatValue(scan.grade)}**`,
     inline: false
   });
 
@@ -867,16 +865,16 @@ function collectGroupedTraderDetailsFields(scan) {
 }
 
 function buildLayoutBHeroDescription(scan, chartPhase) {
-  const mcHead = `## ${formatUsd(scan.marketCap)}`;
-  const mcSub = '*Market cap · snapshot*';
-  const setup =
-    `**${formatValue(scan.alertType, 'Setup')}** · **${scan.entryScore}/100** · **${formatValue(scan.grade, '—')}**`;
-  const pulse = `**Pulse** ${getDisplayMomentum(scan)} · **Risk** ${formatValue(scan.riskLevel)} · **Pressure** ${formatValue(
+  const mcVal = formatUsd(scan.marketCap);
+  const mcHead = `## **${mcVal}**`;
+  const mcSub = '*MC · snapshot*';
+  const setup = `**${formatValue(scan.alertType, 'Setup')}** · ${scan.entryScore}/100 · **${formatValue(scan.grade, '—')}**`;
+  const pulse = `**Pulse** ${getDisplayMomentum(scan)} · **Risk** ${formatValue(scan.riskLevel)} · **Press.** ${formatValue(
     scan.tradePressure,
     '—'
   )}`;
-  const loading = chartPhase === 'loading' ? '\n\n*⏳ Loading chart…*' : '';
-  return `${mcHead}\n${mcSub}\n\n${setup}\n${pulse}${loading}`;
+  const loading = chartPhase === 'loading' ? '\n*⏳ Loading chart…*' : '';
+  return `${mcHead}\n${mcSub}\n${setup}\n${pulse}${loading}`;
 }
 
 /** Call / milestone / performance / alert type / momentum — lives on the details embed (Layout B) or below MC (A/C). */
@@ -904,7 +902,7 @@ function buildTraderDetailsEmbed(scan, showTrackedMeta) {
   const embed = new EmbedBuilder()
     .setColor(0x047857)
     .addFields(...collectGroupedTraderDetailsFields(scan))
-    .setFooter({ text: 'Crypto Scanner · Supporting intel' })
+    .setFooter({ text: 'Crypto Scanner · Intel' })
     .setTimestamp();
 
   if (narrative) {

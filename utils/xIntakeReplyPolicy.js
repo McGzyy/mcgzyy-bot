@@ -6,7 +6,7 @@
 
 const { X_UNVERIFIED_USER_REPLY_MESSAGE } = require('./xInteractionTrust');
 
-/** Case A — unverified / invalid handle (only trust outcomes that imply “not verified”). */
+/** Legacy copy retained for future use (not used by current reply policy). */
 const X_INTAKE_REPLY_UNVERIFIED = X_UNVERIFIED_USER_REPLY_MESSAGE;
 
 function normalizeHandleForReply(raw) {
@@ -42,7 +42,7 @@ function formatMcForXReply(marketCap) {
 }
 
 /**
- * Case B — success line: "@handle called {TOKEN} at $MC"
+ * Success line (new first call only).
  * @param {string} authorHandle — X username (no @ prefix required)
  * @param {string} tokenName
  * @param {number} marketCap
@@ -51,18 +51,18 @@ function buildXMentionSuccessReplyText(authorHandle, tokenName, marketCap) {
   const h = normalizeHandleForReply(authorHandle);
   const t = sanitizeTokenNameForReply(tokenName);
   const mc = formatMcForXReply(marketCap);
-  return `@${h} called ${t} at ${mc}`;
+  return `@${h} got the first call on ${t} at ${mc} MC 📍`;
 }
 
 /**
- * Strict anti-spam: reply only for (A) unverified prompt or (B) brand-new tracked row after full success.
+ * Strict anti-spam (public X replies): reply only for a brand-new tracked row after full success.
  *
  * @param {object|null} result — processVerifiedXMentionCallIntake return value
  * @param {{ authorHandle: string }} context — same X author username used for intake
  * @returns {{
  *   shouldReply: boolean,
  *   text: string | null,
- *   case: 'unverified' | 'success' | 'silent',
+ *   case: 'success' | 'silent',
  *   internalReason?: string
  * }}
  */
@@ -75,24 +75,6 @@ function decideXMentionIntakeReply(result, context = {}) {
       text: null,
       case: 'silent',
       internalReason: 'duplicate_or_missing_result'
-    };
-  }
-
-  if (result.trustDenied && result.trust && !result.trust.allowed) {
-    const r = String(result.reason || result.trust.reason || '');
-    if (r === 'not_verified' || r === 'invalid_handle') {
-      return {
-        shouldReply: true,
-        text: X_INTAKE_REPLY_UNVERIFIED,
-        case: 'unverified',
-        internalReason: r
-      };
-    }
-    return {
-      shouldReply: false,
-      text: null,
-      case: 'silent',
-      internalReason: `trust_${r || 'denied'}`
     };
   }
 
@@ -114,7 +96,7 @@ function decideXMentionIntakeReply(result, context = {}) {
     };
   }
 
-  if (result.reason === 'tracked' && result.wasNewCall === true) {
+  if (result.reason === 'tracked' && result.wasNewCall === true && result.wasReactivated !== true) {
     const tc = result.trackedCall || {};
     const mc = Number(tc.latestMarketCap ?? tc.firstCalledMarketCap ?? 0);
     const text = buildXMentionSuccessReplyText(authorHandle, tc.tokenName, mc);

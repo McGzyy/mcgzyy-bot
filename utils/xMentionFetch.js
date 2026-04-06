@@ -126,10 +126,16 @@ async function fetchXMentionCandidatesFromApi() {
     };
 
     const path = `/users/${encodeURIComponent(userId)}/mentions`;
+    const t0 = Date.now();
     const data = await xApiGet(path, params);
+    const durationMs = Date.now() - t0;
 
     const rawCount = Array.isArray(data?.data) ? data.data.length : 0;
     const candidates = mapMentionPayloadToCandidates(data);
+    const dropped = Math.max(0, rawCount - candidates.length);
+    console.log(
+      `[XFetch] rawTweets=${rawCount} mapped=${candidates.length} dropped=${dropped} durationMs=${durationMs}`
+    );
     console.log(
       `[XMentionFetch] GET /users/${userId}/mentions → raw tweets=${rawCount}, mapped candidates=${candidates.length}`
     );

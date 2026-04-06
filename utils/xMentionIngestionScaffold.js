@@ -3,11 +3,12 @@
  *
  * Env:
  *   X_MENTION_INGESTION_ENABLED=1|true|yes  — start interval runner.
- *   X_MENTION_INGEST_POLL_MS=<ms>             — min 60000, default 300000 (5 min). Not aggressive polling.
+ *   X_MENTION_POLL_INTERVAL_MS=<ms>           — min 15000, default 300000 (5 min). Not aggressive polling.
  *   X_MENTION_POST_REPLIES=1|true|yes         — if set, may call createPost for reply policy outcomes (still obeys X_POST_DRY_RUN / API creds).
  *   DISCORD_GUILD_ID / X_INTAKE_GUILD_ID      — guild for intake membership checks (same as intake).
  *   X API user-context creds (same as posting): X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET
  *   Optional: X_BOT_USER_ID (skip GET /2/users/me), X_MENTION_FETCH_MAX (5–100, default 10)
+ *   X_LOG_VERBOSE=1|true|yes — full tweet text in [XActivity] lines (utils/xActivityLog.js)
  *
  * Layers:
  *   1) fetchXMentionCandidates() — X API v2 GET /2/users/:id/mentions (see xMentionFetch.js); override via setXMentionCandidateProvider().
@@ -22,6 +23,7 @@ const {
   fetchXMentionCandidatesFromApi,
   hasUserContextCredentials
 } = require('./xMentionFetch');
+const { emitXMentionStructuredLog } = require('./xActivityLog');
 
 function truthyEnv(name) {
   return /^1|true|yes$/i.test(String(process.env[name] || '').trim());
@@ -36,9 +38,14 @@ function isXMentionReplyPostingEnabled() {
 }
 
 function pollIntervalMs() {
-  const n = Number(process.env.X_MENTION_INGEST_POLL_MS || 300000);
-  if (!Number.isFinite(n)) return 300000;
-  return Math.max(60000, Math.floor(n));
+  const raw = process.env.X_MENTION_POLL_INTERVAL_MS;
+  const fallback = 300000;
+  const n =
+    raw != null && String(raw).trim() !== ''
+      ? Number(String(raw).trim())
+      : fallback;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(15000, Math.floor(n));
 }
 
 /**
@@ -76,7 +83,6 @@ function resolveDefaultGuild(client) {
  */
 async function processSingleCandidate(client, guild, candidate, options = {}) {
   const dryRun = options.dryRun === true;
-  const logTick = options.logIngestionTick === true;
   const { authorHandle, tweetText, tweetId, replyToTweetId } = candidate;
   if (!authorHandle || !tweetText || !tweetId) {
     console.warn('[XMentionIngest] Skip candidate — missing authorHandle, tweetText, or tweetId');
@@ -90,19 +96,6 @@ async function processSingleCandidate(client, guild, candidate, options = {}) {
 
   const plan = decideXMentionIntakeReply(result, { authorHandle });
   const targetReplyId = replyToTweetId || tweetId;
-
-  const silentIgnore = result.reason === 'no_explicit_call_hashtag';
-  if (logTick && !silentIgnore) {
-    console.log('[XMentionIngest] candidate intake', {
-      tweetId,
-      authorHandle,
-      reason: result.reason,
-      success: !!result.success,
-      duplicate: !!(result.duplicate || result.alreadyProcessed),
-      trustDenied: !!result.trustDenied,
-      tracked: result.reason === 'tracked'
-    });
-  }
 
   return { result, plan, targetReplyId, dryRun };
 }
@@ -121,6 +114,7 @@ async function runInjectedMentionOnce(client, guild, candidate, options = {}) {
 
   const bundle = await processSingleCandidate(client, guild, candidate, { dryRun });
   if (!bundle) {
+    emitXMentionStructuredLog(candidate, null, null, { attempted: false });
     return { ok: false, error: 'invalid_candidate' };
   }
 
@@ -131,6 +125,7 @@ async function runInjectedMentionOnce(client, guild, candidate, options = {}) {
       plan: bundle.plan,
       targetReplyId: bundle.targetReplyId
     });
+    emitXMentionStructuredLog(candidate, bundle.result, bundle.plan, replyOutcome);
   } else {
     replyOutcome = {
       attempted: false,
@@ -148,6 +143,7 @@ async function runInjectedMentionOnce(client, guild, candidate, options = {}) {
       replyOutcome.note +=
         ' Policy may still want a reply on full apply (e.g. unverified / tracked + new case).';
     }
+    emitXMentionStructuredLog(candidate, bundle.result, bundle.plan, replyOutcome);
   }
 
   if (bundle.result?.reason !== 'no_explicit_call_hashtag') {
@@ -249,27 +245,19 @@ async function runIngestionTick(client) {
   console.log(`[XMentionIngest] poll: fetched ${n} candidate(s)`);
   if (n === 0) {
     console.log('[XMentionIngest] poll: 0 mentions — nothing to process this cycle');
-  } else {
-    for (const c of candidates) {
-      console.log(`[XMentionIngest]   · tweetId=${c.tweetId} @${c.authorHandle}`);
-    }
   }
 
   for (const c of candidates) {
     try {
-      const bundle = await processSingleCandidate(client, guild, c, { logIngestionTick: true });
-      if (!bundle) continue;
-
-      const { result, plan, targetReplyId } = bundle;
-      if (result.reason !== 'no_explicit_call_hashtag') {
-        console.log('[XMentionIngest] policy', {
-          tweetId: c.tweetId,
-          replyCase: plan.case,
-          shouldReply: plan.shouldReply
-        });
+      const bundle = await processSingleCandidate(client, guild, c);
+      if (!bundle) {
+        emitXMentionStructuredLog(c, null, null, { attempted: false });
+        continue;
       }
 
-      await maybePostIntakeReply({ plan, targetReplyId });
+      const { plan, targetReplyId } = bundle;
+      const replyOutcome = await maybePostIntakeReply({ plan, targetReplyId });
+      emitXMentionStructuredLog(c, bundle.result, plan, replyOutcome);
     } catch (err) {
       console.error('[XMentionIngest] candidate error:', c?.tweetId, err.message);
     }
@@ -297,7 +285,7 @@ function startXMentionIngestionScaffold(client) {
   const maxBatch = Math.min(100, Math.max(5, Number.isFinite(rawMax) ? Math.floor(rawMax) : 10));
   console.log(
     `[XMentionIngest] Scaffold **enabled** — poll every ${ms}ms; candidates from X API v2 GET /users/:id/mentions ` +
-      `(max ${maxBatch} per poll, min interval 60s). ` +
+      `(max ${maxBatch} per poll, min interval 15s). ` +
       `Replies: ${isXMentionReplyPostingEnabled() ? 'ALLOWED (if createPost succeeds)' : 'OFF (X_MENTION_POST_REPLIES)'}`
   );
 

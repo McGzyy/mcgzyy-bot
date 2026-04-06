@@ -34,6 +34,15 @@ const {
 
 const X_CALL_INTAKE_SOURCE = 'x_mention';
 
+/**
+ * Record tweet id after a live intake decision so polls after restart do not re-run the pipeline.
+ * Skipped for dry-run and when skipDedupeCheck (tests / harness).
+ */
+function touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun) {
+  if (skipDedupeCheck || !dedupeId || dryRun) return;
+  markXIntakeTweetProcessed(dedupeId);
+}
+
 function str(v) {
   return v == null ? '' : String(v).trim();
 }
@@ -103,7 +112,8 @@ function buildCallerContextFromVerifiedProfile(profile) {
  * Pass options.guild (e.g. message.guild) and/or options.client + DISCORD_GUILD_ID / X_INTAKE_GUILD_ID, or rely on a single cached guild.
  *
  * Dedupe: pass `tweetId` (or `eventId`) on payload or options. If set, already-processed IDs short-circuit before intake.
- * Successful **tracked** applies (not dry-run) record the id. Omit id to skip dedupe (e.g. tests).
+ * Live runs (not dry-run) persist the id to disk after **any** terminal outcome so restarts do not re-run intake.
+ * Omit id or pass skipDedupeCheck to skip persistence (e.g. tests).
  *
  * @param {{ authorHandle: string, tweetText: string, tweetId?: string, eventId?: string }} payload
  * @param {{
@@ -155,6 +165,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
 
   const trust = getXVerifiedTrustStatus(authorHandle);
   if (!trust.allowed) {
+    touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
     return {
       success: false,
       trustDenied: true,
@@ -169,6 +180,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
 
   const discordUserIdForGuild = trust.discordUserId || trust.profile?.discordUserId || null;
   if (!str(discordUserIdForGuild)) {
+    touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
     return {
       success: false,
       reason: 'missing_discord_user_id_for_guild_check',
@@ -194,6 +206,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
           ? X_INTAKE_NOT_IN_GUILD_MESSAGE
           : null;
 
+      touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
       return {
         success: false,
         trustDenied: false,
@@ -210,6 +223,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
 
   const ca = extractFirstSolanaCaFromText(tweetText);
   if (!ca) {
+    touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
     return {
       success: false,
       reason: 'no_solana_ca_in_text',
@@ -221,6 +235,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
   }
 
   if (!isLikelySolanaCA(ca)) {
+    touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
     return {
       success: false,
       reason: 'invalid_solana_ca',
@@ -233,6 +248,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
 
   const callerContext = buildCallerContextFromVerifiedProfile(trust.profile);
   if (!callerContext) {
+    touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
     return {
       success: false,
       reason: 'missing_discord_user_on_profile',
@@ -244,9 +260,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
   }
 
   if (!hasXMentionExplicitCallHashtag(tweetText)) {
-    if (!skipDedupeCheck && dedupeId) {
-      markXIntakeTweetProcessed(dedupeId);
-    }
+    touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
     return {
       success: false,
       reason: 'no_explicit_call_hashtag',
@@ -277,6 +291,7 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     realData = await runQuickCa(ca);
     scan = normalizeRealDataToScan(realData);
   } catch (err) {
+    touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
     return {
       success: false,
       reason: 'token_fetch_failed',
@@ -329,7 +344,10 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
         applyResult.trackedCall,
         applyResult.wasNewCall,
         applyResult.wasReactivated,
-        { chartPhase: needsDeferredChart ? 'loading' : 'none' }
+        {
+          chartPhase: needsDeferredChart ? 'loading' : 'none',
+          xOriginHandle: authorHandle
+        }
       );
 
       if (!needsDeferredChart) {
@@ -351,17 +369,16 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
           scan,
           trackedCall: applyResult.trackedCall,
           wasNewCall: applyResult.wasNewCall,
-          wasReactivated: applyResult.wasReactivated
+          wasReactivated: applyResult.wasReactivated,
+          xOriginHandle: authorHandle
         });
       }
     } catch (err) {
-      console.error('[XIntake] #user-calls mirror failed:', err.message);
+      console.error('[XIntake] user-calls / token-calls mirror failed:', err.message);
     }
   }
 
-  if (!skipDedupeCheck && dedupeId) {
-    markXIntakeTweetProcessed(dedupeId);
-  }
+  touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
 
   return {
     success: true,

@@ -67,6 +67,16 @@ function formatReasonList(reasons) {
   return reasons.map(reason => `• ${reason}`).join('\n');
 }
 
+/** Compact single-line rows for Green/Red flag lists (details + single-embed layouts). */
+function formatScanFlagsInline(scan) {
+  const greens = Array.isArray(scan.greenFlags) ? scan.greenFlags.filter(Boolean) : [];
+  const reds = Array.isArray(scan.redFlags) ? scan.redFlags.filter(Boolean) : [];
+  const lines = [];
+  if (greens.length) lines.push(`🟢 **Green:** ${greens.join(' • ')}`);
+  if (reds.length) lines.push(`🔴 **Red:** ${reds.join(' • ')}`);
+  return lines.join('\n');
+}
+
 function formatProfileName(profile) {
   if (!profile) return 'Balanced';
   return profile.charAt(0).toUpperCase() + profile.slice(1);
@@ -671,12 +681,18 @@ function createCallStatusLine(scan) {
     }
   }
 
+  const xHandle = scan.xMentionAttributionHandle
+    ? String(scan.xMentionAttributionHandle).trim().replace(/^@+/, '')
+    : '';
+
   const sourceLine =
     scan.callSourceType === 'watch_only'
       ? `👀 **Watch Only • No caller credit**`
       : scan.callSourceType === 'bot_call'
         ? `🤖 **Bot Tracked Coin**`
-        : `📍 **Called by ${callerName} @ ${formatUsd(scan.firstCalledMarketCap)}**`;
+        : xHandle
+          ? `🐦 **Called via X by @${xHandle} @ ${formatCompactUsd(scan.firstCalledMarketCap)} MC**`
+          : `📍 **Called by ${callerName} @ ${formatUsd(scan.firstCalledMarketCap)}**`;
 
   return `${statusLine}\n${sourceLine}\n\n`;
 }
@@ -733,14 +749,15 @@ function collectTraderScanEmbedFields(scan) {
     });
   }
 
-  if ((scan.greenFlags && scan.greenFlags.length) || (scan.redFlags && scan.redFlags.length)) {
-    fields.push({
-      name: '🚨 Scan Flags',
-      value:
-        `**Green Flags:**\n${formatReasonList(scan.greenFlags)}\n\n` +
-        `**Red Flags:**\n${formatReasonList(scan.redFlags)}`,
-      inline: false
-    });
+  {
+    const flagsVal = formatScanFlagsInline(scan);
+    if (flagsVal) {
+      fields.push({
+        name: '🚨 Scan Flags',
+        value: flagsVal,
+        inline: false
+      });
+    }
   }
 
   const marketLines = [];
@@ -813,19 +830,15 @@ function collectGroupedTraderDetailsFields(scan) {
     inline: false
   });
 
-  if ((scan.greenFlags && scan.greenFlags.length) || (scan.redFlags && scan.redFlags.length)) {
-    const greenPart =
-      scan.greenFlags && scan.greenFlags.length
-        ? `**Green**\n${formatReasonList(scan.greenFlags)}`
-        : '';
-    const redPart =
-      scan.redFlags && scan.redFlags.length ? `**Red**\n${formatReasonList(scan.redFlags)}` : '';
-    const gap = greenPart && redPart ? '\n' : '';
-    fields.push({
-      name: '🚦 Flags',
-      value: `${greenPart}${gap}${redPart}`,
-      inline: false
-    });
+  {
+    const flagsVal = formatScanFlagsInline(scan);
+    if (flagsVal) {
+      fields.push({
+        name: '🚦 Flags',
+        value: flagsVal,
+        inline: false
+      });
+    }
   }
 
   const snap = [];
@@ -1361,6 +1374,7 @@ async function handleDeepScanReply(message, contractAddress, withButtons = false
 
 /**
  * Same content + embed as `!call` / `handleCallCommand` (for channel mirror + X intake).
+ * @param {{ chartPhase?: string, layout?: string, xOriginHandle?: string }} [embedExtras] — xOriginHandle: X-only; folds into embed “Called by” line, not message content.
  * @returns {{ content: string, embeds: import('discord.js').EmbedBuilder[], chartEmbedIndex: number }}
  */
 function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated, embedExtras = {}) {
@@ -1375,6 +1389,10 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
   const { greenFlags, redFlags } = buildScanFlags(realData);
 
   const chartPhase = embedExtras.chartPhase === 'loading' ? 'loading' : 'none';
+
+  const xH = embedExtras.xOriginHandle;
+  const xMentionAttributionHandle =
+    xH != null && String(xH).trim() ? String(xH).trim().replace(/^@+/, '') : '';
 
   const { embeds, chartEmbedIndex } = buildTraderScanEmbeds(
     {
@@ -1392,7 +1410,8 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
       isReactivated: wasReactivated,
       performancePercent,
       milestoneHit,
-      isNewMilestone: false
+      isNewMilestone: false,
+      ...(xMentionAttributionHandle ? { xMentionAttributionHandle } : {})
     },
     {
       showTrackedMeta: true,
@@ -1401,8 +1420,10 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
     }
   );
 
+  const content = '📍 Coin officially called and now being tracked.';
+
   return {
-    content: '📍 Coin officially called and now being tracked.',
+    content,
     embeds,
     chartEmbedIndex
   };
@@ -1446,11 +1467,14 @@ async function augmentNewUserCallPayloadWithChart(
 }
 
 async function runDeferredUserCallChartEdits(messages, ctx) {
-  const { realData, scan, trackedCall, wasNewCall, wasReactivated } = ctx;
+  const { realData, scan, trackedCall, wasNewCall, wasReactivated, xOriginHandle } = ctx;
 
   const buildFinalPayload = () =>
     buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated, {
-      chartPhase: 'none'
+      chartPhase: 'none',
+      ...(xOriginHandle != null && String(xOriginHandle).trim()
+        ? { xOriginHandle }
+        : {})
     });
 
   const safeEdit = async (payload) => {
@@ -1482,7 +1506,7 @@ async function runDeferredUserCallChartEdits(messages, ctx) {
 }
 
 /**
- * Post the same announcement as `!call` to #user-calls (new user calls only).
+ * Post the same announcement as `!call` to #user-calls or #token-calls (new user calls only).
  * @param {import('discord.js').Guild|null} guild
  * @param {{ content: string, embeds: unknown[] }} payload
  * @param {{ returnMessage?: boolean }} [options]
@@ -1493,16 +1517,24 @@ async function announceNewUserCallInUserCallsChannel(guild, payload, options = {
     return { posted: false, reason: 'no_guild' };
   }
 
-  const ch = guild.channels.cache.find(
-    c =>
-      c &&
-      typeof c.isTextBased === 'function' &&
-      c.isTextBased() &&
-      String(c.name || '').toLowerCase() === 'user-calls'
-  );
+  const mirrorNames = ['user-calls', 'token-calls'];
+  let ch = null;
+  for (const name of mirrorNames) {
+    ch = guild.channels.cache.find(
+      c =>
+        c &&
+        typeof c.isTextBased === 'function' &&
+        c.isTextBased() &&
+        String(c.name || '').toLowerCase() === name
+    );
+    if (ch) break;
+  }
 
   if (!ch) {
-    console.warn('[UserCalls] No #user-calls text channel in guild:', guild.name || guild.id);
+    console.warn(
+      '[UserCalls] No #user-calls or #token-calls text channel in guild:',
+      guild.name || guild.id
+    );
     return { posted: false, reason: 'no_channel' };
   }
 

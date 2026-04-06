@@ -1,6 +1,6 @@
 /**
- * Persist processed X tweet / event IDs so live mention intake does not run twice for the same item.
- * Used by xCallIntakeService; no polling or posting here.
+ * Persist seen X tweet / event IDs so live mention intake does not re-run for the same id after restart.
+ * xCallIntakeService records an id after each completed live evaluation (not dry-run).
  */
 
 const fs = require('fs');

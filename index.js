@@ -1165,16 +1165,16 @@ async function upsertSolMembershipReviewCard(guild, userId) {
   const review = claim.review || {};
 
   const content = [
-    '💳 **SOL Membership Claim**',
-    `**User:** <@${userId}>`,
-    `**Plan:** \`${String(expected.tier || SOL_MEMBERSHIP_TIER)}\` • **${String(expected.months || SOL_MEMBERSHIP_MONTHS)} month(s)** • **${expected.priceLabel || formatSolAmount(expected.amountSol)}`,
-    `**Wallet:** \`${expected.walletAddress || SOL_MEMBERSHIP_WALLET || 'NOT_SET'}\``,
+    '💳 **Premium Payment Claim (SOL)**',
+    `**Member:** <@${userId}>`,
+    `**Plan:** \`${String(expected.tier || SOL_MEMBERSHIP_TIER)}\` • **${String(expected.months || SOL_MEMBERSHIP_MONTHS)} month(s)** • **${expected.priceLabel || formatSolAmount(expected.amountSol)}**`,
+    `**Destination wallet:** \`${expected.walletAddress || SOL_MEMBERSHIP_WALLET || 'NOT_SET'}\``,
     '',
-    `**Tx:** \`${String(proof.txSignature || '').slice(0, 180)}\``,
+    `**Tx signature:** \`${String(proof.txSignature || '').slice(0, 180)}\``,
     proof.explorerUrl ? `**Explorer:** ${proof.explorerUrl}` : null,
     proof.note ? `**Note:** ${String(proof.note).slice(0, 300)}` : null,
     '',
-    `**Status:** \`${String(claim.status || 'none')}\``,
+    `**Queue status:** \`${String(claim.status || 'none')}\``,
     claim.submittedAt ? `**Submitted:** ${formatIsoDateTime(claim.submittedAt)}` : null
   ].filter(Boolean).join('\n');
 
@@ -2928,14 +2928,19 @@ let updated = null;
         const post = await upsertSolMembershipReviewCard(interaction.guild, userId);
         if (!post.ok) {
           await interaction.reply({
-            content: '⚠️ Claim saved, but could not post to #mod-approvals. Please contact a mod.',
+            content:
+              '✅ Payment proof saved.\n' +
+              '⚠️ We could not route it to the review queue automatically. Please contact a moderator and provide your tx signature.',
             ephemeral: true
           });
           return;
         }
 
         await interaction.reply({
-          content: '✅ Payment claim submitted. A mod will review it in **#mod-approvals**.',
+          content:
+            '✅ **Payment claim submitted**.\n' +
+            'A moderator will review your transaction signature. Once approved, you’ll automatically receive the Premium member role.\n' +
+            '_This is manual review in v1 — please allow a bit of time._',
           ephemeral: true
         });
         return;
@@ -4886,7 +4891,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     `• \`!help\` / \`!commands\` — This list\n` +
     `• \`!ping\` — Quick alive check\n` +
     `• \`!status\` — Bot status\n` +
-    `• \`!membership\` — View membership plan + submit SOL payment claim\n` +
+    `• \`!membership\` / \`!premium\` / \`!plans\` — View Premium plan + submit SOL payment claim\n` +
     `• \`!ca <ca>\` — Compact contract intel (no tracking)\n` +
     `• \`!scan\` — Random scanner-style test\n` +
     `• \`!scan <ca>\` — Deep scan a token (no tracking)\n` +
@@ -5742,7 +5747,7 @@ if (lowerContent.startsWith('!truestats')) {
         return;
       }
 
-      if (lowerContent === '!membership') {
+      if (lowerContent === '!membership' || lowerContent === '!premium' || lowerContent === '!plans') {
         upsertUserProfile({
           discordUserId: message.author.id,
           username: message.author.username,
@@ -5750,7 +5755,7 @@ if (lowerContent.startsWith('!truestats')) {
         });
 
         if (!SOL_MEMBERSHIP_WALLET) {
-          await replyText(message, '⚠️ Membership payments are not configured yet.');
+          await replyText(message, '⚠️ McGBot Premium is not configured yet.');
           return;
         }
 
@@ -5758,18 +5763,46 @@ if (lowerContent.startsWith('!truestats')) {
         const claimStatus = String(profile?.payments?.solMembership?.status || 'none').toLowerCase();
         const pending = ['pending', 'submitted', 'under_review'].includes(claimStatus);
 
-        const contentOut = [
-          '💳 **Membership (SOL payment — manual mod review)**',
-          `**Wallet:** \`${SOL_MEMBERSHIP_WALLET}\``,
-          `**Plan:** \`${SOL_MEMBERSHIP_TIER}\` • **${SOL_MEMBERSHIP_MONTHS} month(s)**`,
-          `**Price:** **${formatSolAmount(SOL_MEMBERSHIP_AMOUNT_SOL)}**`,
-          '',
-          'Send the payment, then submit your **transaction signature** for review.',
-          pending ? `⚠️ You already have a claim in progress (\`${claimStatus}\`).` : ''
-        ].filter(Boolean).join('\n');
+        const embed = new EmbedBuilder()
+          .setColor(0x22c55e)
+          .setTitle('💳 McGBot Premium')
+          .setDescription(
+            [
+              '**Premium is a paid membership** that grants you the Premium member role.',
+              '',
+              '_Payments are reviewed manually in v1 (no automatic on-chain verification yet)._'
+            ].join('\n')
+          )
+          .addFields(
+            {
+              name: 'Plan',
+              value: `**Tier:** \`${SOL_MEMBERSHIP_TIER}\`\n**Length:** **${SOL_MEMBERSHIP_MONTHS} month(s)**\n**Price:** **${formatSolAmount(SOL_MEMBERSHIP_AMOUNT_SOL)}**`,
+              inline: true
+            },
+            {
+              name: 'Pay to',
+              value: `\`${SOL_MEMBERSHIP_WALLET}\``,
+              inline: false
+            },
+            {
+              name: 'How it works',
+              value: [
+                '1) Send the exact amount to the wallet above',
+                '2) Click **Submit Tx** and paste the transaction signature',
+                '3) After approval, your Premium role will be assigned'
+              ].join('\n'),
+              inline: false
+            }
+          )
+          .setFooter({
+            text: pending
+              ? `Claim status: ${claimStatus} (already submitted)`
+              : 'Tip: keep your tx signature handy after sending.'
+          })
+          .setTimestamp();
 
         await message.reply({
-          content: contentOut,
+          embeds: [embed],
           components: pending ? [] : buildSolMembershipSubmitButtons(),
           allowedMentions: { repliedUser: false }
         });

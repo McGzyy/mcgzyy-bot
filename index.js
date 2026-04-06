@@ -107,6 +107,7 @@ const {
   previewMemberProfileBackfill,
   runMemberProfileBackfill,
   getUserProfileByDiscordId,
+  updateUserProfile,
   CALLER_TRUST_LEVELS,
   normalizeCallerTrustLevel,
   getCallerTrustLevel,
@@ -135,6 +136,7 @@ const {
 } = require('./utils/xMentionIngestionScaffold');
 
 const { getModQueuesSnapshot } = require('./utils/modQueueService');
+const { logMembershipEvent, hasTxSignatureInMembershipEvents } = require('./utils/membershipEventLog');
 const { parseProCallCommandArgs } = require('./utils/proCallText');
 const { extractFirstSolanaCaFromText } = require('./utils/solanaAddress');
 
@@ -143,6 +145,13 @@ function parseMentionedUserIdFromContent(message) {
   if (mentioned?.id) return String(mentioned.id);
   const m = String(message?.content || '').match(/<@!?(\\d+)>/);
   return m ? String(m[1]) : '';
+}
+
+function formatIsoDateTime(iso) {
+  if (!iso) return 'N/A';
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return 'N/A';
+  return t.toISOString().replace('T', ' ').replace('Z', ' UTC');
 }
 
 const client = new Client({
@@ -163,6 +172,11 @@ const X_VERIFY_CHANNEL_NAME = 'verify-x';
 const X_VERIFIED_ROLE_NAME = 'X Verified';
 const MOD_CHANNEL_NAME = 'mod-chat';
 const MOD_APPROVALS_CHANNEL_NAME = 'mod-approvals';
+
+const SOL_MEMBERSHIP_WALLET = String(process.env.SOL_MEMBERSHIP_WALLET || '').trim();
+const SOL_MEMBERSHIP_AMOUNT_SOL = Number(process.env.SOL_MEMBERSHIP_AMOUNT_SOL || 0.5);
+const SOL_MEMBERSHIP_TIER = String(process.env.SOL_MEMBERSHIP_TIER || 'premium').trim() || 'premium';
+const SOL_MEMBERSHIP_MONTHS = Number(process.env.SOL_MEMBERSHIP_MONTHS || 1);
 
 const BOT_SETTINGS_PATH = path.join(__dirname, 'data', 'botSettings.json');
 
@@ -938,6 +952,153 @@ function buildTopCallerCandidateContent({ userId, trust, report }) {
   ].join('\n');
 }
 
+function buildSolMembershipClaimModal() {
+  return new ModalBuilder()
+    .setCustomId('solmember_claim_modal')
+    .setTitle('Submit SOL Payment Proof')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tx_signature')
+          .setLabel('Transaction signature')
+          .setPlaceholder('Paste the tx signature (no screenshots)')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(200)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tx_note')
+          .setLabel('Optional note for mods')
+          .setPlaceholder('Optional: anything helpful for verification')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setMaxLength(300)
+      )
+    );
+}
+
+function buildSolMembershipSubmitButtons() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('solmember_open_claim_modal')
+        .setLabel('Submit Tx')
+        .setStyle(ButtonStyle.Success)
+    )
+  ];
+}
+
+function solExplorerUrl(txSignature) {
+  const sig = String(txSignature || '').trim();
+  if (!sig) return '';
+  return `https://solscan.io/tx/${encodeURIComponent(sig)}`;
+}
+
+function formatSolAmount(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num) || num <= 0) return '—';
+  return `${num} SOL`;
+}
+
+function computeMembershipExtension(nowMs, currentExpiresAt, months) {
+  const base = (() => {
+    const t = currentExpiresAt ? new Date(currentExpiresAt).getTime() : 0;
+    if (Number.isFinite(t) && t > nowMs) return t;
+    return nowMs;
+  })();
+
+  const m = Number(months);
+  const monthsSafe = Number.isFinite(m) && m > 0 ? Math.floor(m) : 1;
+  const days = 30 * monthsSafe;
+  return new Date(base + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function isSignatureAlreadyClaimed(txSignature) {
+  const sig = String(txSignature || '').trim();
+  if (!sig) return false;
+
+  // Check profiles (best-effort, cheap enough for now).
+  const profiles = getAllUserProfiles();
+  for (const p of profiles) {
+    const existingSig = String(p?.payments?.solMembership?.proof?.txSignature || '').trim();
+    if (existingSig && existingSig === sig) return true;
+  }
+
+  // Check membership events (best-effort text scan).
+  if (hasTxSignatureInMembershipEvents(sig)) return true;
+
+  return false;
+}
+
+async function upsertSolMembershipReviewCard(guild, userId) {
+  const profile = getUserProfileByDiscordId(userId);
+  if (!profile) return { ok: false, reason: 'no_profile' };
+
+  const modApprovals = getModApprovalsChannel(guild);
+  if (!modApprovals) return { ok: false, reason: 'missing_mod_approvals_channel' };
+
+  const claim = profile?.payments?.solMembership || {};
+  const expected = claim.expected || {};
+  const proof = claim.proof || {};
+  const review = claim.review || {};
+
+  const content = [
+    '💳 **SOL Membership Claim**',
+    `**User:** <@${userId}>`,
+    `**Plan:** \`${String(expected.tier || SOL_MEMBERSHIP_TIER)}\` • **${String(expected.months || SOL_MEMBERSHIP_MONTHS)} month(s)** • **${expected.priceLabel || formatSolAmount(expected.amountSol)}`,
+    `**Wallet:** \`${expected.walletAddress || SOL_MEMBERSHIP_WALLET || 'NOT_SET'}\``,
+    '',
+    `**Tx:** \`${String(proof.txSignature || '').slice(0, 180)}\``,
+    proof.explorerUrl ? `**Explorer:** ${proof.explorerUrl}` : null,
+    proof.note ? `**Note:** ${String(proof.note).slice(0, 300)}` : null,
+    '',
+    `**Status:** \`${String(claim.status || 'none')}\``,
+    claim.submittedAt ? `**Submitted:** ${formatIsoDateTime(claim.submittedAt)}` : null
+  ].filter(Boolean).join('\n');
+
+  const buttons = [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`solmember_approve:${userId}`)
+        .setLabel('Approve')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`solmember_deny:${userId}`)
+        .setLabel('Deny')
+        .setStyle(ButtonStyle.Danger)
+    )
+  ];
+
+  let posted = null;
+  if (review.messageId && review.channelId === modApprovals.id) {
+    const existing = await modApprovals.messages.fetch(String(review.messageId)).catch(() => null);
+    if (existing) {
+      await existing.edit({ content, components: buttons }).catch(() => null);
+      posted = existing;
+    }
+  }
+
+  if (!posted) {
+    posted = await modApprovals.send({ content, components: buttons });
+  }
+
+  updateUserProfile(userId, {
+    payments: {
+      solMembership: {
+        status: 'under_review',
+        review: {
+          channelId: posted.channel.id,
+          messageId: posted.id,
+          postedAt: new Date().toISOString()
+        }
+      }
+    }
+  });
+
+  return { ok: true, messageId: posted.id };
+}
+
 function buildApprovalButtons(contractAddress) {
   return [
     new ActionRowBuilder().addComponents(
@@ -1376,6 +1537,38 @@ async function cleanupResolvedModApprovals() {
 
       if (profile.discordUserId) {
         clearTopCallerReviewMessageMeta(profile.discordUserId);
+      }
+    }
+
+    // SOL membership claim review messages: delete once resolved for 24h.
+    for (const profile of profiles) {
+      const p = profile?.payments?.solMembership || {};
+      const rv = p.review || {};
+      if (!rv.messageId || !rv.channelId) continue;
+      if (String(rv.channelId) !== String(modApprovals.id)) continue;
+
+      const status = String(p.status || 'none').toLowerCase();
+      if (['pending', 'submitted', 'under_review'].includes(status)) continue;
+
+      const resolvedAt = new Date(p.resolvedAt || 0).getTime();
+      if (!Number.isFinite(resolvedAt) || resolvedAt <= 0) continue;
+      if (now - resolvedAt < TTL_MS) continue;
+
+      const msg = await modApprovals.messages.fetch(String(rv.messageId)).catch(() => null);
+      if (msg) await msg.delete().catch(() => null);
+
+      if (profile.discordUserId) {
+        updateUserProfile(profile.discordUserId, {
+          payments: {
+            solMembership: {
+              review: {
+                channelId: null,
+                messageId: null,
+                postedAt: null
+              }
+            }
+          }
+        });
       }
     }
   } catch (error) {
@@ -1982,8 +2175,133 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
+      if (parts[0] === 'solmember_approve' || parts[0] === 'solmember_deny') {
+        if (!interaction.member?.permissions?.has('ManageGuild')) {
+          await interaction.reply({ content: '❌ Only mods/admins can use this action.', ephemeral: true });
+          return;
+        }
+
+        const userId = parts[1];
+        if (!userId) return;
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await interaction.reply({ content: '❌ That user does not have a profile yet.', ephemeral: true });
+          return;
+        }
+
+        const claim = profile?.payments?.solMembership || {};
+        const expected = claim.expected || {};
+        const proof = claim.proof || {};
+        const txSignature = String(proof.txSignature || '').trim();
+
+        if (!txSignature) {
+          await interaction.reply({ content: '❌ Missing tx signature on this claim.', ephemeral: true });
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+
+        if (parts[0] === 'solmember_deny') {
+          updateUserProfile(userId, {
+            payments: {
+              solMembership: {
+                status: 'denied',
+                resolvedAt: nowIso,
+                review: {
+                  handledByUserId: interaction.user.id,
+                  decisionReason: ''
+                }
+              }
+            }
+          });
+
+          logMembershipEvent('membership_payment_denied', {
+            actorUserId: interaction.user.id,
+            targetUserId: userId,
+            data: {
+              source: 'sol_payment',
+              txSignature,
+              expected
+            }
+          });
+
+          await interaction.update({
+            content: [
+              '❌ **SOL Membership Claim Denied**',
+              `**User:** <@${userId}>`,
+              `**Handled by:** <@${interaction.user.id}>`,
+              '',
+              `**Tx:** \`${txSignature.slice(0, 180)}\``,
+              proof.explorerUrl ? `**Explorer:** ${proof.explorerUrl}` : null
+            ].filter(Boolean).join('\n'),
+            components: []
+          });
+          return;
+        }
+
+        // Approve
+        const m = profile.membership || {};
+        const nowMs = Date.now();
+        const newExpiresAt = computeMembershipExtension(nowMs, m.expiresAt, expected.months || SOL_MEMBERSHIP_MONTHS);
+
+        updateUserProfile(userId, {
+          membership: {
+            status: 'active',
+            tier: String(expected.tier || SOL_MEMBERSHIP_TIER),
+            startsAt: m.startsAt || nowIso,
+            expiresAt: newExpiresAt,
+            source: 'sol_payment'
+          },
+          payments: {
+            solMembership: {
+              status: 'approved',
+              resolvedAt: nowIso,
+              review: {
+                handledByUserId: interaction.user.id,
+                decisionReason: ''
+              }
+            }
+          }
+        });
+
+        logMembershipEvent('membership_started_or_extended', {
+          actorUserId: interaction.user.id,
+          targetUserId: userId,
+          data: {
+            source: 'sol_payment',
+            txSignature,
+            expected,
+            membership: {
+              tier: String(expected.tier || SOL_MEMBERSHIP_TIER),
+              expiresAt: newExpiresAt
+            }
+          }
+        });
+
+        await interaction.update({
+          content: [
+            '✅ **SOL Membership Approved**',
+            `**User:** <@${userId}>`,
+            `**Tier:** \`${String(expected.tier || SOL_MEMBERSHIP_TIER)}\``,
+            `**New expiry:** ${formatIsoDateTime(newExpiresAt)}`,
+            `**Handled by:** <@${interaction.user.id}>`,
+            '',
+            `**Tx:** \`${txSignature.slice(0, 180)}\``,
+            proof.explorerUrl ? `**Explorer:** ${proof.explorerUrl}` : null
+          ].filter(Boolean).join('\n'),
+          components: []
+        });
+        return;
+      }
+
       if (interaction.customId === 'profile_open_verify_modal') {
         await interaction.showModal(buildVerifyXHandleModal());
+        return;
+      }
+
+      if (interaction.customId === 'solmember_open_claim_modal') {
+        await interaction.showModal(buildSolMembershipClaimModal());
         return;
       }
 
@@ -2404,6 +2722,88 @@ let updated = null;
   });
   return;
 }
+
+      if (interaction.customId === 'solmember_claim_modal') {
+        const userId = interaction.user.id;
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await interaction.reply({ content: '❌ No profile found. Please try again.', ephemeral: true });
+          return;
+        }
+
+        const existing = profile?.payments?.solMembership || {};
+        const status = String(existing.status || 'none').toLowerCase();
+        if (['pending', 'submitted', 'under_review'].includes(status)) {
+          await interaction.reply({
+            content: '⚠️ You already have a pending membership claim under review.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const txSignature = String(interaction.fields.getTextInputValue('tx_signature') || '').trim();
+        const note = String(interaction.fields.getTextInputValue('tx_note') || '').trim();
+
+        if (!txSignature || txSignature.length < 20) {
+          await interaction.reply({ content: '❌ Please provide a valid transaction signature.', ephemeral: true });
+          return;
+        }
+
+        if (isSignatureAlreadyClaimed(txSignature)) {
+          await interaction.reply({
+            content: '❌ That transaction signature has already been used in a membership claim.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const nowIso = new Date().toISOString();
+        const explorerUrl = solExplorerUrl(txSignature);
+        const validUntil = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // informational only
+
+        updateUserProfile(userId, {
+          payments: {
+            solMembership: {
+              status: 'submitted',
+              createdAt: existing.createdAt || nowIso,
+              submittedAt: nowIso,
+              resolvedAt: null,
+              expected: {
+                walletAddress: SOL_MEMBERSHIP_WALLET,
+                amountSol: SOL_MEMBERSHIP_AMOUNT_SOL,
+                tier: SOL_MEMBERSHIP_TIER,
+                months: SOL_MEMBERSHIP_MONTHS,
+                priceLabel: `${formatSolAmount(SOL_MEMBERSHIP_AMOUNT_SOL)} for ${SOL_MEMBERSHIP_MONTHS} month(s)`,
+                validUntil
+              },
+              proof: {
+                txSignature,
+                explorerUrl,
+                note
+              },
+              review: {
+                handledByUserId: null,
+                decisionReason: ''
+              }
+            }
+          }
+        });
+
+        const post = await upsertSolMembershipReviewCard(interaction.guild, userId);
+        if (!post.ok) {
+          await interaction.reply({
+            content: '⚠️ Claim saved, but could not post to #mod-approvals. Please contact a mod.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        await interaction.reply({
+          content: '✅ Payment claim submitted. A mod will review it in **#mod-approvals**.',
+          ephemeral: true
+        });
+        return;
+      }
 
       const [action, contractAddress] = interaction.customId.split(':');
       if (!action || !contractAddress) return;
@@ -3047,6 +3447,53 @@ saveBotSettings(BOT_SETTINGS);
         return;
       }
 
+      if (lowerContent.startsWith('!memberstatus')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!memberstatus @user`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const m = profile.membership || {};
+        const r = profile.referral || {};
+        const conv = r.conversion || {};
+        const rewards = r.rewards || {};
+        const grants = m.grants || {};
+
+        const lines = [
+          `💳 **Membership / Referral Status** — <@${userId}>`,
+          '',
+          `**Membership status:** \`${String(m.status || 'none')}\``,
+          `**Tier:** \`${String(m.tier || 'basic')}\``,
+          `**Source:** \`${String(m.source || 'manual')}\``,
+          `**Starts:** ${formatIsoDateTime(m.startsAt)}`,
+          `**Expires:** ${formatIsoDateTime(m.expiresAt)}`,
+          `**Referral credits (months):** ${Number(grants.referralCreditsMonths || 0)}`,
+          m.notes ? `**Notes:** ${String(m.notes).slice(0, 200)}` : null,
+          '',
+          `**Referred by:** ${r.referredByUserId ? `<@${r.referredByUserId}>` : 'None'}`,
+          r.codeUsed ? `**Code used:** \`${String(r.codeUsed).slice(0, 64)}\`` : null,
+          `**Attributed at:** ${formatIsoDateTime(r.attributedAt)}`,
+          `**Conversion:** \`${String(conv.status || 'none')}\``,
+          `**Converted at:** ${formatIsoDateTime(conv.convertedAt)}`,
+          `**Rewards credited (months):** ${Number(rewards.creditedMonths || 0)}`
+        ].filter(Boolean);
+
+        await replyText(message, lines.join('\n'));
+        return;
+      }
+
       if (lowerContent.startsWith('!verifyx ')) {
         if (!message.member?.permissions?.has('ManageGuild')) {
           await replyText(message, '❌ You need **Manage Server** permission to use this command.');
@@ -3476,6 +3923,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     `• \`!help\` / \`!commands\` — This list\n` +
     `• \`!ping\` — Quick alive check\n` +
     `• \`!status\` — Bot status\n` +
+    `• \`!membership\` — View membership plan + submit SOL payment claim\n` +
     `• \`!ca <ca>\` — Compact contract intel (no tracking)\n` +
     `• \`!scan\` — Random scanner-style test\n` +
     `• \`!scan <ca>\` — Deep scan a token (no tracking)\n` +
@@ -4312,6 +4760,41 @@ if (lowerContent.startsWith('!truestats')) {
           console.error('[ProCall Command Error]', error);
           await replyText(message, `❌ Pro call failed: ${error.message}`);
         }
+
+        return;
+      }
+
+      if (lowerContent === '!membership') {
+        upsertUserProfile({
+          discordUserId: message.author.id,
+          username: message.author.username,
+          displayName: message.member?.displayName || message.author.globalName || message.author.username
+        });
+
+        if (!SOL_MEMBERSHIP_WALLET) {
+          await replyText(message, '⚠️ Membership payments are not configured yet.');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(message.author.id);
+        const claimStatus = String(profile?.payments?.solMembership?.status || 'none').toLowerCase();
+        const pending = ['pending', 'submitted', 'under_review'].includes(claimStatus);
+
+        const contentOut = [
+          '💳 **Membership (SOL payment — manual mod review)**',
+          `**Wallet:** \`${SOL_MEMBERSHIP_WALLET}\``,
+          `**Plan:** \`${SOL_MEMBERSHIP_TIER}\` • **${SOL_MEMBERSHIP_MONTHS} month(s)**`,
+          `**Price:** **${formatSolAmount(SOL_MEMBERSHIP_AMOUNT_SOL)}**`,
+          '',
+          'Send the payment, then submit your **transaction signature** for review.',
+          pending ? `⚠️ You already have a claim in progress (\`${claimStatus}\`).` : ''
+        ].filter(Boolean).join('\n');
+
+        await message.reply({
+          content: contentOut,
+          components: pending ? [] : buildSolMembershipSubmitButtons(),
+          allowedMentions: { repliedUser: false }
+        });
 
         return;
       }

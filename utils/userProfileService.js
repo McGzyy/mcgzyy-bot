@@ -165,6 +165,71 @@ function getDefaultTopCallerReview() {
   };
 }
 
+function getDefaultMembership() {
+  return {
+    status: 'none', // none | trial | active | past_due | cancelled | comped
+    tier: 'basic', // basic | premium | pro
+    startsAt: null,
+    expiresAt: null,
+    source: 'manual', // manual | referral_credit | external_billing
+    grants: {
+      referralCreditsMonths: 0
+    },
+    notes: ''
+  };
+}
+
+function getDefaultReferral() {
+  return {
+    referredByUserId: null,
+    codeUsed: null,
+    attributedAt: null,
+    conversion: {
+      status: 'none', // none | joined | paid | refunded
+      convertedAt: null
+    },
+    rewards: {
+      creditedMonths: 0
+    }
+  };
+}
+
+function getDefaultSolMembershipPayment() {
+  return {
+    status: 'none', // none | pending | submitted | under_review | approved | denied | expired
+    createdAt: null,
+    submittedAt: null,
+    resolvedAt: null,
+    expected: {
+      walletAddress: '',
+      amountSol: null,
+      tier: 'premium',
+      months: 1,
+      priceLabel: '',
+      validUntil: null
+    },
+    proof: {
+      txSignature: '',
+      senderWallet: '',
+      explorerUrl: '',
+      note: ''
+    },
+    review: {
+      channelId: null,
+      messageId: null,
+      postedAt: null,
+      handledByUserId: null,
+      decisionReason: ''
+    }
+  };
+}
+
+function getDefaultPayments() {
+  return {
+    solMembership: getDefaultSolMembershipPayment()
+  };
+}
+
 /** Backfill member-oriented fields for legacy rows and after partial updates. */
 function ensureMemberMetaShape(profile) {
   if (!profile || typeof profile !== 'object') return profile;
@@ -179,6 +244,9 @@ function ensureMemberMetaShape(profile) {
   if (profile.xVerifiedAt === undefined) profile.xVerifiedAt = null;
   if (profile.callerTrustLevel === undefined) profile.callerTrustLevel = 'none';
   if (profile.topCallerReview === undefined) profile.topCallerReview = getDefaultTopCallerReview();
+  if (profile.membership === undefined) profile.membership = getDefaultMembership();
+  if (profile.referral === undefined) profile.referral = getDefaultReferral();
+  if (profile.payments === undefined) profile.payments = getDefaultPayments();
 
   return profile;
 }
@@ -219,6 +287,9 @@ function createEmptyProfile({
 
     callerTrustLevel: 'none',
     topCallerReview: getDefaultTopCallerReview(),
+    membership: getDefaultMembership(),
+    referral: getDefaultReferral(),
+    payments: getDefaultPayments(),
 
     createdAt: now,
     updatedAt: now
@@ -490,6 +561,26 @@ function updateUserProfile(discordUserId, updates = {}) {
       ...getDefaultTopCallerReview(),
       ...(existing.topCallerReview || {}),
       ...(updates.topCallerReview || {})
+    },
+    membership: {
+      ...getDefaultMembership(),
+      ...(existing.membership || {}),
+      ...(updates.membership || {})
+    },
+    referral: {
+      ...getDefaultReferral(),
+      ...(existing.referral || {}),
+      ...(updates.referral || {})
+    },
+    payments: {
+      ...getDefaultPayments(),
+      ...(existing.payments || {}),
+      ...(updates.payments || {}),
+      solMembership: {
+        ...getDefaultSolMembershipPayment(),
+        ...(existing.payments?.solMembership || {}),
+        ...(updates.payments?.solMembership || {})
+      }
     },
     publicSettings: {
       ...getDefaultPublicSettings(),

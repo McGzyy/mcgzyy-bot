@@ -37,6 +37,7 @@
 const fs = require('fs/promises');
 const path = require('path');
 const axios = require('axios');
+const { performance } = require('perf_hooks');
 const {
   getChartPlaywrightBrowser,
   resolveSolanaContract,
@@ -98,6 +99,38 @@ function isChartTvDebug() {
     /^1|true|yes$/i.test(String(process.env.CHART_TV_DEBUG || '').trim()) ||
     /^1|true|yes$/i.test(String(process.env.CHART_DEX_DEBUG || '').trim())
   );
+}
+
+function tvTimingRoundMs(v) {
+  return Math.round(Number(v) || 0);
+}
+
+/**
+ * Wall-time phases for one Gecko/TV capture (grep: [TokenChartTV][timing]).
+ * @param {object} phases
+ * @param {number} totalMs
+ * @param {string} [note]
+ */
+function logTokenChartTvTiming(phases, totalMs, note) {
+  const pool = tvTimingRoundMs(phases.pool_resolve);
+  const nav = tvTimingRoundMs(phases.navigation);
+  const toolbar = tvTimingRoundMs(phases.interval_toolbar);
+  const interval = tvTimingRoundMs(phases.interval_select);
+  const metric = tvTimingRoundMs(phases.metric_select);
+  const readiness = tvTimingRoundMs(phases.readiness);
+  const capture = tvTimingRoundMs(phases.capture);
+  const tot = tvTimingRoundMs(totalMs);
+
+  console.info(`[TokenChartTV][timing] pool_resolve=${pool}ms`);
+  console.info(`[TokenChartTV][timing] navigation=${nav}ms`);
+  console.info(`[TokenChartTV][timing] interval_toolbar=${toolbar}ms`);
+  console.info(`[TokenChartTV][timing] interval_select=${interval}ms`);
+  console.info(`[TokenChartTV][timing] metric_select=${metric}ms`);
+  console.info(`[TokenChartTV][timing] readiness=${readiness}ms`);
+  console.info(`[TokenChartTV][timing] capture=${capture}ms`);
+  console.info(`[TokenChartTV][timing] total=${tot}ms`);
+  const breakdown = `pool=${pool} nav=${nav} toolbar=${toolbar} interval=${interval} metric=${metric} readiness=${readiness} capture=${capture} total=${tot}`;
+  console.info(`[TokenChartTV][timing] breakdown ${breakdown}${note ? ` note=${note}` : ''}`);
 }
 
 /** @param {number|null|undefined} deadline */
@@ -972,7 +1005,9 @@ async function trySelectGeckoIntervals(page, opts = {}) {
   const bandPx = tvToolbarBandPx();
   console.info(`[TokenChartTV] interval selection start order=${order.join(',')} bandPx=${bandPx}`);
 
+  const tToolbarStart = performance.now();
   const toolbarProbe = await waitForGeckoIntervalToolbarReady(page, { deadline });
+  const toolbarMs = performance.now() - tToolbarStart;
   if (!toolbarProbe.ready) {
     console.warn(
       '[TokenChartTV] interval toolbar not found after wait — aborting interval selection (no main-frame fallback)'
@@ -982,10 +1017,12 @@ async function trySelectGeckoIntervals(page, opts = {}) {
       selectedInterval: null,
       selectedBy: null,
       intervalConfirmed: false,
-      detachedUnrecoverable: false
+      detachedUnrecoverable: false,
+      timing: { toolbarMs: tvTimingRoundMs(toolbarMs), selectionMs: 0 }
     };
   }
 
+  const tIntervalSelectStart = performance.now();
   const availableTokens = await collectGeckoIntervalTokensUnion(page, bandPx);
   console.info(
     `[TokenChartTV] interval toolbar tokens union count=${availableTokens.size} tokens=[${[...availableTokens].sort().join(', ')}]`
@@ -1177,12 +1214,15 @@ async function trySelectGeckoIntervals(page, opts = {}) {
     console.warn(`[TokenChartTV] interval selection exhausted — no verified interval for order=${order.join(',')}`);
   }
 
+  const selectionMs = performance.now() - tIntervalSelectStart;
+
   return {
     toolbarFound: true,
     selectedInterval,
     selectedBy,
     intervalConfirmed,
-    detachedUnrecoverable
+    detachedUnrecoverable,
+    timing: { toolbarMs: tvTimingRoundMs(toolbarMs), selectionMs: tvTimingRoundMs(selectionMs) }
   };
 }
 
@@ -2277,12 +2317,28 @@ async function runTvDebugOnFailure(page, reason) {
  * @returns {Promise<Buffer|null>}
  */
 async function fetchTradingViewChartPng(trackedCall) {
+  const tRequest = performance.now();
+  const phases = {
+    pool_resolve: 0,
+    navigation: 0,
+    interval_toolbar: 0,
+    interval_select: 0,
+    metric_select: 0,
+    readiness: 0,
+    capture: 0
+  };
+
   const mint = resolveSolanaContract(trackedCall);
   if (!mint) return null;
 
   const network = String(process.env.CHART_TV_NETWORK || 'solana').trim().toLowerCase() || 'solana';
+  const tPool = performance.now();
   const resolved = await resolvePoolForChart(trackedCall, mint, network);
-  if (!resolved) return null;
+  phases.pool_resolve = performance.now() - tPool;
+  if (!resolved) {
+    logTokenChartTvTiming(phases, performance.now() - tRequest, 'no_pool');
+    return null;
+  }
 
   const { poolAddress, source } = resolved;
   const url = geckoPoolPageUrl(network, poolAddress);
@@ -2301,6 +2357,7 @@ async function fetchTradingViewChartPng(trackedCall) {
   let page = null;
 
   try {
+    const tNav = performance.now();
     const browser = await getChartPlaywrightBrowser();
     context = await browser.newContext({
       viewport: { width: vw, height: vh },
@@ -2322,8 +2379,10 @@ async function fetchTradingViewChartPng(trackedCall) {
       return null;
     });
     if (!nav || nav.status() === 404) {
+      phases.navigation = performance.now() - tNav;
       console.info('[TokenChartTV] pool page not available (status=', nav?.status(), ')');
       if (isChartTvDebug()) await runTvDebugOnFailure(page, 'goto_404_or_fail');
+      logTokenChartTvTiming(phases, performance.now() - tRequest, 'goto_failed');
       return null;
     }
 
@@ -2331,13 +2390,20 @@ async function fetchTradingViewChartPng(trackedCall) {
     const canvasWaitMs = Math.min(timeoutMs, 28000, Math.max(2800, tvRemainingMs(deadline)));
     await waitForAnyFrameCanvas(page, CANVAS_WAIT_MIN_AREA, canvasWaitMs);
 
+    phases.navigation = performance.now() - tNav;
+
     await saveTvDebugStep(page, 'tv-after-load.png');
     const intervalRes = await trySelectGeckoIntervals(page, { deadline });
+    phases.interval_toolbar = intervalRes.timing?.toolbarMs ?? 0;
+    phases.interval_select = intervalRes.timing?.selectionMs ?? 0;
     await saveTvDebugStep(page, 'tv-after-interval.png');
 
+    const tMetric = performance.now();
     const metricRes = await applyGeckoMetricMcapFromPage(page, 'mcap', { deadline });
+    phases.metric_select = performance.now() - tMetric;
     if (isChartTvDebug()) await saveTvDebugStep(page, 'tv-after-metric.png');
 
+    const tReady = performance.now();
     const metricInfer = await inferGeckoMetricMode(page);
     if (!metricRes.metricConfirmed) {
       if (metricInfer.inferredMetric === 'price' && metricInfer.matchedText) {
@@ -2361,8 +2427,10 @@ async function fetchTradingViewChartPng(trackedCall) {
     });
 
     if (!trust.ok) {
+      phases.readiness = performance.now() - tReady;
       logGeckoCaptureAbort(intervalRes, metricRes, chartCanvasFound, trust.reason, metricInfer.inferredMetric);
       if (isChartTvDebug()) await runTvDebugOnFailure(page, `readiness_gate:${trust.reason || 'unknown'}`);
+      logTokenChartTvTiming(phases, performance.now() - tRequest, `readiness_gate_failed:${trust.reason || 'unknown'}`);
       return null;
     }
 
@@ -2391,23 +2459,31 @@ async function fetchTradingViewChartPng(trackedCall) {
     const stabilizeMs = Math.min(stabEnv, Math.max(0, tvRemainingMs(deadline) - 40));
     if (stabilizeMs > 0) await page.waitForTimeout(stabilizeMs);
 
+    phases.readiness = performance.now() - tReady;
+
+    const tCap = performance.now();
     let cap = await screenshotGeckoChartRegionDetailed(page);
     if (cap.png && isReasonablePng(cap.png)) {
+      phases.capture = performance.now() - tCap;
       console.info(`[TokenChartTV] capture success: selector=${cap.selector ?? 'unknown'}`);
       console.info('[TokenChart] provider=tv (GeckoTerminal pool)');
+      logTokenChartTvTiming(phases, performance.now() - tRequest, '');
       return cap.png;
     }
 
     const emerg = await emergencyFinalGeckoCapture(page, { skipRepeatDetailed: true });
+    phases.capture = performance.now() - tCap;
     if (emerg && isReasonablePng(emerg)) {
       console.info('[TokenChartTV] capture success: selector=emergency-path');
       console.info('[TokenChart] provider=tv (GeckoTerminal pool)');
+      logTokenChartTvTiming(phases, performance.now() - tRequest, 'capture_emergency');
       return emerg;
     }
 
     console.warn('[TokenChartTV] no usable capture target found after readiness gate');
     console.warn('[TokenChartTV] returning null for provider fallback');
     if (isChartTvDebug()) await runTvDebugOnFailure(page, 'no_chart_region');
+    logTokenChartTvTiming(phases, performance.now() - tRequest, 'capture_failed');
     return null;
   } catch (err) {
     console.warn('[TokenChartTV] Capture failed:', err?.message || String(err));
@@ -2416,6 +2492,8 @@ async function fetchTradingViewChartPng(trackedCall) {
       console.warn('[TokenChartTV] Gecko capture aborted — returning null for provider fallback');
     }
     if (isChartTvDebug() && page) await runTvDebugOnFailure(page, `exception: ${err?.message || String(err)}`);
+    const note = `exception:${String(err?.message || err).slice(0, 120)}`;
+    logTokenChartTvTiming(phases, performance.now() - tRequest, note);
     return null;
   } finally {
     if (page) await page.close().catch(() => {});

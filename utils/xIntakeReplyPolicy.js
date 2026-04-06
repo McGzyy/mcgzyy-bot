@@ -42,7 +42,7 @@ function formatMcForXReply(marketCap) {
 }
 
 /**
- * Case B — exact success line: "@handle called {TOKEN} @ $MC"
+ * Case B — success line: "@handle called {TOKEN} at $MC"
  * @param {string} authorHandle — X username (no @ prefix required)
  * @param {string} tokenName
  * @param {number} marketCap
@@ -51,7 +51,7 @@ function buildXMentionSuccessReplyText(authorHandle, tokenName, marketCap) {
   const h = normalizeHandleForReply(authorHandle);
   const t = sanitizeTokenNameForReply(tokenName);
   const mc = formatMcForXReply(marketCap);
-  return `@${h} called ${t} @ ${mc}`;
+  return `@${h} called ${t} at ${mc}`;
 }
 
 /**

@@ -16,7 +16,7 @@ const {
 } = require('./xPostContent');
 const {
   isMilestoneChartAttachmentEnabled,
-  buildQuickChartSpec
+  canAttemptDexChart
 } = require('./tokenChartImage');
 
 function isXPostDryRunEnabled() {
@@ -80,7 +80,7 @@ function describeXPostForTrackedCall(trackedCall, options = {}) {
     bodyMonitorTemplate: textMonitor,
     dryRunEnvActive: isXPostDryRunEnabled(),
     milestoneChartAttachmentEnabled: isMilestoneChartAttachmentEnabled(),
-    chartSpecCanBuild: !!buildQuickChartSpec(trackedCall)
+    chartSpecCanBuild: canAttemptDexChart(trackedCall)
   };
 }
 

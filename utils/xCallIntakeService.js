@@ -17,6 +17,7 @@ const {
   normalizeRealDataToScan,
   isLikelySolanaCA,
   buildUserCallAnnouncementPayload,
+  augmentNewUserCallPayloadWithChart,
   announceNewUserCallInUserCallsChannel
 } = require('../commands/basicCommands');
 const {
@@ -63,28 +64,10 @@ function extractXMentionHashtagLabels(text) {
 }
 
 /**
- * Hashtag-only intent: `#call` ⇒ user_call; `#watch` ⇒ watch_only; both ⇒ watch_only; else watch_only.
- * Plain words like "call" / "calling" do nothing.
- * @returns {{ callSourceType: 'user_call' | 'watch_only', intentReason: string }}
+ * X intake only runs apply when `#call` is present (with verified user + valid CA). No default watch.
  */
-function resolveXMentionCallIntent(tweetText) {
-  const tags = extractXMentionHashtagLabels(tweetText);
-  const hasCallTag = tags.has('call');
-  const hasWatchTag = tags.has('watch');
-
-  if (hasWatchTag && hasCallTag) {
-    return {
-      callSourceType: 'watch_only',
-      intentReason: 'both_hashtag_watch_and_call_watch_priority'
-    };
-  }
-  if (hasCallTag) {
-    return { callSourceType: 'user_call', intentReason: 'hashtag_call' };
-  }
-  if (hasWatchTag) {
-    return { callSourceType: 'watch_only', intentReason: 'hashtag_watch' };
-  }
-  return { callSourceType: 'watch_only', intentReason: 'default_watch_no_hashtag' };
+function hasXMentionExplicitCallHashtag(tweetText) {
+  return extractXMentionHashtagLabels(tweetText).has('call');
 }
 
 /**
@@ -109,7 +92,8 @@ function buildCallerContextFromVerifiedProfile(profile) {
 }
 
 /**
- * End-to-end: verified X author + tweet body → optional tracked call (same pipeline as Discord !call).
+ * End-to-end: verified X author + tweet body → tracked **user_call** only when tweet includes `#call` (and valid CA).
+ * Tweets without `#call` are ignored (no watch row, no Discord mirror, no reply); dedupe id is still recorded when present.
  *
  * Trust: (1) getXVerifiedTrustStatus(authorHandle) — mod-verified X ↔ Discord profile.
  *        (2) validateXIntakeGuildTrust — linked user must be in the configured Discord server (unless skipGuildMembershipCheck).
@@ -257,7 +241,19 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     };
   }
 
-  const intent = resolveXMentionCallIntent(tweetText);
+  if (!hasXMentionExplicitCallHashtag(tweetText)) {
+    if (!skipDedupeCheck && dedupeId) {
+      markXIntakeTweetProcessed(dedupeId);
+    }
+    return {
+      success: false,
+      reason: 'no_explicit_call_hashtag',
+      trust,
+      guildTrust,
+      contractAddress: ca,
+      callerContext
+    };
+  }
 
   if (dryRun && skipTokenFetch) {
     return {
@@ -268,8 +264,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       guildTrust,
       contractAddress: ca,
       callerContext,
-      callSourceType: intent.callSourceType,
-      intentReason: intent.intentReason
+      callSourceType: 'user_call',
+      intentReason: 'hashtag_call'
     };
   }
 
@@ -299,8 +295,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       guildTrust,
       contractAddress: ca,
       callerContext,
-      callSourceType: intent.callSourceType,
-      intentReason: intent.intentReason,
+      callSourceType: 'user_call',
+      intentReason: 'hashtag_call',
       scanPreview: {
         tokenName: scan.tokenName,
         ticker: scan.ticker,
@@ -314,18 +310,20 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     callerContext,
     scan.marketCap || 0,
     scan,
-    { callSourceType: intent.callSourceType, intakeSource: X_CALL_INTAKE_SOURCE }
+    { callSourceType: 'user_call', intakeSource: X_CALL_INTAKE_SOURCE }
   );
 
-  if (
-    intent.callSourceType === 'user_call' &&
-    applyResult.wasNewCall === true &&
-    guild
-  ) {
+  if (applyResult.wasNewCall === true && guild) {
     try {
-      const announcePayload = buildUserCallAnnouncementPayload(
+      let announcePayload = buildUserCallAnnouncementPayload(
         realData,
         scan,
+        applyResult.trackedCall,
+        applyResult.wasNewCall,
+        applyResult.wasReactivated
+      );
+      announcePayload = await augmentNewUserCallPayloadWithChart(
+        announcePayload,
         applyResult.trackedCall,
         applyResult.wasNewCall,
         applyResult.wasReactivated
@@ -349,8 +347,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     contractAddress: ca,
     callerContext,
     intakeSource: X_CALL_INTAKE_SOURCE,
-    callSourceType: intent.callSourceType,
-    intentReason: intent.intentReason,
+    callSourceType: 'user_call',
+    intentReason: 'hashtag_call',
     trackedCall: applyResult.trackedCall,
     wasNewCall: applyResult.wasNewCall,
     wasReactivated: applyResult.wasReactivated
@@ -361,7 +359,7 @@ module.exports = {
   X_CALL_INTAKE_SOURCE,
   extractFirstSolanaCaFromText,
   extractXMentionHashtagLabels,
-  resolveXMentionCallIntent,
+  hasXMentionExplicitCallHashtag,
   buildCallerContextFromVerifiedProfile,
   processVerifiedXMentionCallIntake,
   decideXMentionIntakeReply,

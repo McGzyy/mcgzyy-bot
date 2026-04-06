@@ -371,6 +371,10 @@ function buildTestXIntakeResultEmbed(result, { applyMode, authorHandle, tweetId,
     embed.setFooter({
       text: 'Dry-run: no tracked-call write, dedupe id not recorded. Owner: !testxintake apply …'
     });
+  } else if (applyMode && result.reason === 'no_explicit_call_hashtag') {
+    embed.setFooter({
+      text: 'Dedupe id stored — tweet had no #call (no track / mirror / X reply, same as live ingestion).'
+    });
   }
 
   return embed;
@@ -2854,8 +2858,8 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
       `• \`!verifyx @user\` — Approve a member’s pending X verification (requires **Manage Server**)\n` +
       `• \`!resetbotstats\` — Reset bot-call stat exclusions on tracked data\n` +
       `• \`!backfillprofiles\` — Preview members missing bot profiles; \`!backfillprofiles run\` creates them once\n` +
-      `• \`!testxintake\` — Simulate X mention intake (dry-run); owner \`apply\` for real write\n` +
-      `• \`!testxmention\` — Inject fake mention through **ingestion scaffold** (dry-run); owner \`apply\` + reply step\n` +
+      `• \`!testxintake\` — Simulate X mention intake (dry-run); owner \`apply\` for real write (**tweet text must include \`#call\`**)\n` +
+      `• \`!testxmention\` — Inject fake mention through **ingestion scaffold** (dry-run); owner \`apply\` + reply step (**needs \`#call\`**)\n` +
       `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
       `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
       `• \`!truebotstats\` — Bot stats including reset/excluded calls\n\n`;
@@ -3157,6 +3161,7 @@ if (lowerContent.startsWith('!testxmention')) {
       '❌ **Usage**\n' +
         '`!testxmention <xHandle> <tweetId> [to:<parentTweetId>] <tweet text…>` — **dry-run** (default; full scaffold path)\n' +
         '`!testxmention apply <xHandle> <tweetId> [to:<parentTweetId>] <tweet text…>` — **owner only**: live intake + `maybePostIntakeReply` (still gated by `X_MENTION_POST_REPLIES` and X poster dry-run)\n\n' +
+        '• **Live X parity:** include **`#call`** in tweet text for a tracked call; otherwise silent ignore (no ingest logs when tick logging is on).\n' +
         '• Same flow as mention ingestion: `processSingleCandidate` → reply policy → optional X reply.\n' +
         '• Default does **not** write tracked calls / dedupe; **`apply`** is owner-only.\n' +
         '• Real X replies require **`X_MENTION_POST_REPLIES`** (and X poster not in dry-run).'

@@ -83,10 +83,6 @@ async function processSingleCandidate(client, guild, candidate, options = {}) {
     return null;
   }
 
-  if (logTick) {
-    console.log('[XMentionIngest] candidate → intake', { tweetId, authorHandle });
-  }
-
   const result = await processVerifiedXMentionCallIntake(
     { authorHandle, tweetText, tweetId },
     { client, guild, dryRun }
@@ -95,9 +91,11 @@ async function processSingleCandidate(client, guild, candidate, options = {}) {
   const plan = decideXMentionIntakeReply(result, { authorHandle });
   const targetReplyId = replyToTweetId || tweetId;
 
-  if (logTick) {
-    console.log('[XMentionIngest] candidate ← intake', {
+  const silentIgnore = result.reason === 'no_explicit_call_hashtag';
+  if (logTick && !silentIgnore) {
+    console.log('[XMentionIngest] candidate intake', {
       tweetId,
+      authorHandle,
       reason: result.reason,
       success: !!result.success,
       duplicate: !!(result.duplicate || result.alreadyProcessed),
@@ -152,15 +150,17 @@ async function runInjectedMentionOnce(client, guild, candidate, options = {}) {
     }
   }
 
-  console.log('[XMentionIngest][inject]', {
-    tweetId: candidate.tweetId,
-    dryRun,
-    attemptReplyAfterIntake,
-    intakeReason: bundle.result.reason,
-    replyCase: bundle.plan.case,
-    policyShouldReply: bundle.plan.shouldReply,
-    replyAttempted: replyOutcome.attempted === true
-  });
+  if (bundle.result?.reason !== 'no_explicit_call_hashtag') {
+    console.log('[XMentionIngest][inject]', {
+      tweetId: candidate.tweetId,
+      dryRun,
+      attemptReplyAfterIntake,
+      intakeReason: bundle.result.reason,
+      replyCase: bundle.plan.case,
+      policyShouldReply: bundle.plan.shouldReply,
+      replyAttempted: replyOutcome.attempted === true
+    });
+  }
 
   return { ok: true, bundle, replyOutcome };
 }
@@ -261,11 +261,13 @@ async function runIngestionTick(client) {
       if (!bundle) continue;
 
       const { result, plan, targetReplyId } = bundle;
-      console.log('[XMentionIngest] policy', {
-        tweetId: c.tweetId,
-        replyCase: plan.case,
-        shouldReply: plan.shouldReply
-      });
+      if (result.reason !== 'no_explicit_call_hashtag') {
+        console.log('[XMentionIngest] policy', {
+          tweetId: c.tweetId,
+          replyCase: plan.case,
+          shouldReply: plan.shouldReply
+        });
+      }
 
       await maybePostIntakeReply({ plan, targetReplyId });
     } catch (err) {

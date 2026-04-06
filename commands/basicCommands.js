@@ -2,7 +2,8 @@ const {
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  AttachmentBuilder
 } = require('discord.js');
 
 const { generateFakeScan, generateBatchScans } = require('../utils/scannerEngine');
@@ -20,6 +21,10 @@ const {
   getCallerLeaderboard,
   getBotStats
 } = require('../utils/callerStatsService');
+const {
+  isMilestoneChartAttachmentEnabled,
+  fetchTokenChartImageBuffer
+} = require('../utils/tokenChartImage');
 
 function formatUsd(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
@@ -1226,6 +1231,40 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
 }
 
 /**
+ * Optionally attach QuickChart PNG for brand-new `user_call` rows only (same gate + fetch as X milestone charts).
+ * @returns {Promise<{ content: string, embeds: unknown[], files?: import('discord.js').AttachmentBuilder[] }>}
+ */
+async function augmentNewUserCallPayloadWithChart(
+  payload,
+  trackedCall,
+  wasNewCall,
+  wasReactivated
+) {
+  if (!payload || !trackedCall) return payload;
+  if (!wasNewCall || wasReactivated || trackedCall.callSourceType !== 'user_call') {
+    return payload;
+  }
+  if (!isMilestoneChartAttachmentEnabled()) return payload;
+
+  const buf = await fetchTokenChartImageBuffer(trackedCall);
+  if (!buf || buf.length < 24) return payload;
+
+  const attachmentName = 'call-chart.png';
+  const attachment = new AttachmentBuilder(buf, { name: attachmentName });
+  const files = Array.isArray(payload.files) ? [...payload.files, attachment] : [attachment];
+
+  const embeds = payload.embeds;
+  if (Array.isArray(embeds) && embeds.length > 0) {
+    const e = embeds[embeds.length - 1];
+    if (e && typeof e.setImage === 'function') {
+      e.setImage(`attachment://${attachmentName}`);
+    }
+  }
+
+  return { ...payload, files };
+}
+
+/**
  * Post the same announcement as `!call` to #user-calls (new user calls only).
  * @param {import('discord.js').Guild|null} guild
  * @param {{ content: string, embeds: unknown[] }} payload
@@ -1253,6 +1292,7 @@ async function announceNewUserCallInUserCallsChannel(guild, payload) {
     await ch.send({
       content: payload.content,
       embeds: payload.embeds,
+      ...(Array.isArray(payload.files) && payload.files.length ? { files: payload.files } : {}),
       allowedMentions: { parse: [] }
     });
     return { posted: true };
@@ -1274,13 +1314,15 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     { callSourceType: 'user_call' }
   );
 
-  const payload = buildUserCallAnnouncementPayload(
+  let payload = buildUserCallAnnouncementPayload(
     realData,
     scan,
     trackedCall,
     wasNewCall,
     wasReactivated
   );
+
+  payload = await augmentNewUserCallPayloadWithChart(payload, trackedCall, wasNewCall, wasReactivated);
 
   await message.reply(payload);
 
@@ -1609,6 +1651,7 @@ module.exports = {
   handleCallCommand,
   handleWatchCommand,
   buildUserCallAnnouncementPayload,
+  augmentNewUserCallPayloadWithChart,
   announceNewUserCallInUserCallsChannel,
   isLikelySolanaCA,
   applyTrackedCallState,

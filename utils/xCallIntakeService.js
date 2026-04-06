@@ -82,6 +82,70 @@ function hasXMentionExplicitCallHashtag(tweetText) {
   return extractXMentionHashtagLabels(tweetText).has('call');
 }
 
+/** Trusted Pro intake mode hashtag. Takes precedence over #call when present. */
+function hasXMentionExplicitProCallHashtag(tweetText) {
+  return extractXMentionHashtagLabels(tweetText).has('procall');
+}
+
+function sanitizeProField(value, maxLen) {
+  let s = String(value || '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!s) return '';
+
+  // Neutralize @mentions + strip URLs (avoid pinging or link spam in Discord).
+  s = s.replace(/@\w+/g, '[mention]');
+  s = s.replace(/https?:\/\/\S+/gi, '').replace(/\s+/g, ' ').trim();
+
+  if (!s) return '';
+
+  if (s.length > maxLen) {
+    s = `${s.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
+  }
+
+  return s;
+}
+
+function parseProCallFields(tweetText) {
+  const lines = String(tweetText || '').split(/\r?\n/);
+  let title = '';
+  let why = '';
+  let risk = '';
+
+  for (const raw of lines) {
+    const line = String(raw || '').trim();
+    if (!line) continue;
+
+    const t = line.match(/^title\s*:\s*(.+)$/i);
+    if (t && !title) {
+      title = t[1];
+      continue;
+    }
+
+    const w = line.match(/^why\s*:\s*(.+)$/i);
+    if (w && !why) {
+      why = w[1];
+      continue;
+    }
+
+    const r = line.match(/^risk\s*:\s*(.+)$/i);
+    if (r && !risk) {
+      risk = r[1];
+      continue;
+    }
+  }
+
+  const out = {
+    title: sanitizeProField(title, 80),
+    why: sanitizeProField(why, 300),
+    risk: sanitizeProField(risk, 120)
+  };
+
+  return out;
+}
+
 /**
  * Caller context for applyTrackedCallState from a mod-verified user profile row.
  * @param {object} profile — from getXVerifiedTrustStatus / getUserProfileByVerifiedXHandle
@@ -266,7 +330,35 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     };
   }
 
-  if (!hasXMentionExplicitCallHashtag(tweetText)) {
+  const hashtags = extractXMentionHashtagLabels(tweetText);
+  const hasProCall = hashtags.has('procall');
+  const hasCall = hashtags.has('call');
+
+  // #procall takes precedence over #call when both are present.
+  const requestedMode = hasProCall ? 'procall' : hasCall ? 'call' : 'none';
+
+  // Pro call requires trusted_pro trust tier. Safest fallback:
+  // - if #procall is present but user is not trusted_pro, only allow a normal #call if also present.
+  // - otherwise ignore (no intake).
+  if (requestedMode === 'procall') {
+    const level = getCallerTrustLevel(String(callerContext.discordUserId || ''));
+    if (level !== 'trusted_pro') {
+      if (!hasCall) {
+        touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
+        return {
+          success: false,
+          reason: 'procall_requires_trusted_pro',
+          trust,
+          guildTrust,
+          contractAddress: ca,
+          callerContext
+        };
+      }
+      // Fall back to regular #call behavior if both tags present.
+    }
+  }
+
+  if (requestedMode === 'none') {
     touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun);
     return {
       success: false,
@@ -278,6 +370,12 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     };
   }
 
+  const isProCallMode =
+    requestedMode === 'procall' &&
+    getCallerTrustLevel(String(callerContext.discordUserId || '')) === 'trusted_pro';
+
+  const proFields = isProCallMode ? parseProCallFields(tweetText) : null;
+
   if (dryRun && skipTokenFetch) {
     return {
       success: true,
@@ -288,7 +386,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       contractAddress: ca,
       callerContext,
       callSourceType: 'user_call',
-      intentReason: 'hashtag_call'
+      intentReason: isProCallMode ? 'hashtag_procall' : 'hashtag_call',
+      proCall: proFields
     };
   }
 
@@ -320,7 +419,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       contractAddress: ca,
       callerContext,
       callSourceType: 'user_call',
-      intentReason: 'hashtag_call',
+      intentReason: isProCallMode ? 'hashtag_procall' : 'hashtag_call',
+      proCall: proFields,
       scanPreview: {
         tokenName: scan.tokenName,
         ticker: scan.ticker,
@@ -353,7 +453,20 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
         applyResult.wasReactivated,
         {
           chartPhase: needsDeferredChart ? 'loading' : 'none',
-          xOriginHandle: authorHandle
+          xOriginHandle: authorHandle,
+          ...(isProCallMode
+            ? {
+              proCall: {
+                title: proFields?.title || '',
+                why: proFields?.why || '',
+                risk: proFields?.risk || '',
+                tweetUrl:
+                  dedupeId && authorHandle
+                    ? `https://x.com/${String(authorHandle).replace(/^@+/, '')}/status/${dedupeId}`
+                    : ''
+              }
+            }
+            : {})
         }
       );
 
@@ -397,7 +510,8 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
     callerContext,
     intakeSource: X_CALL_INTAKE_SOURCE,
     callSourceType: 'user_call',
-    intentReason: 'hashtag_call',
+    intentReason: isProCallMode ? 'hashtag_procall' : 'hashtag_call',
+    proCall: proFields,
     trackedCall: applyResult.trackedCall,
     wasNewCall: applyResult.wasNewCall,
     wasReactivated: applyResult.wasReactivated
@@ -409,6 +523,7 @@ module.exports = {
   extractFirstSolanaCaFromText,
   extractXMentionHashtagLabels,
   hasXMentionExplicitCallHashtag,
+  hasXMentionExplicitProCallHashtag,
   buildCallerContextFromVerifiedProfile,
   processVerifiedXMentionCallIntake,
   decideXMentionIntakeReply,

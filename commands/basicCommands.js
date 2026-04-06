@@ -1375,7 +1375,9 @@ async function handleDeepScanReply(message, contractAddress, withButtons = false
 
 /**
  * Same content + embed as `!call` / `handleCallCommand` (for channel mirror + X intake).
- * @param {{ chartPhase?: string, layout?: string, xOriginHandle?: string }} [embedExtras] — xOriginHandle: X-only; folds into embed “Called by” line, not message content.
+ * @param {{ chartPhase?: string, layout?: string, xOriginHandle?: string, proCall?: { title?: string, why?: string, risk?: string, tweetUrl?: string } }} [embedExtras]
+ *        xOriginHandle: X-only; folds into embed “Called by” line, not message content.
+ *        proCall: trusted_pro narrative (Discord-only in v1).
  * @returns {{ content: string, embeds: import('discord.js').EmbedBuilder[], chartEmbedIndex: number }}
  */
 function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated, embedExtras = {}) {
@@ -1421,7 +1423,20 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
     }
   );
 
-  const content = '📍 Coin officially called and now being tracked.';
+  const pro = embedExtras?.proCall || null;
+  const proLines = [];
+  if (pro && (pro.title || pro.why || pro.risk || pro.tweetUrl)) {
+    proLines.push('🧠 **Pro Call**');
+    if (pro.title) proLines.push(`**TITLE:** ${String(pro.title).trim()}`);
+    if (pro.why) proLines.push(`**WHY:** ${String(pro.why).trim()}`);
+    if (pro.risk) proLines.push(`**RISK:** ${String(pro.risk).trim()}`);
+    if (pro.tweetUrl) proLines.push(`**Source:** ${String(pro.tweetUrl).trim()}`);
+    proLines.push('');
+  }
+
+  const content =
+    (proLines.length ? `${proLines.join('\n')}\n` : '') +
+    '📍 Coin officially called and now being tracked.';
 
   return {
     content,

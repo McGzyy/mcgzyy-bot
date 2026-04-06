@@ -11,6 +11,7 @@ const {
   X_INTAKE_NOT_IN_GUILD_MESSAGE,
   validateXIntakeGuildTrust
 } = require('./xIntakeGuildTrust');
+const { isMilestoneChartAttachmentEnabled } = require('./tokenChartImage');
 const {
   applyTrackedCallState,
   runQuickCa,
@@ -18,7 +19,8 @@ const {
   isLikelySolanaCA,
   buildUserCallAnnouncementPayload,
   augmentNewUserCallPayloadWithChart,
-  announceNewUserCallInUserCallsChannel
+  announceNewUserCallInUserCallsChannel,
+  runDeferredUserCallChartEdits
 } = require('../commands/basicCommands');
 const {
   isXIntakeTweetProcessed,
@@ -315,20 +317,43 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
 
   if (applyResult.wasNewCall === true && guild) {
     try {
+      const needsDeferredChart =
+        applyResult.wasNewCall &&
+        !applyResult.wasReactivated &&
+        applyResult.trackedCall?.callSourceType === 'user_call' &&
+        isMilestoneChartAttachmentEnabled();
+
       let announcePayload = buildUserCallAnnouncementPayload(
         realData,
         scan,
         applyResult.trackedCall,
         applyResult.wasNewCall,
-        applyResult.wasReactivated
+        applyResult.wasReactivated,
+        { chartPhase: needsDeferredChart ? 'loading' : 'none' }
       );
-      announcePayload = await augmentNewUserCallPayloadWithChart(
-        announcePayload,
-        applyResult.trackedCall,
-        applyResult.wasNewCall,
-        applyResult.wasReactivated
-      );
-      await announceNewUserCallInUserCallsChannel(guild, announcePayload);
+
+      if (!needsDeferredChart) {
+        announcePayload = await augmentNewUserCallPayloadWithChart(
+          announcePayload,
+          applyResult.trackedCall,
+          applyResult.wasNewCall,
+          applyResult.wasReactivated
+        );
+      }
+
+      const mirrorResult = await announceNewUserCallInUserCallsChannel(guild, announcePayload, {
+        returnMessage: true
+      });
+
+      if (needsDeferredChart && mirrorResult.message) {
+        void runDeferredUserCallChartEdits([mirrorResult.message], {
+          realData,
+          scan,
+          trackedCall: applyResult.trackedCall,
+          wasNewCall: applyResult.wasNewCall,
+          wasReactivated: applyResult.wasReactivated
+        });
+      }
     } catch (err) {
       console.error('[XIntake] #user-calls mirror failed:', err.message);
     }

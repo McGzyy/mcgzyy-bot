@@ -25,6 +25,7 @@ const {
   isMilestoneChartAttachmentEnabled,
   fetchTokenChartImageBuffer
 } = require('../utils/tokenChartImage');
+const { getAlertEmbedLayoutMode } = require('../config/alertEmbedLayout');
 
 function formatUsd(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
@@ -692,13 +693,7 @@ function createCompactCaEmbed(data) {
     .setTimestamp();
 }
 
-function createTraderScanEmbed(scan, options = {}) {
-  const showTrackedMeta = options.showTrackedMeta === true;
-
-  const callStatusLine = showTrackedMeta && scan.callSourceType ? createCallStatusLine(scan) : '';
-  const milestoneLine = showTrackedMeta ? formatMilestoneLine(scan.milestoneHit, scan.isNewCall, scan.isNewMilestone) : '';
-  const performanceLine = showTrackedMeta ? formatPerformanceLine(scan.performancePercent, scan.isNewCall) : '';
-
+function collectTraderScanEmbedFields(scan) {
   const fields = [];
 
   fields.push({
@@ -769,28 +764,96 @@ function createTraderScanEmbed(scan, options = {}) {
 
   addFieldIfHasContent(fields, '🎯 Trader Verdict', verdictLines, true);
 
-  const displayMomentum = getDisplayMomentum(scan);
+  return fields;
+}
 
+/** Call / milestone / performance / alert type / momentum — lives on the details embed (Layout B) or below MC (A/C). */
+function buildTraderScanNarrativeBlock(scan, showTrackedMeta) {
+  const callStatusLine = showTrackedMeta && scan.callSourceType ? createCallStatusLine(scan) : '';
+  const milestoneLine = showTrackedMeta ? formatMilestoneLine(scan.milestoneHit, scan.isNewCall, scan.isNewMilestone) : '';
+  const performanceLine = showTrackedMeta ? formatPerformanceLine(scan.performancePercent, scan.isNewCall) : '';
+
+  const displayMomentum = getDisplayMomentum(scan);
   const descLines = [
     `**Momentum:** ${displayMomentum}`,
     `**Risk:** ${formatValue(scan.riskLevel)}`,
     `**Pressure:** ${formatValue(scan.tradePressure, 'Unknown')}`
   ];
 
-  return new EmbedBuilder()
+  return (
+    `${callStatusLine}${milestoneLine}${performanceLine}` +
+    `**${scan.alertType}**` +
+    (descLines.length ? `\n\n${descLines.join('\n')}` : '')
+  ).trim();
+}
+
+function buildTraderDetailsEmbed(scan, showTrackedMeta) {
+  const narrative = buildTraderScanNarrativeBlock(scan, showTrackedMeta);
+  const embed = new EmbedBuilder()
     .setColor(0x00ff99)
-    .setTitle(`🎯 ${scan.tokenName} (${scan.ticker})`)
-    .setDescription(
-      `## ${formatUsd(scan.marketCap)} MC\n` +
-      `${callStatusLine}` +
-      `${milestoneLine}` +
-      `${performanceLine}` +
-      `**${scan.alertType}**` +
-      (descLines.length ? `\n\n${descLines.join('\n')}` : '')
-    )
-    .addFields(fields)
-    .setFooter({ text: 'Crypto Scanner Bot • Trader Scan' })
+    .addFields(...collectTraderScanEmbedFields(scan))
+    .setFooter({ text: 'Crypto Scanner Bot • Call details' })
     .setTimestamp();
+
+  if (narrative) {
+    embed.setDescription(narrative);
+  }
+
+  return embed;
+}
+
+/**
+ * Two-embed trader card so the chart image sits high (Discord renders image below description, not below fields).
+ * @returns {{ embeds: EmbedBuilder[], chartEmbedIndex: number }}
+ */
+function buildTraderScanEmbeds(scan, options = {}) {
+  const showTrackedMeta = options.showTrackedMeta === true;
+  const chartPhase = options.chartPhase === 'loading' ? 'loading' : 'none';
+  const layout = options.layout || getAlertEmbedLayoutMode();
+
+  const mcBlock = `## ${formatUsd(scan.marketCap)} MC\n`;
+  const color = 0x00ff99;
+
+  if (layout === 'A') {
+    const chartEmbed = new EmbedBuilder()
+      .setColor(color)
+      .setDescription(chartPhase === 'loading' ? '⏳ Loading chart...' : '\u200b');
+    const narrative = buildTraderScanNarrativeBlock(scan, showTrackedMeta);
+    const mainBody = `${mcBlock}${narrative}`.trim();
+    const main = new EmbedBuilder()
+      .setColor(color)
+      .setTitle(`${scan.tokenName} · ${scan.ticker}`)
+      .setDescription(mainBody)
+      .addFields(...collectTraderScanEmbedFields(scan))
+      .setFooter({ text: 'Crypto Scanner Bot • Call details' })
+      .setTimestamp();
+    return { embeds: [chartEmbed, main], chartEmbedIndex: 0 };
+  }
+
+  if (layout === 'C') {
+    const chartEmbed = new EmbedBuilder()
+      .setColor(color)
+      .setDescription(chartPhase === 'loading' ? '⏳ Loading chart...' : '\u200b');
+    const compactHeader = `**${scan.tokenName} (${scan.ticker})** — **${formatUsd(scan.marketCap)}** MC`;
+    const narrative = buildTraderScanNarrativeBlock(scan, showTrackedMeta);
+    const main = new EmbedBuilder()
+      .setColor(color)
+      .setDescription(`${compactHeader}\n\n${narrative}`.trim())
+      .addFields(...collectTraderScanEmbedFields(scan))
+      .setFooter({ text: 'Crypto Scanner Bot • Call details' })
+      .setTimestamp();
+    return { embeds: [chartEmbed, main], chartEmbedIndex: 0 };
+  }
+
+  const loadingLine = chartPhase === 'loading' ? '\n\n⏳ Loading chart...' : '';
+  const heroDesc = `${mcBlock}**${formatValue(scan.alertType, 'Scan')}**${loadingLine}`;
+
+  const hero = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(`${scan.tokenName} · ${scan.ticker}`)
+    .setDescription(heroDesc);
+  const details = buildTraderDetailsEmbed(scan, showTrackedMeta);
+  return { embeds: [hero, details], chartEmbedIndex: 0 };
 }
 
 function createScanEmbed(scan) {
@@ -1165,18 +1228,21 @@ async function handleDeepScanReply(message, contractAddress, withButtons = false
     }
   });
 
-  const embed = createTraderScanEmbed({
-    ...scan,
-    greenFlags,
-    redFlags,
-    riskLevel: scan.riskLevel || 'Low',
-    isNewCall: false,
-    isReactivated: false
-  }, {
-    showTrackedMeta: false
-  });
+  const { embeds } = buildTraderScanEmbeds(
+    {
+      ...scan,
+      greenFlags,
+      redFlags,
+      riskLevel: scan.riskLevel || 'Low',
+      isNewCall: false,
+      isReactivated: false
+    },
+    {
+      showTrackedMeta: false
+    }
+  );
 
-  const payload = { embeds: [embed] };
+  const payload = { embeds };
 
   if (withButtons) {
     payload.content = 'What would you like to do?';
@@ -1188,9 +1254,9 @@ async function handleDeepScanReply(message, contractAddress, withButtons = false
 
 /**
  * Same content + embed as `!call` / `handleCallCommand` (for channel mirror + X intake).
- * @returns {{ content: string, embeds: import('discord.js').EmbedBuilder[] }}
+ * @returns {{ content: string, embeds: import('discord.js').EmbedBuilder[], chartEmbedIndex: number }}
  */
-function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated) {
+function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated, embedExtras = {}) {
   const performancePercent = trackedCall
     ? calculatePerformance(scan.marketCap || 0, trackedCall.firstCalledMarketCap)
     : null;
@@ -1201,7 +1267,9 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
 
   const { greenFlags, redFlags } = buildScanFlags(realData);
 
-  const embed = createTraderScanEmbed(
+  const chartPhase = embedExtras.chartPhase === 'loading' ? 'loading' : 'none';
+
+  const { embeds, chartEmbedIndex } = buildTraderScanEmbeds(
     {
       ...scan,
       greenFlags,
@@ -1220,13 +1288,16 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
       isNewMilestone: false
     },
     {
-      showTrackedMeta: true
+      showTrackedMeta: true,
+      chartPhase,
+      layout: embedExtras.layout
     }
   );
 
   return {
     content: '📍 Coin officially called and now being tracked.',
-    embeds: [embed]
+    embeds,
+    chartEmbedIndex
   };
 }
 
@@ -1234,6 +1305,21 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
  * Optionally attach QuickChart PNG for brand-new `user_call` rows only (same gate + fetch as X milestone charts).
  * @returns {Promise<{ content: string, embeds: unknown[], files?: import('discord.js').AttachmentBuilder[] }>}
  */
+function applyChartBufferToPayload(payload, buf) {
+  if (!payload || !buf || buf.length < 24) return payload;
+
+  const attachmentName = 'call-chart.png';
+  const attachment = new AttachmentBuilder(buf, { name: attachmentName });
+  const idx = Number.isInteger(payload.chartEmbedIndex) ? payload.chartEmbedIndex : 0;
+  const embeds = Array.isArray(payload.embeds) ? [...payload.embeds] : [];
+
+  if (embeds[idx] && typeof embeds[idx].setImage === 'function') {
+    embeds[idx] = EmbedBuilder.from(embeds[idx]).setImage(`attachment://${attachmentName}`);
+  }
+
+  return { ...payload, files: [attachment], embeds };
+}
+
 async function augmentNewUserCallPayloadWithChart(
   payload,
   trackedCall,
@@ -1249,28 +1335,53 @@ async function augmentNewUserCallPayloadWithChart(
   const buf = await fetchTokenChartImageBuffer(trackedCall);
   if (!buf || buf.length < 24) return payload;
 
-  const attachmentName = 'call-chart.png';
-  const attachment = new AttachmentBuilder(buf, { name: attachmentName });
-  const files = Array.isArray(payload.files) ? [...payload.files, attachment] : [attachment];
+  return applyChartBufferToPayload(payload, buf);
+}
 
-  const embeds = payload.embeds;
-  if (Array.isArray(embeds) && embeds.length > 0) {
-    const e = embeds[embeds.length - 1];
-    if (e && typeof e.setImage === 'function') {
-      e.setImage(`attachment://${attachmentName}`);
+async function runDeferredUserCallChartEdits(messages, ctx) {
+  const { realData, scan, trackedCall, wasNewCall, wasReactivated } = ctx;
+
+  const buildFinalPayload = () =>
+    buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated, {
+      chartPhase: 'none'
+    });
+
+  const safeEdit = async (payload) => {
+    for (const m of messages) {
+      if (!m || typeof m.edit !== 'function') continue;
+      try {
+        await m.edit({
+          content: payload.content,
+          embeds: payload.embeds,
+          ...(Array.isArray(payload.files) && payload.files.length ? { files: payload.files } : {})
+        });
+      } catch (err) {
+        console.error('[ChartDefer] Message edit failed:', err.message);
+      }
     }
-  }
+  };
 
-  return { ...payload, files };
+  try {
+    const buf = await fetchTokenChartImageBuffer(trackedCall);
+    if (buf && buf.length >= 24) {
+      await safeEdit(applyChartBufferToPayload(buildFinalPayload(), buf));
+    } else {
+      await safeEdit(buildFinalPayload());
+    }
+  } catch (err) {
+    console.error('[ChartDefer] Chart fetch failed:', err.message);
+    await safeEdit(buildFinalPayload());
+  }
 }
 
 /**
  * Post the same announcement as `!call` to #user-calls (new user calls only).
  * @param {import('discord.js').Guild|null} guild
  * @param {{ content: string, embeds: unknown[] }} payload
- * @returns {Promise<{ posted: boolean, reason?: string }>}
+ * @param {{ returnMessage?: boolean }} [options]
+ * @returns {Promise<{ posted: boolean, reason?: string, message?: import('discord.js').Message }>}
  */
-async function announceNewUserCallInUserCallsChannel(guild, payload) {
+async function announceNewUserCallInUserCallsChannel(guild, payload, options = {}) {
   if (!guild?.channels?.cache) {
     return { posted: false, reason: 'no_guild' };
   }
@@ -1289,12 +1400,15 @@ async function announceNewUserCallInUserCallsChannel(guild, payload) {
   }
 
   try {
-    await ch.send({
+    const msg = await ch.send({
       content: payload.content,
       embeds: payload.embeds,
       ...(Array.isArray(payload.files) && payload.files.length ? { files: payload.files } : {}),
       allowedMentions: { parse: [] }
     });
+    if (options.returnMessage) {
+      return { posted: true, message: msg };
+    }
     return { posted: true };
   } catch (err) {
     console.error('[UserCalls] Send failed:', err.message);
@@ -1314,20 +1428,44 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     { callSourceType: 'user_call' }
   );
 
-  let payload = buildUserCallAnnouncementPayload(
-    realData,
-    scan,
-    trackedCall,
-    wasNewCall,
-    wasReactivated
-  );
+  const needsDeferredChart =
+    wasNewCall &&
+    !wasReactivated &&
+    trackedCall?.callSourceType === 'user_call' &&
+    isMilestoneChartAttachmentEnabled();
 
-  payload = await augmentNewUserCallPayloadWithChart(payload, trackedCall, wasNewCall, wasReactivated);
+  let payload = buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated, {
+    chartPhase: needsDeferredChart ? 'loading' : 'none'
+  });
 
-  await message.reply(payload);
+  if (!needsDeferredChart) {
+    payload = await augmentNewUserCallPayloadWithChart(payload, trackedCall, wasNewCall, wasReactivated);
+  }
 
+  const replyPayload = {
+    content: payload.content,
+    embeds: payload.embeds,
+    ...(Array.isArray(payload.files) && payload.files.length ? { files: payload.files } : {})
+  };
+
+  const sentMessage = await message.reply(replyPayload);
+
+  let mirrorMessage = null;
   if (wasNewCall && trackedCall?.callSourceType === 'user_call') {
-    await announceNewUserCallInUserCallsChannel(message.guild, payload);
+    const mirrorResult = await announceNewUserCallInUserCallsChannel(message.guild, payload, {
+      returnMessage: true
+    });
+    mirrorMessage = mirrorResult.message || null;
+  }
+
+  if (needsDeferredChart) {
+    void runDeferredUserCallChartEdits([sentMessage, mirrorMessage].filter(Boolean), {
+      realData,
+      scan,
+      trackedCall,
+      wasNewCall,
+      wasReactivated
+    });
   }
 }
 
@@ -1353,29 +1491,32 @@ async function handleWatchCommand(message, contractAddress, source = 'command') 
 
   const { greenFlags, redFlags } = buildScanFlags(realData);
 
-  const embed = createTraderScanEmbed({
-    ...scan,
-    greenFlags,
-    redFlags,
-    riskLevel: scan.riskLevel || 'Low',
-    firstCallerUsername: trackedCall?.firstCallerUsername,
-    firstCallerDisplayName: trackedCall?.firstCallerDisplayName,
-    firstCallerDiscordId: trackedCall?.firstCallerDiscordId,
-    firstCalledMarketCap: trackedCall?.firstCalledMarketCap,
-    lifecycleStatus: trackedCall?.lifecycleStatus,
-    callSourceType: trackedCall?.callSourceType,
-    isNewCall: wasNewCall,
-    isReactivated: wasReactivated,
-    performancePercent,
-    milestoneHit,
-    isNewMilestone: false
-  }, {
-    showTrackedMeta: true
-  });
+  const { embeds } = buildTraderScanEmbeds(
+    {
+      ...scan,
+      greenFlags,
+      redFlags,
+      riskLevel: scan.riskLevel || 'Low',
+      firstCallerUsername: trackedCall?.firstCallerUsername,
+      firstCallerDisplayName: trackedCall?.firstCallerDisplayName,
+      firstCallerDiscordId: trackedCall?.firstCallerDiscordId,
+      firstCalledMarketCap: trackedCall?.firstCalledMarketCap,
+      lifecycleStatus: trackedCall?.lifecycleStatus,
+      callSourceType: trackedCall?.callSourceType,
+      isNewCall: wasNewCall,
+      isReactivated: wasReactivated,
+      performancePercent,
+      milestoneHit,
+      isNewMilestone: false
+    },
+    {
+      showTrackedMeta: true
+    }
+  );
 
   return message.reply({
     content: '👀 Added to watchlist tracking (no caller credit).',
-    embeds: [embed]
+    embeds
   });
 }
 
@@ -1564,8 +1705,8 @@ async function handleBasicCommands(message, options = {}) {
 
   if (lowerContent === '!scan') {
     const scan = await generateFakeScan();
-    const embed = createTraderScanEmbed(scan, { showTrackedMeta: false });
-    await message.reply({ embeds: [embed] });
+    const { embeds } = buildTraderScanEmbeds(scan, { showTrackedMeta: false });
+    await message.reply({ embeds });
     return true;
   }
 
@@ -1650,8 +1791,11 @@ module.exports = {
   buildDisabledActionButtons,
   handleCallCommand,
   handleWatchCommand,
+  buildTraderScanEmbeds,
   buildUserCallAnnouncementPayload,
   augmentNewUserCallPayloadWithChart,
+  applyChartBufferToPayload,
+  runDeferredUserCallChartEdits,
   announceNewUserCallInUserCallsChannel,
   isLikelySolanaCA,
   applyTrackedCallState,

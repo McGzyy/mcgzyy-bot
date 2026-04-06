@@ -1767,7 +1767,7 @@ if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) 
             member: interaction.member,
             channel: interaction.channel,
             guild: interaction.guild,
-            reply: async (payload) => interaction.followUp(payload)
+            reply: async (payload) => interaction.followUp({ ...payload, fetchReply: true })
           },
           contractAddress,
           'button'
@@ -1792,7 +1792,7 @@ if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) 
             member: interaction.member,
             channel: interaction.channel,
             guild: interaction.guild,
-            reply: async (payload) => interaction.followUp(payload)
+            reply: async (payload) => interaction.followUp({ ...payload, fetchReply: true })
           },
           contractAddress,
           'button'

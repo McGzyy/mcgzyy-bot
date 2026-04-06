@@ -26,6 +26,7 @@ const {
   fetchTokenChartImageBuffer
 } = require('../utils/tokenChartImage');
 const { getAlertEmbedLayoutMode } = require('../config/alertEmbedLayout');
+const { getCallerTrustLevel } = require('../utils/userProfileService');
 
 function formatUsd(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
@@ -1556,6 +1557,14 @@ async function announceNewUserCallInUserCallsChannel(guild, payload, options = {
 }
 
 async function handleCallCommand(message, contractAddress, source = 'command') {
+  try {
+    const uid = message?.author?.id ? String(message.author.id) : '';
+    if (uid) {
+      const level = getCallerTrustLevel(uid);
+      console.log(`[CallerTrust] user=${uid} level=${level} source=discord_call`);
+    }
+  } catch (_) {}
+
   const realData = await runQuickCa(contractAddress);
   const scan = normalizeRealDataToScan(realData);
 

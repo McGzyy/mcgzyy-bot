@@ -62,7 +62,9 @@ const {
   getCallerLeaderboard,
   getTopCallerInTimeframe,
   getBestCallInTimeframe,
-  getBestBotCallInTimeframe
+  getBestBotCallInTimeframe,
+  getTopCallerEligibilityReport,
+  TOP_CALLER_ELIGIBILITY
 } = require('./utils/callerStatsService');
 
 const {
@@ -104,6 +106,10 @@ const {
   previewMemberProfileBackfill,
   runMemberProfileBackfill,
   getUserProfileByDiscordId,
+  CALLER_TRUST_LEVELS,
+  normalizeCallerTrustLevel,
+  getCallerTrustLevel,
+  setCallerTrustLevel,
   setPublicCreditMode,
   startXVerification,
   getPendingXVerifications,
@@ -120,6 +126,13 @@ const {
   runInjectedMentionOnce,
   logXMentionIngestionReadyDiagnostics
 } = require('./utils/xMentionIngestionScaffold');
+
+function parseMentionedUserIdFromContent(message) {
+  const mentioned = message?.mentions?.users?.first?.();
+  if (mentioned?.id) return String(mentioned.id);
+  const m = String(message?.content || '').match(/<@!?(\\d+)>/);
+  return m ? String(m[1]) : '';
+}
 
 const client = new Client({
   intents: [
@@ -2393,6 +2406,260 @@ saveBotSettings(BOT_SETTINGS);
         return;
       }
 
+      if (lowerContent.startsWith('!getcallertrust')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!getcallertrust @user`');
+          return;
+        }
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const level = getCallerTrustLevel(userId);
+        await replyText(
+          message,
+          `🪪 Caller trust for <@${userId}>: **${level}**`
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!setcallertrust ')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(
+            message,
+            '❌ Usage: `!setcallertrust @user <level>`\n' +
+              `Allowed: \`${CALLER_TRUST_LEVELS.join('`, `')}\``
+          );
+          return;
+        }
+
+        const rawLevel = content
+          .replace(/^!setcallertrust\\s+/i, '')
+          .replace(/<@!?(\\d+)>/, '')
+          .trim()
+          .split(/\\s+/)[0];
+
+        const level = normalizeCallerTrustLevel(rawLevel);
+        if (!rawLevel || level === 'none' && String(rawLevel).trim().toLowerCase() !== 'none') {
+          await replyText(
+            message,
+            '❌ Invalid trust level.\n' +
+              `Allowed: \`${CALLER_TRUST_LEVELS.join('`, `')}\``
+          );
+          return;
+        }
+
+        const existing = getUserProfileByDiscordId(userId);
+        if (!existing) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const updated = setCallerTrustLevel(userId, level);
+        if (!updated) {
+          await replyText(message, '❌ Failed to update caller trust level.');
+          return;
+        }
+
+        await replyText(
+          message,
+          `✅ Updated caller trust for <@${userId}>: **${existing.callerTrustLevel || 'none'}** → **${level}**`
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!topcallercheck')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!topcallercheck @user`');
+          return;
+        }
+
+        const report = getTopCallerEligibilityReport(userId);
+        if (!report) {
+          await replyText(message, '❌ Could not evaluate (missing user id).');
+          return;
+        }
+
+        const trust = getCallerTrustLevel(userId);
+        const top3Lines = (report.top3 || [])
+          .map(
+            (t, i) =>
+              `${i + 1}. **${t.tokenName || '?'}** (${t.ticker || '—'}) — **${Number(t.x).toFixed(2)}x**`
+          )
+          .join('\n');
+
+        const reasonBlock = (report.reasons || []).map(r => `• ${r}`).join('\n') || '• (no extra notes)';
+
+        await replyText(
+          message,
+          [
+            `📊 **Top Caller Check** — <@${userId}>`,
+            `**Current trust:** \`${trust}\` _(manual / separate from this tool)_`,
+            '',
+            `**Scope:** Discord-ID-linked \`user_call\` rows only (same validity rules as caller stats).`,
+            `**Draft thresholds:** min **${TOP_CALLER_ELIGIBILITY.minValidCalls}** valid calls, avg X ≥ **${TOP_CALLER_ELIGIBILITY.minAvgX}x** (borderline / NO uses softer floors).`,
+            '',
+            `**Valid calls:** ${report.validCallCount}`,
+            `**Avg X:** ${report.avgX.toFixed(2)}x`,
+            `**Median X:** ${report.medianX.toFixed(2)}x`,
+            `**Best X:** ${report.bestX.toFixed(2)}x${report.bestToken ? ` — ${report.bestToken}` : ''}`,
+            top3Lines ? `\n**Top 3 calls:**\n${top3Lines}` : '',
+            '',
+            `**Excluded from stats (same ID):** ${report.excludedFromStatsCount}`,
+            `**Denied / excluded / expired approval (same ID):** ${report.blockedByApprovalCount}`,
+            `**Total user_call rows for this ID:** ${report.idLinkedCallCount}`,
+            '',
+            `**Eligible (draft):** **${report.eligibility}**`,
+            '',
+            '**Notes:**',
+            reasonBlock,
+            '',
+            '_Read-only — does not change trust or roles._'
+          ]
+            .filter(Boolean)
+            .join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!approvetopcaller')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!approvetopcaller @user`');
+          return;
+        }
+
+        const existing = getUserProfileByDiscordId(userId);
+        if (!existing) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const current = getCallerTrustLevel(userId);
+        if (current === 'top_caller') {
+          await replyText(
+            message,
+            `ℹ️ <@${userId}> is already **top_caller**. No change.`
+          );
+          return;
+        }
+        if (current === 'trusted_pro') {
+          await replyText(
+            message,
+            '❌ **trusted_pro** is a separate curated tier. This command only sets **top_caller** and would replace that value.\n' +
+              'Use `!setcallertrust` if you need to change **trusted_pro** or combine tiers manually.'
+          );
+          return;
+        }
+        if (current === 'restricted') {
+          await replyText(
+            message,
+            '❌ User is **restricted**. Resolve trust with `!setcallertrust` before using Top Caller promotion.'
+          );
+          return;
+        }
+
+        const updated = setCallerTrustLevel(userId, 'top_caller');
+        if (!updated) {
+          await replyText(message, '❌ Failed to update caller trust level.');
+          return;
+        }
+
+        const draftReport = getTopCallerEligibilityReport(userId);
+        const draftLine = draftReport
+          ? `_Draft \`!topcallercheck\`: **${draftReport.eligibility}**_`
+          : '';
+
+        await replyText(
+          message,
+          [
+            `✅ **top_caller** granted to <@${userId}> (was \`${current}\`).`,
+            draftLine,
+            '_Does not assign Discord roles — trust field only._'
+          ]
+            .filter(Boolean)
+            .join('\n')
+        );
+        return;
+      }
+
+      if (lowerContent.startsWith('!removetopcaller')) {
+        if (!message.member?.permissions?.has('ManageGuild')) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        const userId = parseMentionedUserIdFromContent(message);
+        if (!userId) {
+          await replyText(message, '❌ Usage: `!removetopcaller @user`');
+          return;
+        }
+
+        const existing = getUserProfileByDiscordId(userId);
+        if (!existing) {
+          await replyText(message, '❌ That user does not have a profile yet.');
+          return;
+        }
+
+        const current = getCallerTrustLevel(userId);
+        if (current !== 'top_caller') {
+          await replyText(
+            message,
+            `ℹ️ <@${userId}> is not **top_caller** (current: **${current}**). No change.`
+          );
+          return;
+        }
+
+        const updatedCaller = setCallerTrustLevel(userId, 'approved');
+        if (!updatedCaller) {
+          await replyText(message, '❌ Failed to update caller trust level.');
+          return;
+        }
+
+        const draftReport = getTopCallerEligibilityReport(userId);
+        const draftLine = draftReport
+          ? `_Draft \`!topcallercheck\` would now read: **${draftReport.eligibility}**_`
+          : '';
+
+        await replyText(
+          message,
+          [
+            `✅ Removed **top_caller** from <@${userId}> → **approved** (standard caller trust, not a full reset).`,
+            draftLine,
+            '_trusted_pro and other tiers were not involved._'
+          ]
+            .filter(Boolean)
+            .join('\n')
+        );
+        return;
+      }
+
       if (lowerContent.startsWith('!verifyx ')) {
         if (!message.member?.permissions?.has('ManageGuild')) {
           await replyText(message, '❌ You need **Manage Server** permission to use this command.');
@@ -2862,7 +3129,10 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
       `• \`!testxmention\` — Inject fake mention through **ingestion scaffold** (dry-run); owner \`apply\` + reply step (**needs \`#call\`**)\n` +
       `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
       `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
-      `• \`!truebotstats\` — Bot stats including reset/excluded calls\n\n`;
+      `• \`!truebotstats\` — Bot stats including reset/excluded calls\n` +
+      `• \`!topcallercheck @user\` — Read-only Top Caller eligibility (Discord-ID-linked calls; draft thresholds)\n` +
+      `• \`!approvetopcaller @user\` — Set caller trust to **top_caller**\n` +
+      `• \`!removetopcaller @user\` — Clear **top_caller** → **approved**\n\n`;
   }
 
   // BOT OWNER ONLY

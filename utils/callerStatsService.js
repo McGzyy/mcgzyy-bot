@@ -131,6 +131,139 @@ function buildTopCalls(calls = [], limit = 5) {
     .slice(0, limit);
 }
 
+function callerMatchesDiscordId(call, discordUserId) {
+  const uid = discordUserId != null ? String(discordUserId).trim() : '';
+  if (!uid) return false;
+  const cid = String(call.firstCallerDiscordId || call.firstCallerId || '').trim();
+  return cid === uid;
+}
+
+function medianSorted(xs) {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  if (s.length % 2) return s[mid];
+  return (s[mid - 1] + s[mid]) / 2;
+}
+
+/** Draft v1 thresholds for mod-facing Top Caller eligibility (not enforced automatically). */
+const TOP_CALLER_ELIGIBILITY = {
+  minValidCalls: 10,
+  minAvgX: 2.0,
+  noLineAvgX: 1.4,
+  minCallsNoLine: 5
+};
+
+/**
+ * Read-only: evaluate a user using Discord-ID-linked `user_call` rows only (no alias fallback).
+ * @param {string} discordUserId
+ * @returns {object|null}
+ */
+function getTopCallerEligibilityReport(discordUserId) {
+  const uid = discordUserId != null ? String(discordUserId).trim() : '';
+  if (!uid) return null;
+
+  const allTracked = getAllTrackedCalls();
+  const idLinked = allTracked.filter(
+    c => c && c.callSourceType === 'user_call' && callerMatchesDiscordId(c, uid)
+  );
+
+  const excludedFromStatsCount = idLinked.filter(c => c.excludedFromStats === true).length;
+  const badApprovalStatuses = new Set(['denied', 'excluded', 'expired']);
+  const blockedByApprovalCount = idLinked.filter(c =>
+    badApprovalStatuses.has(String(c.approvalStatus || '').toLowerCase())
+  ).length;
+
+  const eligiblePool = idLinked.filter(
+    c =>
+      !c.excludedFromStats &&
+      !badApprovalStatuses.has(String(c.approvalStatus || '').toLowerCase())
+  );
+
+  const valid = eligiblePool.filter(isValid);
+  const xs = valid.map(c => calculateX(c.firstCalledMarketCap, getAth(c)));
+
+  let totalX = 0;
+  let bestX = 0;
+  let bestToken = '';
+  for (let i = 0; i < valid.length; i++) {
+    const x = xs[i];
+    totalX += x;
+    if (x > bestX) {
+      bestX = x;
+      bestToken = `${valid[i].tokenName || 'Unknown'} ($${valid[i].ticker || '—'})`;
+    }
+  }
+
+  const validCount = valid.length;
+  const avgX = validCount ? totalX / validCount : 0;
+  const medianX = medianSorted(xs);
+  const top3 = buildTopCalls(valid, 3);
+
+  const lookup = {
+    raw: '',
+    discordUserId: uid,
+    username: '',
+    displayName: ''
+  };
+  const profile = resolveCallerIdentity({
+    discordUserId: uid,
+    username: '',
+    displayName: '',
+    rawInput: ''
+  });
+  const legacyMatched = allTracked.filter(
+    c => c && c.callSourceType === 'user_call' && matchCaller(c, lookup, profile)
+  );
+  const legacyMoreThanIdOnly = legacyMatched.length > idLinked.length;
+
+  let eligibility = 'BORDERLINE';
+  const reasons = [];
+
+  const { minValidCalls, minAvgX, noLineAvgX, minCallsNoLine } = TOP_CALLER_ELIGIBILITY;
+
+  if (validCount >= minValidCalls && avgX >= minAvgX) {
+    eligibility = 'YES';
+    reasons.push(`Meets minimum valid calls (${minValidCalls}+) and average X (≥${minAvgX}x).`);
+  } else if (validCount < minCallsNoLine || avgX < noLineAvgX) {
+    eligibility = 'NO';
+    if (validCount < minCallsNoLine) reasons.push(`Below minimum sample for a clear read (${minCallsNoLine}+ valid calls).`);
+    if (avgX < noLineAvgX) reasons.push(`Average X below conservative floor (need ≥${noLineAvgX}x at this stage).`);
+  } else {
+    eligibility = 'BORDERLINE';
+    if (validCount < minValidCalls) reasons.push(`Valid calls ${validCount} — under ${minValidCalls} target.`);
+    if (avgX < minAvgX) reasons.push(`Average X ${avgX.toFixed(2)}x — under ${minAvgX}x target.`);
+    if (bestX >= minAvgX * 2) reasons.push('Best call is strong; sample or average still catching up.');
+  }
+
+  if (legacyMoreThanIdOnly) {
+    reasons.push(
+      '**Caveat:** extra user_call rows match via username/display legacy paths but not Discord ID on row — not counted here.'
+    );
+  }
+
+  if (validCount === 0 && idLinked.length === 0) {
+    reasons.push('No user_call rows with this Discord ID as first caller.');
+  }
+
+  return {
+    discordUserId: uid,
+    validCallCount: validCount,
+    avgX,
+    medianX,
+    bestX,
+    bestToken,
+    top3,
+    excludedFromStatsCount,
+    blockedByApprovalCount,
+    idLinkedCallCount: idLinked.length,
+    legacyMoreThanIdOnly,
+    eligibility,
+    reasons,
+    thresholds: { ...TOP_CALLER_ELIGIBILITY }
+  };
+}
+
 /**
  * =========================
  * HUMAN CALLER STATS
@@ -393,5 +526,7 @@ module.exports = {
   getCallerStatsRaw,
   getCallerLeaderboard,
   getBotStats,
-  getBotStatsRaw
+  getBotStatsRaw,
+  getTopCallerEligibilityReport,
+  TOP_CALLER_ELIGIBILITY
 };

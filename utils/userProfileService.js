@@ -56,6 +56,13 @@ function normalizeLower(value) {
   return normalizeString(value).toLowerCase();
 }
 
+const CALLER_TRUST_LEVELS = ['none', 'approved', 'top_caller', 'trusted_pro', 'restricted'];
+
+function normalizeCallerTrustLevel(level) {
+  const raw = String(level || '').trim().toLowerCase();
+  return CALLER_TRUST_LEVELS.includes(raw) ? raw : 'none';
+}
+
 function normalizeXHandle(value) {
   let raw = normalizeString(value);
 
@@ -153,6 +160,7 @@ function ensureMemberMetaShape(profile) {
   profile.guildMember = profile.guildMember === true;
   if (!Array.isArray(profile.rolesSnapshot)) profile.rolesSnapshot = [];
   if (profile.xVerifiedAt === undefined) profile.xVerifiedAt = null;
+  if (profile.callerTrustLevel === undefined) profile.callerTrustLevel = 'none';
 
   return profile;
 }
@@ -191,6 +199,8 @@ function createEmptyProfile({
     publicSettings: getDefaultPublicSettings(),
     publicTracking: getDefaultPublicTracking(),
 
+    callerTrustLevel: 'none',
+
     createdAt: now,
     updatedAt: now
   };
@@ -208,6 +218,21 @@ function createEmptyProfile({
 
 function getAllUserProfiles() {
   return loadUserProfiles();
+}
+
+function getCallerTrustLevel(discordUserId) {
+  const profile = getUserProfileByDiscordId(discordUserId);
+  return normalizeCallerTrustLevel(profile?.callerTrustLevel || 'none');
+}
+
+function setCallerTrustLevel(discordUserId, level) {
+  const normalizedLevel = normalizeCallerTrustLevel(level);
+  return updateUserProfile(discordUserId, { callerTrustLevel: normalizedLevel });
+}
+
+function isCallerApproved(discordUserId) {
+  const level = getCallerTrustLevel(discordUserId);
+  return level !== 'none' && level !== 'restricted';
 }
 
 function getUserProfileByDiscordId(discordUserId) {
@@ -960,5 +985,12 @@ module.exports = {
 
   // public identity
   resolvePublicCallerName,
-  getPublicCallerIdentity
+  getPublicCallerIdentity,
+
+  // caller trust
+  CALLER_TRUST_LEVELS,
+  normalizeCallerTrustLevel,
+  getCallerTrustLevel,
+  setCallerTrustLevel,
+  isCallerApproved
 };

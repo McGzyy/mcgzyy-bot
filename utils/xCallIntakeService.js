@@ -31,6 +31,7 @@ const {
   decideXMentionIntakeReply,
   buildXMentionSuccessReplyText
 } = require('./xIntakeReplyPolicy');
+const { getCallerTrustLevel } = require('./userProfileService');
 
 const X_CALL_INTAKE_SOURCE = 'x_mention';
 
@@ -190,6 +191,12 @@ async function processVerifiedXMentionCallIntake(payload, options = {}) {
       callerContext: null
     };
   }
+
+  try {
+    const uid = String(discordUserIdForGuild);
+    const level = getCallerTrustLevel(uid);
+    console.log(`[CallerTrust] user=${uid} level=${level} source=x_mention`);
+  } catch (_) {}
 
   let guildTrust = null;
   if (!skipGuildMembershipCheck) {

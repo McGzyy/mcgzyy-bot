@@ -16,11 +16,11 @@
  *   CHART_TV_INTERVAL_ORDER — comma list (default 15s,5s,1s,30s,1m,15m,1h,4h,1d)
  *   CHART_TV_TOOLBAR_BAND_PX — pixels below top chart canvas to scan for interval row (default 200)
  *   CHART_TV_METRIC_BAND_EXTRA_PX — extra band height/width for Price/MCAP toolbar vs intervals (default 100)
- *   CHART_TV_METRIC_SETTLE_MS — wait after MCAP click before final stabilize/screenshot (default 700)
- *   CHART_TV_METRIC_VERIFY_MS — post-click MCAP verify poll (default 2400)
+ *   CHART_TV_METRIC_SETTLE_MS — wait after MCAP click before final stabilize/screenshot (default 320)
+ *   CHART_TV_METRIC_VERIFY_MS — post-click MCAP verify poll (default 700)
  *   CHART_TV_METRIC_SECOND_PASS_EXTRA_PX — extra toolbar band for second MCAP toggle pass (default 56, 0 disables)
- *   CHART_TV_INTERVAL_TOOLBAR_WAIT_MS / CHART_TV_INTERVAL_TOOLBAR_POLL_MS — toolbar readiness poll (wait default ~2200ms; ready when any interval token appears)
- *   CHART_TV_INTERVAL_VERIFY_MS — post-click verify poll (like CHART_DEX_INTERVAL_VERIFY_MS)
+ *   CHART_TV_INTERVAL_TOOLBAR_WAIT_MS / CHART_TV_INTERVAL_TOOLBAR_POLL_MS — toolbar readiness poll (wait default ~1000ms; ready when any interval token appears)
+ *   CHART_TV_INTERVAL_VERIFY_MS — post-click verify poll (default ~900ms; like CHART_DEX_INTERVAL_VERIFY_MS)
  *   CHART_TV_DEBUG=1 — on failure: debug/tv-*.png + tv-dom.html (also if CHART_DEX_DEBUG=1)
  *
  * Post-interval/metric framing (subtle wheel-out on largest chart canvas for more visible history):
@@ -760,7 +760,7 @@ async function readLargestCanvasDimsInTvFrame(frame) {
 }
 
 async function verifyGeckoIntervalChangeAfterClick(page, frame, fidx, label, canvasBefore, bandPx, opts = {}) {
-  const envMax = Math.min(5000, Math.max(600, Math.floor(numEnv('CHART_TV_INTERVAL_VERIFY_MS', 2400))));
+  const envMax = Math.min(2500, Math.max(400, Math.floor(numEnv('CHART_TV_INTERVAL_VERIFY_MS', 900))));
   let maxMs = envMax;
   if (opts.maxMs != null && Number.isFinite(opts.maxMs)) {
     maxMs = Math.min(envMax, Math.max(200, Math.floor(opts.maxMs)));
@@ -769,7 +769,7 @@ async function verifyGeckoIntervalChangeAfterClick(page, frame, fidx, label, can
   let lastSignal = 'none';
 
   while (Date.now() - start < maxMs) {
-    await page.waitForTimeout(160);
+    await page.waitForTimeout(90);
     const sig = await readGeckoIntervalSelectionSignals(frame, label, bandPx);
     if (
       sig.found &&
@@ -810,14 +810,14 @@ async function verifyGeckoIntervalChangeAfterClick(page, frame, fidx, label, can
  */
 async function waitForGeckoIntervalToolbarReady(page, opts = {}) {
   const deadline = opts.deadline != null ? opts.deadline : null;
-  const envTimeout = Math.min(5000, Math.max(1200, Math.floor(numEnv('CHART_TV_INTERVAL_TOOLBAR_WAIT_MS', 2200))));
+  const envTimeout = Math.min(5000, Math.max(700, Math.floor(numEnv('CHART_TV_INTERVAL_TOOLBAR_WAIT_MS', 1000))));
   let timeoutMs = envTimeout;
   if (deadline != null) {
     const rem = tvRemainingMs(deadline);
-    const reserveMs = Math.min(22000, Math.max(10000, Math.floor(numEnv('CHART_TV_CAPTURE_POST_TOOLBAR_RESERVE_MS', 15000))));
-    timeoutMs = Math.min(envTimeout, Math.max(2500, rem - reserveMs));
+    const reserveMs = Math.min(22000, Math.max(8000, Math.floor(numEnv('CHART_TV_CAPTURE_POST_TOOLBAR_RESERVE_MS', 12000))));
+    timeoutMs = Math.min(envTimeout, Math.max(2000, rem - reserveMs));
   }
-  const pollMs = Math.min(600, Math.max(180, Math.floor(numEnv('CHART_TV_INTERVAL_TOOLBAR_POLL_MS', 250))));
+  const pollMs = Math.min(500, Math.max(120, Math.floor(numEnv('CHART_TV_INTERVAL_TOOLBAR_POLL_MS', 120))));
   const bandPx = tvToolbarBandPx();
 
   console.info(
@@ -1006,7 +1006,7 @@ async function trySelectGeckoIntervals(page, opts = {}) {
    */
   async function attemptIntervalLabelOnFrame(rankPass, frame, fidx, label) {
     const rem = tvRemainingMs(deadline);
-    const verifyCap = Math.max(250, Math.min(2400, Math.max(200, rem - 120)));
+    const verifyCap = Math.max(200, Math.min(900, Math.max(200, rem - 100)));
     const clickTimeout = Math.min(2500, Math.max(250, rem));
     const clickTimeoutShort = Math.min(1800, Math.max(250, rem));
     const wants = geckoIntervalMatchTokens(label);
@@ -1161,7 +1161,7 @@ async function trySelectGeckoIntervals(page, opts = {}) {
           console.info(
             `[TokenChartTV] interval candidate success label="${label}" signal=${r.signal != null ? r.signal : 'n/a'}`
           );
-          await page.waitForTimeout(Math.min(450, Math.max(0, tvRemainingMs(deadline))));
+          await page.waitForTimeout(Math.min(150, Math.max(0, tvRemainingMs(deadline))));
           break outer;
         }
         lastReason = r.failReason || 'attempt_failed';
@@ -1692,7 +1692,7 @@ async function readGeckoMetricSelectionSignals(frame, bandMetricPx, topSlackPx) 
 }
 
 async function verifyGeckoMetricAfterClick(page, frame, fidx, wanted, bandMetricPx, topSlackPx, opts = {}) {
-  const envMax = Math.min(5000, Math.max(500, Math.floor(numEnv('CHART_TV_METRIC_VERIFY_MS', 2400))));
+  const envMax = Math.min(2200, Math.max(350, Math.floor(numEnv('CHART_TV_METRIC_VERIFY_MS', 700))));
   let maxMs = envMax;
   if (opts.maxMs != null && Number.isFinite(opts.maxMs)) {
     maxMs = Math.min(envMax, Math.max(200, Math.floor(opts.maxMs)));
@@ -1701,7 +1701,7 @@ async function verifyGeckoMetricAfterClick(page, frame, fidx, wanted, bandMetric
   let last = 'none';
 
   while (Date.now() - start < maxMs) {
-    await page.waitForTimeout(140);
+    await page.waitForTimeout(75);
     const sig = await readGeckoMetricSelectionSignals(frame, bandMetricPx, topSlackPx);
     if (sig.mcapActive || sig.titleMarketCap) {
       last = `toolbar_state titleMarketCap=${!!sig.titleMarketCap} mcapActive=${!!sig.mcapActive} mcapScore=${sig.mcapScore} priceScore=${sig.priceScore} mcapText="${sig.mcapText}"`;
@@ -1922,8 +1922,8 @@ async function applyGeckoMetricMcapFromPage(page, wanted = 'mcap', opts = {}) {
       if (row.maxA < 4000 && row.sumA < 5000) continue;
       const { frame, index: fidx } = row;
 
-      const verifyCap = Math.max(350, Math.min(2400, tvRemainingMs(deadline) - 250));
-      const clickFast = Math.min(700, Math.max(250, tvRemainingMs(deadline)));
+      const verifyCap = Math.max(280, Math.min(900, tvRemainingMs(deadline) - 180));
+      const clickFast = Math.min(550, Math.max(220, tvRemainingMs(deadline)));
 
       try {
         let qd = { ok: false, reason: 'skip' };
@@ -1947,7 +1947,7 @@ async function applyGeckoMetricMcapFromPage(page, wanted = 'mcap', opts = {}) {
             `[TokenChartTV] metric quick includes-click ok frame[${fidx}] text="${qd.matchedText || ''}"`
           );
           const verQ = await verifyGeckoMetricAfterClick(page, frame, fidx, w, bandM, topSlack, {
-            maxMs: Math.min(1200, verifyCap)
+            maxMs: Math.min(450, verifyCap)
           });
           if (verQ.ok) {
             console.info('[TokenChartTV] metric mode selected: mcap');
@@ -2074,8 +2074,8 @@ async function applyGeckoMetricMcapFromPage(page, wanted = 'mcap', opts = {}) {
     for (const row of rankedPass2) {
       if (row.maxA < 4000 && row.sumA < 5000) continue;
       const { frame, index: fidx } = row;
-      const verifyCap2 = Math.max(400, Math.min(2200, tvRemainingMs(deadline) - 180));
-      if (verifyCap2 < 380) continue;
+      const verifyCap2 = Math.max(350, Math.min(900, tvRemainingMs(deadline) - 150));
+      if (verifyCap2 < 320) continue;
       console.info(`[TokenChartTV] metric second-pass toggle band frame[${fidx}] extraBandPx=${extraBand}`);
       try {
         await logGeckoMetricToolbarCandidates(frame, fidx, bandM + extraBand, topSlack2);
@@ -2229,10 +2229,10 @@ async function applyGeckoFramingAssist(page, _frame, selectedInterval, _frameInd
   const deltaMag = Math.max(20, Math.floor(numEnv('CHART_TV_FRAMING_WHEEL_DELTA', 100)));
   let sign = Number(process.env.CHART_TV_FRAMING_WHEEL_SIGN);
   if (!Number.isFinite(sign) || sign === 0) sign = 1;
-  const delayMs = Math.max(30, Math.floor(numEnv('CHART_TV_FRAMING_WHEEL_DELAY_MS', 72)));
+  const delayMs = Math.max(28, Math.floor(numEnv('CHART_TV_FRAMING_WHEEL_DELAY_MS', 45)));
 
   await page.mouse.move(plot.absX, plot.absY);
-  await page.waitForTimeout(70);
+  await page.waitForTimeout(45);
 
   for (let i = 0; i < n; i++) {
     await page.mouse.wheel(0, sign * deltaMag);
@@ -2328,7 +2328,7 @@ async function fetchTradingViewChartPng(trackedCall) {
     }
 
     await dismissOptionalOverlays(page);
-    const canvasWaitMs = Math.min(timeoutMs, 45000, Math.max(3000, tvRemainingMs(deadline)));
+    const canvasWaitMs = Math.min(timeoutMs, 28000, Math.max(2800, tvRemainingMs(deadline)));
     await waitForAnyFrameCanvas(page, CANVAS_WAIT_MIN_AREA, canvasWaitMs);
 
     await saveTvDebugStep(page, 'tv-after-load.png');
@@ -2377,8 +2377,8 @@ async function fetchTradingViewChartPng(trackedCall) {
     }
 
     const settleMs = Math.min(
-      Math.max(0, Math.floor(numEnv('CHART_TV_METRIC_SETTLE_MS', 700))),
-      Math.max(0, tvRemainingMs(deadline) - 50)
+      Math.max(0, Math.floor(numEnv('CHART_TV_METRIC_SETTLE_MS', 320))),
+      Math.max(0, tvRemainingMs(deadline) - 40)
     );
     if (settleMs > 0) await page.waitForTimeout(settleMs);
 
@@ -2386,9 +2386,9 @@ async function fetchTradingViewChartPng(trackedCall) {
 
     const stabEnv = numEnv(
       'CHART_TV_STABILIZE_MS',
-      numEnv('CHART_GMGN_STABILIZE_MS', numEnv('CHART_DEX_STABILIZE_MS', 1200))
+      numEnv('CHART_GMGN_STABILIZE_MS', numEnv('CHART_DEX_STABILIZE_MS', 520))
     );
-    const stabilizeMs = Math.min(stabEnv, Math.max(0, tvRemainingMs(deadline) - 50));
+    const stabilizeMs = Math.min(stabEnv, Math.max(0, tvRemainingMs(deadline) - 40));
     if (stabilizeMs > 0) await page.waitForTimeout(stabilizeMs);
 
     let cap = await screenshotGeckoChartRegionDetailed(page);

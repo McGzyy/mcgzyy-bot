@@ -97,6 +97,23 @@ function shortenCA(ca) {
   return `${ca.slice(0, 6)}...${ca.slice(-6)}`;
 }
 
+/** Strong call-card title: 🎯 Name ($TICK) with redundant ticker dropped. */
+function formatCallAlertEmbedTitle(scan) {
+  const name = formatValue(scan.tokenName, 'Token').trim();
+  let tick = formatValue(scan.ticker, '').trim().replace(/^\$+/, '');
+  const nameLower = name.toLowerCase();
+  const tickLower = tick.toLowerCase();
+  if (tick && (tickLower === nameLower || nameLower.includes(tickLower))) {
+    tick = '';
+  }
+  const tickShow = tick ? (tick.startsWith('$') ? tick : `$${tick}`) : '';
+  let title = tickShow ? `🎯 ${name} (${tickShow})` : `🎯 ${name}`;
+  if (title.length > 250) {
+    title = `${title.slice(0, 247)}…`;
+  }
+  return title;
+}
+
 function buildActionButtons(contractAddress) {
   return [
     new ActionRowBuilder().addComponents(
@@ -767,6 +784,101 @@ function collectTraderScanEmbedFields(scan) {
   return fields;
 }
 
+/** Caller / milestone / performance only — Layout B hero carries setup pulse; avoids duplicating alert lines. */
+function buildDetailsNarrativeOnly(scan, showTrackedMeta) {
+  const callStatusLine = showTrackedMeta && scan.callSourceType ? createCallStatusLine(scan) : '';
+  const milestoneLine = showTrackedMeta ? formatMilestoneLine(scan.milestoneHit, scan.isNewCall, scan.isNewMilestone) : '';
+  const performanceLine = showTrackedMeta ? formatPerformanceLine(scan.performancePercent, scan.isNewCall) : '';
+  return `${callStatusLine}${milestoneLine}${performanceLine}`.trim();
+}
+
+/** Layout B second card: grouped fields, less wall-of-stats. */
+function collectGroupedTraderDetailsFields(scan) {
+  const fields = [];
+
+  fields.push({
+    name: '🧾 Contract',
+    value: `\`${formatValue(scan.contractAddress, 'Unknown')}\``,
+    inline: false
+  });
+
+  const links = buildLinksLine([
+    scan.website ? `[Website](${scan.website})` : null,
+    scan.twitter ? `[X / Twitter](${scan.twitter})` : null,
+    scan.telegram ? `[Telegram](${scan.telegram})` : null
+  ]);
+  fields.push({
+    name: '🔗 Socials',
+    value: links || '*No links listed*',
+    inline: false
+  });
+
+  if ((scan.greenFlags && scan.greenFlags.length) || (scan.redFlags && scan.redFlags.length)) {
+    const greenPart =
+      scan.greenFlags && scan.greenFlags.length
+        ? `**Green**\n${formatReasonList(scan.greenFlags)}`
+        : '';
+    const redPart =
+      scan.redFlags && scan.redFlags.length ? `**Red**\n${formatReasonList(scan.redFlags)}` : '';
+    const gap = greenPart && redPart ? '\n\n' : '';
+    fields.push({
+      name: '🚦 Scanner flags',
+      value: `${greenPart}${gap}${redPart}`,
+      inline: false
+    });
+  }
+
+  const snap = [];
+  addLineIfMeaningful(snap, 'MC', scan.marketCap, formatUsd, { type: 'number' });
+  addLineIfMeaningful(snap, 'Liq', scan.liquidity, formatUsd, { type: 'number' });
+  addLineIfMeaningful(snap, 'Vol 5m', scan.volume5m, formatUsd, { type: 'number' });
+  addLineIfMeaningful(snap, 'Vol 1h', scan.volume1h, formatUsd, { type: 'number' });
+  addLineIfMeaningful(snap, 'Age', scan.ageMinutes, (v) => `${v}m`, { type: 'number', allowZero: true });
+  addLineIfMeaningful(snap, 'Holders', scan.holders, (v) => String(v), { type: 'number', allowZero: false });
+  if (snap.length) {
+    fields.push({
+      name: '💧 Market snapshot',
+      value: snap.join(' · '),
+      inline: false
+    });
+  }
+
+  const flow = [];
+  addLineIfMeaningful(flow, 'B/S 5m', scan.buySellRatio5m, (v) => String(v));
+  addLineIfMeaningful(flow, 'B/S 1h', scan.buySellRatio1h, (v) => String(v));
+  addLineIfMeaningful(flow, 'Tape', getTradeQualityLabel(scan));
+  if (flow.length) {
+    fields.push({
+      name: '⚡ Flow',
+      value: flow.join(' · '),
+      inline: false
+    });
+  }
+
+  fields.push({
+    name: '⚖️ Desk read',
+    value:
+      `**${formatValue(scan.status)}** · **${formatValue(scan.conviction)}**\n` +
+      `Entry **${scan.entryScore}/100** · Grade **${formatValue(scan.grade)}**`,
+    inline: false
+  });
+
+  return fields;
+}
+
+function buildLayoutBHeroDescription(scan, chartPhase) {
+  const mcHead = `## ${formatUsd(scan.marketCap)}`;
+  const mcSub = '*Market cap · snapshot*';
+  const setup =
+    `**${formatValue(scan.alertType, 'Setup')}** · **${scan.entryScore}/100** · **${formatValue(scan.grade, '—')}**`;
+  const pulse = `**Pulse** ${getDisplayMomentum(scan)} · **Risk** ${formatValue(scan.riskLevel)} · **Pressure** ${formatValue(
+    scan.tradePressure,
+    '—'
+  )}`;
+  const loading = chartPhase === 'loading' ? '\n\n*⏳ Loading chart…*' : '';
+  return `${mcHead}\n${mcSub}\n\n${setup}\n${pulse}${loading}`;
+}
+
 /** Call / milestone / performance / alert type / momentum — lives on the details embed (Layout B) or below MC (A/C). */
 function buildTraderScanNarrativeBlock(scan, showTrackedMeta) {
   const callStatusLine = showTrackedMeta && scan.callSourceType ? createCallStatusLine(scan) : '';
@@ -788,11 +900,11 @@ function buildTraderScanNarrativeBlock(scan, showTrackedMeta) {
 }
 
 function buildTraderDetailsEmbed(scan, showTrackedMeta) {
-  const narrative = buildTraderScanNarrativeBlock(scan, showTrackedMeta);
+  const narrative = buildDetailsNarrativeOnly(scan, showTrackedMeta);
   const embed = new EmbedBuilder()
-    .setColor(0x00ff99)
-    .addFields(...collectTraderScanEmbedFields(scan))
-    .setFooter({ text: 'Crypto Scanner Bot • Call details' })
+    .setColor(0x047857)
+    .addFields(...collectGroupedTraderDetailsFields(scan))
+    .setFooter({ text: 'Crypto Scanner · Supporting intel' })
     .setTimestamp();
 
   if (narrative) {
@@ -822,7 +934,7 @@ function buildTraderScanEmbeds(scan, options = {}) {
     const mainBody = `${mcBlock}${narrative}`.trim();
     const main = new EmbedBuilder()
       .setColor(color)
-      .setTitle(`${scan.tokenName} · ${scan.ticker}`)
+      .setTitle(formatCallAlertEmbedTitle(scan))
       .setDescription(mainBody)
       .addFields(...collectTraderScanEmbedFields(scan))
       .setFooter({ text: 'Crypto Scanner Bot • Call details' })
@@ -845,13 +957,10 @@ function buildTraderScanEmbeds(scan, options = {}) {
     return { embeds: [chartEmbed, main], chartEmbedIndex: 0 };
   }
 
-  const loadingLine = chartPhase === 'loading' ? '\n\n⏳ Loading chart...' : '';
-  const heroDesc = `${mcBlock}**${formatValue(scan.alertType, 'Scan')}**${loadingLine}`;
-
   const hero = new EmbedBuilder()
-    .setColor(color)
-    .setTitle(`${scan.tokenName} · ${scan.ticker}`)
-    .setDescription(heroDesc);
+    .setColor(0x34d399)
+    .setTitle(formatCallAlertEmbedTitle(scan))
+    .setDescription(buildLayoutBHeroDescription(scan, chartPhase));
   const details = buildTraderDetailsEmbed(scan, showTrackedMeta);
   return { embeds: [hero, details], chartEmbedIndex: 0 };
 }

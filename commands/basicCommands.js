@@ -98,10 +98,7 @@ function safeLink(label, url) {
   return url ? `[${label}](${url})` : null;
 }
 
-function isLikelySolanaCA(input = '') {
-  const clean = String(input || '').trim();
-  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(clean);
-}
+const { isLikelySolanaCA } = require('../utils/solanaAddress');
 
 function shortenCA(ca) {
   if (!ca || ca.length < 14) return ca || 'Unknown';

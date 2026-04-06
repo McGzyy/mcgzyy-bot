@@ -135,42 +135,14 @@ const {
 } = require('./utils/xMentionIngestionScaffold');
 
 const { getModQueuesSnapshot } = require('./utils/modQueueService');
+const { parseProCallCommandArgs } = require('./utils/proCallText');
+const { extractFirstSolanaCaFromText } = require('./utils/solanaAddress');
 
 function parseMentionedUserIdFromContent(message) {
   const mentioned = message?.mentions?.users?.first?.();
   if (mentioned?.id) return String(mentioned.id);
   const m = String(message?.content || '').match(/<@!?(\\d+)>/);
   return m ? String(m[1]) : '';
-}
-
-function sanitizeProField(value, maxLen) {
-  let s = String(value || '')
-    .replace(/\r?\n/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!s) return '';
-
-  s = s.replace(/@\w+/g, '[mention]');
-  s = s.replace(/https?:\/\/\S+/gi, '').replace(/\s+/g, ' ').trim();
-  if (!s) return '';
-
-  if (s.length > maxLen) {
-    s = `${s.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
-  }
-  return s;
-}
-
-function parseProCallCommandArgs(raw) {
-  const text = String(raw || '').trim();
-  if (!text) return { ca: '', title: '', why: '', risk: '' };
-
-  const parts = text.split('|').map(s => String(s || '').trim());
-  const ca = parts[0] || '';
-  const title = sanitizeProField(parts[1] || '', 80);
-  const why = sanitizeProField(parts[2] || '', 300);
-  const risk = sanitizeProField(parts[3] || '', 120);
-
-  return { ca, title, why, risk };
 }
 
 const client = new Client({
@@ -226,8 +198,7 @@ let BOT_SETTINGS = loadBotSettings();
 let SCANNER_ENABLED = BOT_SETTINGS.scannerEnabled;
 
 function extractSolanaAddress(text) {
-  const match = text.match(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/);
-  return match ? match[0] : null;
+  return extractFirstSolanaCaFromText(text);
 }
 
 function createDevSessionKey(userId, channelId) {

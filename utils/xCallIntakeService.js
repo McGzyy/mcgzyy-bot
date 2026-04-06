@@ -16,7 +16,6 @@ const {
   applyTrackedCallState,
   runQuickCa,
   normalizeRealDataToScan,
-  isLikelySolanaCA,
   buildUserCallAnnouncementPayload,
   augmentNewUserCallPayloadWithChart,
   announceNewUserCallInUserCallsChannel,
@@ -32,6 +31,8 @@ const {
   buildXMentionSuccessReplyText
 } = require('./xIntakeReplyPolicy');
 const { getCallerTrustLevel } = require('./userProfileService');
+const { extractFirstSolanaCaFromText, isLikelySolanaCA } = require('./solanaAddress');
+const { parseProCallFields } = require('./proCallText');
 
 const X_CALL_INTAKE_SOURCE = 'x_mention';
 
@@ -46,16 +47,6 @@ function touchXMentionDedupe(dedupeId, skipDedupeCheck, dryRun) {
 
 function str(v) {
   return v == null ? '' : String(v).trim();
-}
-
-/**
- * First Solana-looking contract in free text (same pattern as index.js extractSolanaAddress).
- * @param {string} text
- * @returns {string|null}
- */
-function extractFirstSolanaCaFromText(text) {
-  const match = String(text || '').match(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/);
-  return match ? match[0] : null;
 }
 
 /**
@@ -85,65 +76,6 @@ function hasXMentionExplicitCallHashtag(tweetText) {
 /** Trusted Pro intake mode hashtag. Takes precedence over #call when present. */
 function hasXMentionExplicitProCallHashtag(tweetText) {
   return extractXMentionHashtagLabels(tweetText).has('procall');
-}
-
-function sanitizeProField(value, maxLen) {
-  let s = String(value || '')
-    .replace(/\r?\n/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (!s) return '';
-
-  // Neutralize @mentions + strip URLs (avoid pinging or link spam in Discord).
-  s = s.replace(/@\w+/g, '[mention]');
-  s = s.replace(/https?:\/\/\S+/gi, '').replace(/\s+/g, ' ').trim();
-
-  if (!s) return '';
-
-  if (s.length > maxLen) {
-    s = `${s.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
-  }
-
-  return s;
-}
-
-function parseProCallFields(tweetText) {
-  const lines = String(tweetText || '').split(/\r?\n/);
-  let title = '';
-  let why = '';
-  let risk = '';
-
-  for (const raw of lines) {
-    const line = String(raw || '').trim();
-    if (!line) continue;
-
-    const t = line.match(/^title\s*:\s*(.+)$/i);
-    if (t && !title) {
-      title = t[1];
-      continue;
-    }
-
-    const w = line.match(/^why\s*:\s*(.+)$/i);
-    if (w && !why) {
-      why = w[1];
-      continue;
-    }
-
-    const r = line.match(/^risk\s*:\s*(.+)$/i);
-    if (r && !risk) {
-      risk = r[1];
-      continue;
-    }
-  }
-
-  const out = {
-    title: sanitizeProField(title, 80),
-    why: sanitizeProField(why, 300),
-    risk: sanitizeProField(risk, 120)
-  };
-
-  return out;
 }
 
 /**

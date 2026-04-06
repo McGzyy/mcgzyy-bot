@@ -143,6 +143,36 @@ function parseMentionedUserIdFromContent(message) {
   return m ? String(m[1]) : '';
 }
 
+function sanitizeProField(value, maxLen) {
+  let s = String(value || '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s) return '';
+
+  s = s.replace(/@\w+/g, '[mention]');
+  s = s.replace(/https?:\/\/\S+/gi, '').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+
+  if (s.length > maxLen) {
+    s = `${s.slice(0, Math.max(0, maxLen - 1)).trimEnd()}…`;
+  }
+  return s;
+}
+
+function parseProCallCommandArgs(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return { ca: '', title: '', why: '', risk: '' };
+
+  const parts = text.split('|').map(s => String(s || '').trim());
+  const ca = parts[0] || '';
+  const title = sanitizeProField(parts[1] || '', 80);
+  const why = sanitizeProField(parts[2] || '', 300);
+  const risk = sanitizeProField(parts[3] || '', 120);
+
+  return { ca, title, why, risk };
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -3479,6 +3509,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     `• \`!scan\` — Random scanner-style test\n` +
     `• \`!scan <ca>\` — Deep scan a token (no tracking)\n` +
     `• \`!call <ca>\` — Official call + track\n` +
+    `• \`!procall <ca> | <title> | <why> | <risk?>\` — Trusted Pro call (**trusted_pro only**)\n` +
     `• \`!watch <ca>\` — Track without caller credit\n` +
     `• \`!tracked\` / \`!tracked <ca>\` — Tracked summary or detail (live refresh)\n` +
     `• \`!caller <name>\` or \`!caller @user\` — Caller stats (embed)\n` +
@@ -4272,6 +4303,43 @@ if (lowerContent.startsWith('!truestats')) {
         } catch (error) {
           console.error('[Call Command Error]', error);
           await replyText(message, `❌ Call failed: ${error.message}`);
+        }
+
+        return;
+      }
+
+      if (lowerContent.startsWith('!procall ')) {
+        const trust = getCallerTrustLevel(message.author.id);
+        if (trust !== 'trusted_pro') {
+          await replyText(message, '❌ This command is **trusted_pro** only.');
+          return;
+        }
+
+        const raw = content.replace(/^!procall\s+/i, '').trim();
+        const { ca, title, why, risk } = parseProCallCommandArgs(raw);
+
+        if (!ca) {
+          await replyText(message, '⚠️ Usage: `!procall <ca> | <title> | <why> | <risk?>`');
+          return;
+        }
+
+        if (!isLikelySolanaCA(ca)) {
+          await replyText(message, '❌ Invalid Solana contract address.');
+          return;
+        }
+
+        try {
+          await handleCallCommand(message, ca, 'command', {
+            proCall: {
+              title,
+              why,
+              risk,
+              sourceLabel: 'Discord (Trusted Pro submission)'
+            }
+          });
+        } catch (error) {
+          console.error('[ProCall Command Error]', error);
+          await replyText(message, `❌ Pro call failed: ${error.message}`);
         }
 
         return;

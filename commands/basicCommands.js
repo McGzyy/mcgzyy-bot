@@ -1426,12 +1426,33 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
   const pro = embedExtras?.proCall || null;
   const proLines = [];
   if (pro && (pro.title || pro.why || pro.risk || pro.tweetUrl)) {
-    proLines.push('🧠 **Pro Call**');
-    if (pro.title) proLines.push(`**TITLE:** ${String(pro.title).trim()}`);
-    if (pro.why) proLines.push(`**WHY:** ${String(pro.why).trim()}`);
-    if (pro.risk) proLines.push(`**RISK:** ${String(pro.risk).trim()}`);
-    if (pro.tweetUrl) proLines.push(`**Source:** ${String(pro.tweetUrl).trim()}`);
+    proLines.push('🧠 **Trusted Pro Call**');
     proLines.push('');
+
+    if (pro.title) {
+      proLines.push('**Thesis**');
+      proLines.push(String(pro.title).trim());
+      proLines.push('');
+    }
+
+    if (pro.why) {
+      proLines.push('**Why**');
+      proLines.push(String(pro.why).trim());
+      proLines.push('');
+    }
+
+    if (pro.risk) {
+      proLines.push('**Risk**');
+      proLines.push(String(pro.risk).trim());
+      proLines.push('');
+    }
+
+    const source = pro.tweetUrl ? String(pro.tweetUrl).trim() : pro.sourceLabel ? String(pro.sourceLabel).trim() : '';
+    if (source) {
+      proLines.push('**Source**');
+      proLines.push(source);
+      proLines.push('');
+    }
   }
 
   const content =
@@ -1483,14 +1504,15 @@ async function augmentNewUserCallPayloadWithChart(
 }
 
 async function runDeferredUserCallChartEdits(messages, ctx) {
-  const { realData, scan, trackedCall, wasNewCall, wasReactivated, xOriginHandle } = ctx;
+  const { realData, scan, trackedCall, wasNewCall, wasReactivated, xOriginHandle, proCall } = ctx;
 
   const buildFinalPayload = () =>
     buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated, {
       chartPhase: 'none',
       ...(xOriginHandle != null && String(xOriginHandle).trim()
         ? { xOriginHandle }
-        : {})
+        : {}),
+      ...(proCall ? { proCall } : {})
     });
 
   const safeEdit = async (payload) => {
@@ -1571,7 +1593,7 @@ async function announceNewUserCallInUserCallsChannel(guild, payload, options = {
   }
 }
 
-async function handleCallCommand(message, contractAddress, source = 'command') {
+async function handleCallCommand(message, contractAddress, source = 'command', extras = {}) {
   try {
     const uid = message?.author?.id ? String(message.author.id) : '';
     if (uid) {
@@ -1597,9 +1619,19 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     trackedCall?.callSourceType === 'user_call' &&
     isMilestoneChartAttachmentEnabled();
 
-  let payload = buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCall, wasReactivated, {
-    chartPhase: needsDeferredChart ? 'loading' : 'none'
-  });
+  const embedExtras = {
+    chartPhase: needsDeferredChart ? 'loading' : 'none',
+    ...(extras && typeof extras === 'object' ? extras : {})
+  };
+
+  let payload = buildUserCallAnnouncementPayload(
+    realData,
+    scan,
+    trackedCall,
+    wasNewCall,
+    wasReactivated,
+    embedExtras
+  );
 
   if (!needsDeferredChart) {
     payload = await augmentNewUserCallPayloadWithChart(payload, trackedCall, wasNewCall, wasReactivated);
@@ -1627,7 +1659,9 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
       scan,
       trackedCall,
       wasNewCall,
-      wasReactivated
+      wasReactivated,
+      ...(embedExtras?.xOriginHandle ? { xOriginHandle: embedExtras.xOriginHandle } : {}),
+      ...(embedExtras?.proCall ? { proCall: embedExtras.proCall } : {})
     });
   }
 }

@@ -32,6 +32,10 @@
  * Strict capture / fast-fail (untrusted Gecko state returns null for Dex fallback):
  *   CHART_TV_CAPTURE_BUDGET_MS — max wall time for Gecko chart work after page open (default 32000)
  *   CHART_TV_CAPTURE_POST_TOOLBAR_RESERVE_MS — reserve left for interval+metric+shot after toolbar wait (default 15000)
+ *
+ * Performance (Gecko capture):
+ *   CHART_TV_REUSE_SESSION — 1/true (default): reuse one Playwright context+page across TV captures (serialized); 0 = fresh context each time
+ *   CHART_TV_BLOCK_TRACKERS — 1/true (default): abort common analytics/ad third-party requests on the Gecko context
  */
 
 const fs = require('fs/promises');
@@ -131,6 +135,90 @@ function logTokenChartTvTiming(phases, totalMs, note) {
   console.info(`[TokenChartTV][timing] total=${tot}ms`);
   const breakdown = `pool=${pool} nav=${nav} toolbar=${toolbar} interval=${interval} metric=${metric} readiness=${readiness} capture=${capture} total=${tot}`;
   console.info(`[TokenChartTV][timing] breakdown ${breakdown}${note ? ` note=${note}` : ''}`);
+}
+
+let geckoCaptureQueue = Promise.resolve();
+let geckoReuseContext = null;
+let geckoReusePage = null;
+let geckoReuseOptsKey = '';
+
+function tvEnvTruthy(name, defaultTrue = true) {
+  const raw = String(process.env[name] ?? '').trim();
+  if (!raw) return defaultTrue;
+  return !/^0|false|no|off$/i.test(raw);
+}
+
+/**
+ * Drop reused Gecko context/page (e.g. detached frame, bad navigation, or shared browser closed).
+ * @returns {Promise<void>}
+ */
+async function resetGeckoChartReuseSession() {
+  if (geckoReusePage) {
+    await geckoReusePage.close().catch(() => {});
+    geckoReusePage = null;
+  }
+  if (geckoReuseContext) {
+    await geckoReuseContext.close().catch(() => {});
+    geckoReuseContext = null;
+  }
+  geckoReuseOptsKey = '';
+}
+
+function enqueueGeckoChartCapture(fn) {
+  const out = geckoCaptureQueue.then(() => fn());
+  geckoCaptureQueue = out.catch(() => {}).then(() => {});
+  return out;
+}
+
+async function installGeckoLightAdBlocking(context) {
+  if (context.__geckoAdRoutesInstalled) return;
+  if (!tvEnvTruthy('CHART_TV_BLOCK_TRACKERS', true)) return;
+  context.__geckoAdRoutesInstalled = true;
+  await context.route('**/*', route => {
+    const url = route.request().url();
+    if (
+      /googletagmanager\.com|google-analytics\.com|\/gtag\/js|doubleclick\.net|googlesyndication\.com|facebook\.net|connect\.facebook|hotjar\.com|segment\.(com|io)|sentry\.io|intercom\.io|mixpanel\.com|clarity\.ms|bat\.bing\.com|linkedin\.com\/pxl|twitter\.com\/i\/ads|criteo\.com|taboola\.com|outbrain\.com/i.test(
+        url
+      )
+    ) {
+      return route.abort();
+    }
+    return route.continue();
+  });
+}
+
+/**
+ * One persistent context+page for Gecko (when reuse on), or a fresh pair. Captures are serialized via enqueueGeckoChartCapture.
+ * @returns {Promise<{ context: import('playwright').BrowserContext, page: import('playwright').Page, ephemeral: boolean }>}
+ */
+async function acquireGeckoChartPage(browser, contextOptions) {
+  const reuseOn = tvEnvTruthy('CHART_TV_REUSE_SESSION', true);
+  const baseOpts = { ...contextOptions, serviceWorkers: 'block' };
+
+  if (!reuseOn) {
+    const context = await browser.newContext(baseOpts);
+    await installGeckoLightAdBlocking(context);
+    const page = await context.newPage();
+    return { context, page, ephemeral: true };
+  }
+
+  const key = `${baseOpts.viewport.width}x${baseOpts.viewport.height}@${baseOpts.deviceScaleFactor}|${baseOpts.userAgent}|${baseOpts.locale || 'en-US'}`;
+  if (geckoReuseContext && geckoReuseOptsKey !== key) {
+    await resetGeckoChartReuseSession();
+  }
+  if (!geckoReuseContext) {
+    geckoReuseContext = await browser.newContext(baseOpts);
+    geckoReuseOptsKey = key;
+    await installGeckoLightAdBlocking(geckoReuseContext);
+    geckoReusePage = await geckoReuseContext.newPage();
+    console.info('[TokenChartTV] reusable Gecko context+page created (set CHART_TV_REUSE_SESSION=0 to disable)');
+  }
+  return { context: geckoReuseContext, page: geckoReusePage, ephemeral: false };
+}
+
+function isPlaywrightSessionDeadError(err) {
+  const m = String(err?.message || err || '');
+  return /Target page, context or browser has been closed|Browser has been closed|Context has been closed/i.test(m);
 }
 
 /** @param {number|null|undefined} deadline */
@@ -2353,155 +2441,181 @@ async function fetchTradingViewChartPng(trackedCall) {
   const vh = numEnv('CHART_TV_VIEWPORT_HEIGHT', numEnv('X_CHART_HEIGHT', DEFAULT_VIEWPORT.height));
   const dpr = Math.min(3, Math.max(1, numEnv('CHART_TV_DEVICE_SCALE', numEnv('CHART_DEX_DEVICE_SCALE', 2))));
 
-  let context = null;
-  let page = null;
+  const contextOptions = {
+    viewport: { width: vw, height: vh },
+    deviceScaleFactor: dpr,
+    colorScheme: 'dark',
+    userAgent:
+      process.env.CHART_TV_USER_AGENT ||
+      process.env.CHART_DEX_USER_AGENT ||
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    locale: 'en-US'
+  };
 
-  try {
-    const tNav = performance.now();
-    const browser = await getChartPlaywrightBrowser();
-    context = await browser.newContext({
-      viewport: { width: vw, height: vh },
-      deviceScaleFactor: dpr,
-      colorScheme: 'dark',
-      userAgent:
-        process.env.CHART_TV_USER_AGENT ||
-        process.env.CHART_DEX_USER_AGENT ||
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      locale: 'en-US'
-    });
+  return enqueueGeckoChartCapture(async () => {
+    let page = null;
+    let disposeEphemeral = null;
 
-    page = await context.newPage();
-    const deadline = Date.now() + captureBudgetMs;
-    page.setDefaultTimeout(Math.min(timeoutMs, Math.max(5000, tvRemainingMs(deadline))));
+    try {
+      const tNav = performance.now();
+      const browser = await getChartPlaywrightBrowser();
+      const acquired = await acquireGeckoChartPage(browser, contextOptions);
+      page = acquired.page;
+      if (acquired.ephemeral) {
+        disposeEphemeral = async () => {
+          await acquired.page.close().catch(() => {});
+          await acquired.context.close().catch(() => {});
+        };
+      }
 
-    const nav = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs }).catch(err => {
-      console.info('[TokenChartTV] goto failed:', err?.message || err);
-      return null;
-    });
-    if (!nav || nav.status() === 404) {
+      const deadline = Date.now() + captureBudgetMs;
+      page.setDefaultTimeout(Math.min(timeoutMs, Math.max(5000, tvRemainingMs(deadline))));
+
+      const nav = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs }).catch(err => {
+        console.info('[TokenChartTV] goto failed:', err?.message || err);
+        return null;
+      });
+      if (!nav || nav.status() === 404) {
+        phases.navigation = performance.now() - tNav;
+        console.info('[TokenChartTV] pool page not available (status=', nav?.status(), ')');
+        if (isChartTvDebug()) await runTvDebugOnFailure(page, 'goto_404_or_fail');
+        if (acquired.ephemeral && disposeEphemeral) {
+          await disposeEphemeral();
+          disposeEphemeral = null;
+        } else {
+          await resetGeckoChartReuseSession();
+        }
+        logTokenChartTvTiming(phases, performance.now() - tRequest, 'goto_failed');
+        return null;
+      }
+
+      await dismissOptionalOverlays(page);
+      const canvasWaitMs = Math.min(timeoutMs, 28000, Math.max(2800, tvRemainingMs(deadline)));
+      await waitForAnyFrameCanvas(page, CANVAS_WAIT_MIN_AREA, canvasWaitMs);
+
       phases.navigation = performance.now() - tNav;
-      console.info('[TokenChartTV] pool page not available (status=', nav?.status(), ')');
-      if (isChartTvDebug()) await runTvDebugOnFailure(page, 'goto_404_or_fail');
-      logTokenChartTvTiming(phases, performance.now() - tRequest, 'goto_failed');
+
+      await saveTvDebugStep(page, 'tv-after-load.png');
+      const intervalRes = await trySelectGeckoIntervals(page, { deadline });
+      phases.interval_toolbar = intervalRes.timing?.toolbarMs ?? 0;
+      phases.interval_select = intervalRes.timing?.selectionMs ?? 0;
+      await saveTvDebugStep(page, 'tv-after-interval.png');
+
+      const tMetric = performance.now();
+      const metricRes = await applyGeckoMetricMcapFromPage(page, 'mcap', { deadline });
+      phases.metric_select = performance.now() - tMetric;
+      if (isChartTvDebug()) await saveTvDebugStep(page, 'tv-after-metric.png');
+
+      const tReady = performance.now();
+      let metricInfer = {
+        metricInferredFromTitle: false,
+        inferredMetric: null,
+        matchedText: null
+      };
+      if (!metricRes.metricConfirmed) {
+        metricInfer = await inferGeckoMetricMode(page);
+        if (metricInfer.inferredMetric === 'price' && metricInfer.matchedText) {
+          console.info(`[TokenChartTV] metric inferred: price via text="${metricInfer.matchedText}"`);
+        } else if (metricInfer.inferredMetric == null) {
+          console.info('[TokenChartTV] metric inference inconclusive — allowing Gecko capture');
+        } else if (metricInfer.inferredMetric === 'mcap' && metricInfer.matchedText) {
+          console.info(
+            `[TokenChartTV] metric inferred: mcap (title or active toolbar only)="${metricInfer.matchedText}"`
+          );
+        }
+      }
+
+      const plotForGate = await resolveTvPlotViewportCoords(page);
+      const chartCanvasFound = !!plotForGate;
+      const detachedUnrecoverable = !!(intervalRes.detachedUnrecoverable || metricRes.detachedUnrecoverable);
+      const trust = isTrustedGeckoChartState({
+        intervalConfirmed: intervalRes.intervalConfirmed,
+        chartCanvasFound,
+        detachedUnrecoverable
+      });
+
+      if (!trust.ok) {
+        phases.readiness = performance.now() - tReady;
+        logGeckoCaptureAbort(intervalRes, metricRes, chartCanvasFound, trust.reason, metricInfer.inferredMetric);
+        if (isChartTvDebug()) await runTvDebugOnFailure(page, `readiness_gate:${trust.reason || 'unknown'}`);
+        logTokenChartTvTiming(phases, performance.now() - tRequest, `readiness_gate_failed:${trust.reason || 'unknown'}`);
+        return null;
+      }
+
+      if (!metricRes.metricConfirmed) {
+        console.info('[TokenChartTV] metric not confirmed — proceeding with current chart mode');
+      }
+
+      console.info('[TokenChartTV] usable chart state reached — proceeding to capture');
+
+      if (tvRemainingMs(deadline) < 800) {
+        console.warn('[TokenChartTV] capture budget low — skipping settle/stabilize delays');
+      }
+
+      const settleMs = Math.min(
+        Math.max(0, Math.floor(numEnv('CHART_TV_METRIC_SETTLE_MS', 320))),
+        Math.max(0, tvRemainingMs(deadline) - 40)
+      );
+      if (settleMs > 0) await page.waitForTimeout(settleMs);
+
+      await applyGeckoFramingAssist(page, null, intervalRes.selectedInterval, null);
+
+      const stabEnv = numEnv(
+        'CHART_TV_STABILIZE_MS',
+        numEnv('CHART_GMGN_STABILIZE_MS', numEnv('CHART_DEX_STABILIZE_MS', 520))
+      );
+      const stabilizeMs = Math.min(stabEnv, Math.max(0, tvRemainingMs(deadline) - 40));
+      if (stabilizeMs > 0) await page.waitForTimeout(stabilizeMs);
+
+      phases.readiness = performance.now() - tReady;
+
+      const tCap = performance.now();
+      let cap = await screenshotGeckoChartRegionDetailed(page);
+      if (cap.png && isReasonablePng(cap.png)) {
+        phases.capture = performance.now() - tCap;
+        console.info(`[TokenChartTV] capture success: selector=${cap.selector ?? 'unknown'}`);
+        console.info('[TokenChart] provider=tv (GeckoTerminal pool)');
+        logTokenChartTvTiming(phases, performance.now() - tRequest, '');
+        return cap.png;
+      }
+
+      const emerg = await emergencyFinalGeckoCapture(page, { skipRepeatDetailed: true });
+      phases.capture = performance.now() - tCap;
+      if (emerg && isReasonablePng(emerg)) {
+        console.info('[TokenChartTV] capture success: selector=emergency-path');
+        console.info('[TokenChart] provider=tv (GeckoTerminal pool)');
+        logTokenChartTvTiming(phases, performance.now() - tRequest, 'capture_emergency');
+        return emerg;
+      }
+
+      console.warn('[TokenChartTV] no usable capture target found after readiness gate');
+      console.warn('[TokenChartTV] returning null for provider fallback');
+      if (isChartTvDebug()) await runTvDebugOnFailure(page, 'no_chart_region');
+      logTokenChartTvTiming(phases, performance.now() - tRequest, 'capture_failed');
       return null;
-    }
-
-    await dismissOptionalOverlays(page);
-    const canvasWaitMs = Math.min(timeoutMs, 28000, Math.max(2800, tvRemainingMs(deadline)));
-    await waitForAnyFrameCanvas(page, CANVAS_WAIT_MIN_AREA, canvasWaitMs);
-
-    phases.navigation = performance.now() - tNav;
-
-    await saveTvDebugStep(page, 'tv-after-load.png');
-    const intervalRes = await trySelectGeckoIntervals(page, { deadline });
-    phases.interval_toolbar = intervalRes.timing?.toolbarMs ?? 0;
-    phases.interval_select = intervalRes.timing?.selectionMs ?? 0;
-    await saveTvDebugStep(page, 'tv-after-interval.png');
-
-    const tMetric = performance.now();
-    const metricRes = await applyGeckoMetricMcapFromPage(page, 'mcap', { deadline });
-    phases.metric_select = performance.now() - tMetric;
-    if (isChartTvDebug()) await saveTvDebugStep(page, 'tv-after-metric.png');
-
-    const tReady = performance.now();
-    const metricInfer = await inferGeckoMetricMode(page);
-    if (!metricRes.metricConfirmed) {
-      if (metricInfer.inferredMetric === 'price' && metricInfer.matchedText) {
-        console.info(`[TokenChartTV] metric inferred: price via text="${metricInfer.matchedText}"`);
-      } else if (metricInfer.inferredMetric == null) {
-        console.info('[TokenChartTV] metric inference inconclusive — allowing Gecko capture');
-      } else if (metricInfer.inferredMetric === 'mcap' && metricInfer.matchedText) {
-        console.info(
-          `[TokenChartTV] metric inferred: mcap (title or active toolbar only)="${metricInfer.matchedText}"`
-        );
+    } catch (err) {
+      console.warn('[TokenChartTV] Capture failed:', err?.message || String(err));
+      if (isDetachedFrameError(err) || isPlaywrightSessionDeadError(err)) {
+        await resetGeckoChartReuseSession();
+        if (isDetachedFrameError(err)) {
+          console.warn('[TokenChartTV] aborting Gecko capture: detached frame unrecoverable');
+          console.warn('[TokenChartTV] Gecko capture aborted — returning null for provider fallback');
+        }
+      }
+      if (isChartTvDebug() && page) await runTvDebugOnFailure(page, `exception: ${err?.message || String(err)}`);
+      const note = `exception:${String(err?.message || err).slice(0, 120)}`;
+      logTokenChartTvTiming(phases, performance.now() - tRequest, note);
+      return null;
+    } finally {
+      if (disposeEphemeral) {
+        await disposeEphemeral();
       }
     }
-
-    const plotForGate = await resolveTvPlotViewportCoords(page);
-    const chartCanvasFound = !!plotForGate;
-    const detachedUnrecoverable = !!(intervalRes.detachedUnrecoverable || metricRes.detachedUnrecoverable);
-    const trust = isTrustedGeckoChartState({
-      intervalConfirmed: intervalRes.intervalConfirmed,
-      chartCanvasFound,
-      detachedUnrecoverable
-    });
-
-    if (!trust.ok) {
-      phases.readiness = performance.now() - tReady;
-      logGeckoCaptureAbort(intervalRes, metricRes, chartCanvasFound, trust.reason, metricInfer.inferredMetric);
-      if (isChartTvDebug()) await runTvDebugOnFailure(page, `readiness_gate:${trust.reason || 'unknown'}`);
-      logTokenChartTvTiming(phases, performance.now() - tRequest, `readiness_gate_failed:${trust.reason || 'unknown'}`);
-      return null;
-    }
-
-    if (!metricRes.metricConfirmed) {
-      console.info('[TokenChartTV] metric not confirmed — proceeding with current chart mode');
-    }
-
-    console.info('[TokenChartTV] usable chart state reached — proceeding to capture');
-
-    if (tvRemainingMs(deadline) < 800) {
-      console.warn('[TokenChartTV] capture budget low — skipping settle/stabilize delays');
-    }
-
-    const settleMs = Math.min(
-      Math.max(0, Math.floor(numEnv('CHART_TV_METRIC_SETTLE_MS', 320))),
-      Math.max(0, tvRemainingMs(deadline) - 40)
-    );
-    if (settleMs > 0) await page.waitForTimeout(settleMs);
-
-    await applyGeckoFramingAssist(page, null, intervalRes.selectedInterval, null);
-
-    const stabEnv = numEnv(
-      'CHART_TV_STABILIZE_MS',
-      numEnv('CHART_GMGN_STABILIZE_MS', numEnv('CHART_DEX_STABILIZE_MS', 520))
-    );
-    const stabilizeMs = Math.min(stabEnv, Math.max(0, tvRemainingMs(deadline) - 40));
-    if (stabilizeMs > 0) await page.waitForTimeout(stabilizeMs);
-
-    phases.readiness = performance.now() - tReady;
-
-    const tCap = performance.now();
-    let cap = await screenshotGeckoChartRegionDetailed(page);
-    if (cap.png && isReasonablePng(cap.png)) {
-      phases.capture = performance.now() - tCap;
-      console.info(`[TokenChartTV] capture success: selector=${cap.selector ?? 'unknown'}`);
-      console.info('[TokenChart] provider=tv (GeckoTerminal pool)');
-      logTokenChartTvTiming(phases, performance.now() - tRequest, '');
-      return cap.png;
-    }
-
-    const emerg = await emergencyFinalGeckoCapture(page, { skipRepeatDetailed: true });
-    phases.capture = performance.now() - tCap;
-    if (emerg && isReasonablePng(emerg)) {
-      console.info('[TokenChartTV] capture success: selector=emergency-path');
-      console.info('[TokenChart] provider=tv (GeckoTerminal pool)');
-      logTokenChartTvTiming(phases, performance.now() - tRequest, 'capture_emergency');
-      return emerg;
-    }
-
-    console.warn('[TokenChartTV] no usable capture target found after readiness gate');
-    console.warn('[TokenChartTV] returning null for provider fallback');
-    if (isChartTvDebug()) await runTvDebugOnFailure(page, 'no_chart_region');
-    logTokenChartTvTiming(phases, performance.now() - tRequest, 'capture_failed');
-    return null;
-  } catch (err) {
-    console.warn('[TokenChartTV] Capture failed:', err?.message || String(err));
-    if (isDetachedFrameError(err)) {
-      console.warn('[TokenChartTV] aborting Gecko capture: detached frame unrecoverable');
-      console.warn('[TokenChartTV] Gecko capture aborted — returning null for provider fallback');
-    }
-    if (isChartTvDebug() && page) await runTvDebugOnFailure(page, `exception: ${err?.message || String(err)}`);
-    const note = `exception:${String(err?.message || err).slice(0, 120)}`;
-    logTokenChartTvTiming(phases, performance.now() - tRequest, note);
-    return null;
-  } finally {
-    if (page) await page.close().catch(() => {});
-    if (context) await context.close().catch(() => {});
-  }
+  });
 }
 
 module.exports = {
   fetchTradingViewChartPng,
-  geckoPoolPageUrl
+  geckoPoolPageUrl,
+  resetGeckoChartReuseSession
 };

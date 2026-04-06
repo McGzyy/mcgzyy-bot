@@ -2639,6 +2639,14 @@ async function fetchDexScreenerChartPng(trackedCall) {
 async function closeDexChartBrowser() {
   if (!sharedBrowser) return;
   try {
+    try {
+      const tv = require('./tokenChartTradingView');
+      if (tv && typeof tv.resetGeckoChartReuseSession === 'function') {
+        await tv.resetGeckoChartReuseSession();
+      }
+    } catch {
+      /* avoid blocking browser close if TV module unload/order issues */
+    }
     await sharedBrowser.close();
   } finally {
     sharedBrowser = null;

@@ -144,7 +144,24 @@ function getDefaultXVerification() {
     requestedHandle: '',
     requestedAt: null,
     verificationCode: '',
-    status: 'none' // 'none' | 'pending' | 'verified' | 'denied'
+    status: 'none', // 'none' | 'pending' | 'verified' | 'denied'
+    deniedAt: null,
+    deniedReason: '',
+    /** Mod review message (for centralized mod queue channels). */
+    reviewChannelId: null,
+    reviewMessageId: null,
+    reviewPostedAt: null,
+    reviewResolvedAt: null
+  };
+}
+
+function getDefaultTopCallerReview() {
+  return {
+    dismissedUntil: null,
+    reviewChannelId: null,
+    reviewMessageId: null,
+    reviewPostedAt: null,
+    reviewResolvedAt: null
   };
 }
 
@@ -161,6 +178,7 @@ function ensureMemberMetaShape(profile) {
   if (!Array.isArray(profile.rolesSnapshot)) profile.rolesSnapshot = [];
   if (profile.xVerifiedAt === undefined) profile.xVerifiedAt = null;
   if (profile.callerTrustLevel === undefined) profile.callerTrustLevel = 'none';
+  if (profile.topCallerReview === undefined) profile.topCallerReview = getDefaultTopCallerReview();
 
   return profile;
 }
@@ -200,6 +218,7 @@ function createEmptyProfile({
     publicTracking: getDefaultPublicTracking(),
 
     callerTrustLevel: 'none',
+    topCallerReview: getDefaultTopCallerReview(),
 
     createdAt: now,
     updatedAt: now
@@ -467,6 +486,11 @@ function updateUserProfile(discordUserId, updates = {}) {
         existing?.xVerification?.status ??
         'none'
     },
+    topCallerReview: {
+      ...getDefaultTopCallerReview(),
+      ...(existing.topCallerReview || {}),
+      ...(updates.topCallerReview || {})
+    },
     publicSettings: {
       ...getDefaultPublicSettings(),
       ...(existing.publicSettings || {}),
@@ -686,7 +710,11 @@ function startXVerification(discordUserId, handle, verificationCode = '') {
       verificationCode,
       status: 'pending',
       deniedAt: null,
-      deniedReason: ''
+      deniedReason: '',
+      reviewChannelId: null,
+      reviewMessageId: null,
+      reviewPostedAt: null,
+      reviewResolvedAt: null
     }
   });
 }
@@ -702,7 +730,8 @@ function completeXVerification(discordUserId, handle) {
       requestedHandle: normalizedHandle,
       requestedAt: new Date().toISOString(),
       verificationCode: '',
-      status: 'verified'
+      status: 'verified',
+      reviewResolvedAt: new Date().toISOString()
     },
     publicSettings: {
       allowPublicXTag: true
@@ -736,7 +765,72 @@ function denyXVerification(discordUserId, handle, reason = '') {
       verificationCode: '',
       status: 'denied',
       deniedAt: new Date().toISOString(),
-      deniedReason: String(reason || '').trim().slice(0, 500)
+      deniedReason: String(reason || '').trim().slice(0, 500),
+      reviewResolvedAt: new Date().toISOString()
+    }
+  });
+}
+
+function setXVerificationReviewMessageMeta(discordUserId, { channelId = null, messageId = null } = {}) {
+  if (!discordUserId) return null;
+  return updateUserProfile(discordUserId, {
+    xVerification: {
+      reviewChannelId: channelId ? String(channelId) : null,
+      reviewMessageId: messageId ? String(messageId) : null,
+      reviewPostedAt: new Date().toISOString()
+    }
+  });
+}
+
+function clearXVerificationReviewMessageMeta(discordUserId) {
+  if (!discordUserId) return null;
+  return updateUserProfile(discordUserId, {
+    xVerification: {
+      reviewChannelId: null,
+      reviewMessageId: null,
+      reviewPostedAt: null
+    }
+  });
+}
+
+function setTopCallerReviewMessageMeta(discordUserId, { channelId = null, messageId = null } = {}) {
+  if (!discordUserId) return null;
+  return updateUserProfile(discordUserId, {
+    topCallerReview: {
+      reviewChannelId: channelId ? String(channelId) : null,
+      reviewMessageId: messageId ? String(messageId) : null,
+      reviewPostedAt: new Date().toISOString()
+    }
+  });
+}
+
+function clearTopCallerReviewMessageMeta(discordUserId) {
+  if (!discordUserId) return null;
+  return updateUserProfile(discordUserId, {
+    topCallerReview: {
+      reviewChannelId: null,
+      reviewMessageId: null,
+      reviewPostedAt: null
+    }
+  });
+}
+
+function dismissTopCallerCandidate(discordUserId, days = 7) {
+  if (!discordUserId) return null;
+  const until = new Date(Date.now() + Math.max(1, Number(days) || 7) * 24 * 60 * 60 * 1000).toISOString();
+  return updateUserProfile(discordUserId, {
+    topCallerReview: {
+      dismissedUntil: until,
+      reviewResolvedAt: new Date().toISOString()
+    }
+  });
+}
+
+function resolveTopCallerReview(discordUserId) {
+  if (!discordUserId) return null;
+  return updateUserProfile(discordUserId, {
+    topCallerReview: {
+      reviewResolvedAt: new Date().toISOString()
     }
   });
 }
@@ -981,7 +1075,13 @@ module.exports = {
   startXVerification,
   completeXVerification,
   denyXVerification,
+  setXVerificationReviewMessageMeta,
+  clearXVerificationReviewMessageMeta,
   getPreferredPublicName,
+  setTopCallerReviewMessageMeta,
+  clearTopCallerReviewMessageMeta,
+  dismissTopCallerCandidate,
+  resolveTopCallerReview,
 
   // public identity
   resolvePublicCallerName,

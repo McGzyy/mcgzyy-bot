@@ -265,6 +265,17 @@ function getHighestDump(drawdown, hits = []) {
 function getApprovalChannel(guild) {
   if (!guild) return null;
 
+  // New primary moderation action channel (transition-safe: fallback to legacy channels).
+  const modApprovals = guild.channels.cache.find(
+    ch =>
+      ch &&
+      ch.isTextBased &&
+      typeof ch.isTextBased === 'function' &&
+      ch.isTextBased() &&
+      ch.name === 'mod-approvals'
+  );
+  if (modApprovals) return modApprovals;
+
   return guild.channels.cache.find(
     ch =>
       ch &&

@@ -102,6 +102,7 @@ const { describeXPostForTrackedCall, isXPostDryRunEnabled } = require('./utils/x
 
 const {
   upsertUserProfile,
+  getAllUserProfiles,
   ensureUserProfileOnGuildJoin,
   previewMemberProfileBackfill,
   runMemberProfileBackfill,
@@ -115,6 +116,12 @@ const {
   getPendingXVerifications,
   completeXVerification,
   denyXVerification,
+  setXVerificationReviewMessageMeta,
+  clearXVerificationReviewMessageMeta,
+  setTopCallerReviewMessageMeta,
+  clearTopCallerReviewMessageMeta,
+  dismissTopCallerCandidate,
+  resolveTopCallerReview,
   getPreferredPublicName,
   normalizeXHandle,
   isLikelyXHandle
@@ -126,6 +133,8 @@ const {
   runInjectedMentionOnce,
   logXMentionIngestionReadyDiagnostics
 } = require('./utils/xMentionIngestionScaffold');
+
+const { getModQueuesSnapshot } = require('./utils/modQueueService');
 
 function parseMentionedUserIdFromContent(message) {
   const mentioned = message?.mentions?.users?.first?.();
@@ -151,6 +160,7 @@ const X_VERIFY_SESSION_TTL_MS = 30 * 60 * 1000;
 const X_VERIFY_CHANNEL_NAME = 'verify-x';
 const X_VERIFIED_ROLE_NAME = 'X Verified';
 const MOD_CHANNEL_NAME = 'mod-chat';
+const MOD_APPROVALS_CHANNEL_NAME = 'mod-approvals';
 
 const BOT_SETTINGS_PATH = path.join(__dirname, 'data', 'botSettings.json');
 
@@ -687,6 +697,20 @@ function getModChannel(guild) {
       ch.name === MOD_CHANNEL_NAME
   ) || null;
 }
+
+function getModApprovalsChannel(guild) {
+  if (!guild) return null;
+
+  return guild.channels.cache.find(
+    ch =>
+      ch &&
+      ch.isTextBased &&
+      typeof ch.isTextBased === 'function' &&
+      ch.isTextBased() &&
+      ch.isTextBased() &&
+      ch.name === MOD_APPROVALS_CHANNEL_NAME
+  ) || null;
+}
 function getXApprovalChannel(guild) {
   if (!guild) return null;
 
@@ -880,6 +904,39 @@ function buildXVerifyButtons(userId, handle) {
   ];
 }
 
+function buildTopCallerCandidateButtons(userId) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`topcaller_approve:${userId}`)
+        .setLabel('Approve Top Caller')
+        .setStyle(ButtonStyle.Success),
+
+      new ButtonBuilder()
+        .setCustomId(`topcaller_dismiss:${userId}`)
+        .setLabel('Dismiss (7d)')
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
+function buildTopCallerCandidateContent({ userId, trust, report }) {
+  const valid = report?.validCallCount ?? 0;
+  const avgX = Number(report?.avgX || 0);
+  const bestX = Number(report?.bestX || 0);
+  const bestToken = report?.bestToken ? ` — ${report.bestToken}` : '';
+
+  return [
+    '🏆 **Top Caller Candidate**',
+    `**User:** <@${userId}>`,
+    `**Current Trust:** \`${trust}\``,
+    `**Valid Calls:** ${valid}`,
+    `**Avg X:** ${avgX.toFixed(2)}x`,
+    `**Best Call:** ${bestX.toFixed(2)}x${bestToken}`,
+    `**Eligible:** **${report?.eligibility || 'UNKNOWN'}**`
+  ].join('\n');
+}
+
 function buildApprovalButtons(contractAddress) {
   return [
     new ActionRowBuilder().addComponents(
@@ -1054,24 +1111,55 @@ if (trackedCall.callSourceType === 'bot_call') {
     'Unknown';
 }
 
+  const handledBy =
+    trackedCall.moderatedById
+      ? `<@${trackedCall.moderatedById}>`
+      : trackedCall.moderatedByUsername
+      ? trackedCall.moderatedByUsername
+      : '';
+
+  const showReason =
+    (status === 'denied' || status === 'excluded') &&
+    typeof trackedCall.moderationNotes === 'string' &&
+    trackedCall.moderationNotes.trim().length > 0;
+
+  const actionTitle =
+    status === 'approved' ? '✅ Coin Approved' :
+    status === 'denied' ? '❌ Coin Denied' :
+    status === 'excluded' ? '🗑 Coin Excluded' :
+    status === 'expired' ? '⌛ Coin Approval Expired' :
+    '⏳ Coin Pending Review';
+
+  const typeLabel =
+    trackedCall.callSourceType === 'bot_call'
+      ? 'Bot Call'
+      : trackedCall.callSourceType === 'watch_only'
+      ? 'Watch Only'
+      : 'User Call';
+
   const descriptionLines = [
-    `## ${statusLabel}`,
+    `## ${actionTitle}`,
     '',
-    `**Caller:** ${callerLabel}`,
+    `**Token:** ${trackedCall.tokenName || 'Unknown'} (${trackedCall.ticker ? `$${trackedCall.ticker}` : 'No ticker'})`,
     `**CA:** \`${ca}\``,
+    `**Type:** ${typeLabel}`,
+    handledBy ? `**Handled by:** ${handledBy}` : null,
+    showReason ? `**Reason:** ${trackedCall.moderationNotes.trim()}` : null,
+    '',
     `**Links:** ${links}`,
     '',
-    `### 📈 Performance`,
+    `### Performance`,
     `**Current X:** ${formatX(currentX)} • **ATH X:** ${formatX(x)} • **Trigger:** ${formatX(trackedCall.lastApprovalTriggerX)}`,
     `**Current MC:** ${formatUsd(currentMc)} • **ATH MC:** ${formatUsd(ath)}`,
     `**Drawdown from ATH:** ${formatPercent(drawdown)}`,
     '',
-    `### 📊 Call Details`,
+    `### Call Details`,
+    `**Caller:** ${callerLabel}`,
     `**First Called MC:** ${formatUsd(firstCalledMc)}`,
     `**Excluded From Stats:** ${trackedCall.excludedFromStats ? 'Yes' : 'No'}`,
     `**Tags:** ${tags}`,
     `**Notes:** ${trackedCall.moderationNotes || 'None'}`
-  ];
+  ].filter(Boolean);
 
   descriptionLines.push(...getResolutionLines(trackedCall));
 
@@ -1219,6 +1307,187 @@ async function cleanupExpiredApprovals() {
     }
   } catch (error) {
     console.error('[ApprovalQueue] Cleanup error:', error.message);
+  }
+}
+
+async function cleanupResolvedModApprovals() {
+  try {
+    const guild = client.guilds.cache.first();
+    if (!guild) return;
+
+    const modApprovals = getModApprovalsChannel(guild);
+    if (!modApprovals) return;
+
+    const now = Date.now();
+    const TTL_MS = 24 * 60 * 60 * 1000;
+
+    // X verification review messages: delete once resolved for 24h.
+    const profiles = getAllUserProfiles();
+    for (const profile of profiles) {
+      const v = profile?.xVerification || {};
+      if (!v.reviewMessageId || !v.reviewChannelId) continue;
+      if (String(v.reviewChannelId) !== String(modApprovals.id)) continue;
+
+      const status = String(v.status || 'none').toLowerCase();
+      if (status === 'pending') continue;
+
+      const resolvedAt = new Date(v.reviewResolvedAt || v.deniedAt || 0).getTime();
+      if (!Number.isFinite(resolvedAt) || resolvedAt <= 0) continue;
+      if (now - resolvedAt < TTL_MS) continue;
+
+      const msg = await modApprovals.messages.fetch(String(v.reviewMessageId)).catch(() => null);
+      if (msg) await msg.delete().catch(() => null);
+
+      if (profile.discordUserId) {
+        clearXVerificationReviewMessageMeta(profile.discordUserId);
+      }
+    }
+
+    // Coin approval messages posted into #mod-approvals: delete once resolved for 24h.
+    const calls = getAllTrackedCalls();
+    for (const call of calls) {
+      if (!call?.approvalMessageId || !call?.approvalChannelId) continue;
+      if (String(call.approvalChannelId) !== String(modApprovals.id)) continue;
+
+      const status = String(call.approvalStatus || 'none').toLowerCase();
+      if (status === 'pending') continue;
+
+      const resolvedAt = new Date(call.moderatedAt || call.approvalExpiresAt || 0).getTime();
+      if (!Number.isFinite(resolvedAt) || resolvedAt <= 0) continue;
+      if (now - resolvedAt < TTL_MS) continue;
+
+      await deleteApprovalMessage(guild, call);
+      clearApprovalRequest(call.contractAddress);
+    }
+
+    // Top Caller candidate review messages: delete once resolved/dismissed for 24h.
+    for (const profile of profiles) {
+      const r = profile?.topCallerReview || {};
+      if (!r.reviewMessageId || !r.reviewChannelId) continue;
+      if (String(r.reviewChannelId) !== String(modApprovals.id)) continue;
+
+      const resolvedAt = new Date(r.reviewResolvedAt || 0).getTime();
+      if (!Number.isFinite(resolvedAt) || resolvedAt <= 0) continue;
+      if (now - resolvedAt < TTL_MS) continue;
+
+      const msg = await modApprovals.messages.fetch(String(r.reviewMessageId)).catch(() => null);
+      if (msg) await msg.delete().catch(() => null);
+
+      if (profile.discordUserId) {
+        clearTopCallerReviewMessageMeta(profile.discordUserId);
+      }
+    }
+  } catch (error) {
+    console.error('[ModApprovals] Resolved cleanup error:', error.message);
+  }
+}
+
+async function syncModApprovalsChannel() {
+  try {
+    const guild = client.guilds.cache.first();
+    if (!guild) return;
+
+    const modApprovals = getModApprovalsChannel(guild);
+    if (!modApprovals) return;
+
+    // Use centralized snapshot so categories stay consistent and extensible.
+    const snapshot = getModQueuesSnapshot({
+      xLimit: 50,
+      coinLimit: 50,
+      topBotLimit: 8,
+      topCallerLimit: 25
+    });
+
+    // 1) X verifications (oldest -> newest, so newer end up later in channel)
+    const pendingX = snapshot?.queues?.xVerifications?.items || [];
+    if (pendingX.length) {
+      const orderedX = [...pendingX].sort((a, b) => {
+        const aTime = new Date(a?.requestedAt || 0).getTime();
+        const bTime = new Date(b?.requestedAt || 0).getTime();
+        return aTime - bTime;
+      });
+
+      for (const item of orderedX) {
+        const userId = item?.discordUserId ? String(item.discordUserId) : '';
+        if (!userId) continue;
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) continue;
+        const v = profile?.xVerification || {};
+        const status = String(v.status || 'none').toLowerCase();
+        if (status !== 'pending') continue;
+
+        const handle = v.requestedHandle || profile.xHandle || '';
+        const code = v.verificationCode || '';
+        if (!handle || !code) continue;
+
+        const existingMsgId = String(v.reviewMessageId || '');
+        const existingChId = String(v.reviewChannelId || '');
+
+        if (existingMsgId && existingChId === String(modApprovals.id)) {
+          const existingMsg = await modApprovals.messages.fetch(existingMsgId).catch(() => null);
+          if (existingMsg) continue;
+          clearXVerificationReviewMessageMeta(userId);
+        }
+
+        if (existingMsgId) continue; // posted elsewhere (transition-safe)
+
+        const embed = buildXVerifyEmbed({
+          user: { id: userId, username: profile.username || 'Unknown' },
+          handle,
+          code
+        });
+        const buttons = buildXVerifyButtons(userId, handle);
+
+        const posted = await modApprovals.send({ embeds: [embed], components: buttons });
+        setXVerificationReviewMessageMeta(userId, { channelId: posted.channel.id, messageId: posted.id });
+      }
+    }
+
+    // 2) Top Caller candidates (highest value first; then keep stable order)
+    const candidates = snapshot?.queues?.topCallerCandidates?.items || [];
+    if (candidates.length) {
+      for (const cand of candidates) {
+        const userId = cand?.discordUserId ? String(cand.discordUserId) : '';
+        if (!userId) continue;
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) continue;
+
+        const currentTrust = getCallerTrustLevel(userId);
+        if (currentTrust === 'top_caller' || currentTrust === 'trusted_pro' || currentTrust === 'restricted') continue;
+
+        const dismissedUntil = profile?.topCallerReview?.dismissedUntil;
+        if (dismissedUntil && new Date(dismissedUntil).getTime() > Date.now()) continue;
+
+        const reviewMeta = profile?.topCallerReview || {};
+        const existingMsgId = String(reviewMeta.reviewMessageId || '');
+        const existingChId = String(reviewMeta.reviewChannelId || '');
+
+        if (existingMsgId && existingChId === String(modApprovals.id)) {
+          const existingMsg = await modApprovals.messages.fetch(existingMsgId).catch(() => null);
+          if (existingMsg) continue;
+          clearTopCallerReviewMessageMeta(userId);
+        }
+
+        if (existingMsgId) continue;
+
+        const report = getTopCallerEligibilityReport(userId);
+        if (!report || report.eligibility !== 'YES') continue;
+
+        const content = buildTopCallerCandidateContent({
+          userId,
+          trust: currentTrust,
+          report
+        });
+        const buttons = buildTopCallerCandidateButtons(userId);
+
+        const posted = await modApprovals.send({ content, components: buttons });
+        setTopCallerReviewMessageMeta(userId, { channelId: posted.channel.id, messageId: posted.id });
+      }
+    }
+  } catch (error) {
+    console.error('[ModApprovals] Sync error:', error.message);
   }
 }
 
@@ -1607,6 +1876,18 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
       console.error('[ApprovalQueue] Interval cleanup failed:', err.message);
     });
   }, 60 * 1000);
+
+  setInterval(() => {
+    syncModApprovalsChannel().catch(err => {
+      console.error('[ModApprovals] Interval sync failed:', err.message);
+    });
+  }, 2 * 60 * 1000);
+
+  setInterval(() => {
+    cleanupResolvedModApprovals().catch(err => {
+      console.error('[ModApprovals] Interval cleanup failed:', err.message);
+    });
+  }, 10 * 60 * 1000);
 });
 
 client.on('guildMemberAdd', (member) => {
@@ -1621,6 +1902,84 @@ client.on('interactionCreate', async (interaction) => {
   try {
     if (interaction.isButton()) {
       const parts = interaction.customId.split(':');
+
+      if (parts[0] === 'topcaller_approve' || parts[0] === 'topcaller_dismiss') {
+        if (!interaction.member?.permissions?.has('ManageGuild')) {
+          await interaction.reply({ content: '❌ Only mods/admins can use this action.', ephemeral: true });
+          return;
+        }
+
+        const userId = parts[1];
+        if (!userId) return;
+
+        const profile = getUserProfileByDiscordId(userId);
+        if (!profile) {
+          await interaction.reply({ content: '❌ That user does not have a profile yet.', ephemeral: true });
+          return;
+        }
+
+        const current = getCallerTrustLevel(userId);
+        if (parts[0] === 'topcaller_approve') {
+          if (current === 'top_caller') {
+            await interaction.reply({ content: 'ℹ️ Already **top_caller**. No change.', ephemeral: true });
+            return;
+          }
+          if (current === 'trusted_pro') {
+            await interaction.reply({ content: '❌ **trusted_pro** is curated. This action does not override it.', ephemeral: true });
+            return;
+          }
+          if (current === 'restricted') {
+            await interaction.reply({ content: '❌ User is **restricted**. Resolve restriction first.', ephemeral: true });
+            return;
+          }
+
+          const report = getTopCallerEligibilityReport(userId);
+          if (!report || report.eligibility !== 'YES') {
+            await interaction.reply({ content: '⚠️ Candidate no longer meets draft eligibility (**YES**) right now. No change.', ephemeral: true });
+            return;
+          }
+
+          const updated = setCallerTrustLevel(userId, 'top_caller');
+          if (!updated) {
+            await interaction.reply({ content: '❌ Failed to update caller trust level.', ephemeral: true });
+            return;
+          }
+
+          resolveTopCallerReview(userId);
+
+          await interaction.update({
+            content: [
+              '✅ **Top Caller Approved**',
+              `**User:** <@${userId}>`,
+              `**Previous Trust:** \`${current}\``,
+              `**New Trust:** \`top_caller\``,
+              `**Approved by:** <@${interaction.user.id}>`,
+              '',
+              `**Valid Calls:** ${report.validCallCount}`,
+              `**Avg X:** ${Number(report.avgX || 0).toFixed(2)}x`,
+              `**Best Call:** ${Number(report.bestX || 0).toFixed(2)}x${report.bestToken ? ` — ${report.bestToken}` : ''}`
+            ].join('\n'),
+            components: []
+          });
+          return;
+        }
+
+        // Dismiss
+        dismissTopCallerCandidate(userId, 7);
+
+        await interaction.update({
+          content: [
+            '🗑 **Top Caller Candidate Dismissed**',
+            `**User:** <@${userId}>`,
+            `**Dismissed by:** <@${interaction.user.id}>`,
+            `**Hidden for:** 7 days`,
+            '',
+            '_If they remain eligible after the cooldown, they can reappear._'
+          ].join('\n'),
+          components: []
+        });
+        return;
+      }
 
       if (interaction.customId === 'profile_open_verify_modal') {
         await interaction.showModal(buildVerifyXHandleModal());
@@ -1663,22 +2022,38 @@ client.on('interactionCreate', async (interaction) => {
 
 const buttons = buildXVerifyButtons(interaction.user.id, handle);
 
-const modChannel = getModChannel(interaction.guild);
-const xApprovalChannel = getXApprovalChannel(interaction.guild);
+        if (String(profile?.xVerification?.reviewMessageId || '')) {
+          await interaction.update({
+            content: `✅ Your verification request is already in the mod queue.\nA MOD will review and verify your request.`,
+            components: []
+          });
+          return;
+        }
 
-if (modChannel) {
-  await modChannel.send({
-    embeds: [embed],
-    components: buttons
-  });
-}
+        const modApprovals = getModApprovalsChannel(interaction.guild);
+        const modChannel = getModChannel(interaction.guild);
+        const xApprovalChannel = getXApprovalChannel(interaction.guild);
 
-if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) {
-  await xApprovalChannel.send({
-    embeds: [embed],
-    components: buttons
-  });
-}
+        let posted = null;
+
+        // New primary: #mod-approvals. Transition-safe fallback: legacy channels if hub not present.
+        if (modApprovals) {
+          posted = await modApprovals.send({ embeds: [embed], components: buttons });
+        } else {
+          if (modChannel) {
+            posted = await modChannel.send({ embeds: [embed], components: buttons });
+          }
+          if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) {
+            await xApprovalChannel.send({ embeds: [embed], components: buttons });
+          }
+        }
+
+        if (posted) {
+          setXVerificationReviewMessageMeta(interaction.user.id, {
+            channelId: posted.channel.id,
+            messageId: posted.id
+          });
+        }
 
         await interaction.update({
           content: `✅ Your verification request has been submitted.\nA MOD will review and verify your request.`,
@@ -1741,7 +2116,12 @@ if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) 
   }
 
   await interaction.update({
-    content: `✅ Verified **@${handle}**`,
+    content: [
+      '✅ **X Verification Approved**',
+      `**User:** <@${userId}>`,
+      `**Handle:** @${handle}`,
+      `**Approved by:** <@${interaction.user.id}>`
+    ].join('\n'),
     embeds: [],
     components: []
   });
@@ -2011,7 +2391,13 @@ let updated = null;
   }
 
   await interaction.update({
-    content: `❌ Denied **@${handle}**\n**Reason:** ${reason}`,
+    content: [
+      '❌ **X Verification Denied**',
+      `**User:** <@${userId}>`,
+      `**Handle:** @${handle}`,
+      `**Denied by:** <@${interaction.user.id}>`,
+      reason && String(reason).trim() ? `**Reason:** ${String(reason).trim()}` : null
+    ].filter(Boolean).join('\n'),
     embeds: [],
     components: []
   });
@@ -3191,57 +3577,29 @@ if (lowerContent === '!pendingapprovals') {
     return;
   }
 
-  const X_LIST_CAP = 8;
-  const BOT_LIST_CAP = 8;
-
-  const pendingX = getPendingXVerifications(X_LIST_CAP);
-
-  const pendingBot = getPendingApprovals(50).filter(
-    c =>
-      c.callSourceType === 'bot_call' &&
-      String(c.approvalStatus || '').toLowerCase() === 'pending' &&
-      c.isActive !== false &&
-      String(c.lifecycleStatus || 'active').toLowerCase() !== 'archived'
-  );
-
-  const xLines = pendingX.map((profile, index) => {
-    const displayName =
-      profile.preferredPublicName ||
-      profile.username ||
-      profile.discordUsername ||
-      `User ${index + 1}`;
-
-    const handle = profile?.xVerification?.requestedHandle
-      ? `@${String(profile.xVerification.requestedHandle).replace(/^@/, '')}`
-      : 'Unknown';
-
-    let minutes = 0;
-    if (profile?.xVerification?.requestedAt) {
-      const diff =
-        Date.now() - new Date(profile.xVerification.requestedAt).getTime();
-      minutes = Math.floor(diff / 60000);
-    }
-
-    return `${index + 1}. **${displayName}** • ${handle} • ${minutes}m ago`;
+  const snapshot = getModQueuesSnapshot({
+    xLimit: 8,
+    coinLimit: 50,
+    topBotLimit: 8
   });
 
-  const rankedBot = [...pendingBot]
-    .map(call => {
-      const entry = Number(call.firstCalledMarketCap || call.marketCap || 0);
-      const current = Number(call.latestMarketCap || call.marketCap || 0);
-      const mult = entry > 0 ? current / entry : 0;
+  const pendingX = snapshot?.queues?.xVerifications?.items || [];
+  const topPendingBot = snapshot?.queues?.coinApprovals?.topPendingBotByPriority || [];
 
-      return { call, mult };
-    })
-    .sort((a, b) => b.mult - a.mult)
-    .slice(0, BOT_LIST_CAP);
+  const xLines = pendingX.map((item, index) => {
+    const name = item.displayName || `User ${index + 1}`;
+    const handle = item.requestedHandle || 'Unknown';
+    const minutes = Number.isFinite(item.minutesSinceRequested)
+      ? item.minutesSinceRequested
+      : 0;
+    return `${index + 1}. **${name}** • ${handle} • ${minutes}m ago`;
+  });
 
-  const botLines = rankedBot.map((item, index) => {
-    const call = item.call;
-    const token = call.tokenName || 'Unknown';
-    const ticker = call.ticker ? `$${call.ticker}` : '';
-
-    return `${index + 1}. **${token}** ${ticker} • **${item.mult.toFixed(2)}x**`;
+  const botLines = topPendingBot.map((item, index) => {
+    const token = item.tokenName || 'Unknown';
+    const ticker = item.ticker ? `$${item.ticker}` : '';
+    const mult = Number(item?.priority?.currentOverEntryX || 0);
+    return `${index + 1}. **${token}** ${ticker} • **${mult.toFixed(2)}x**`;
   });
 
   await message.reply({

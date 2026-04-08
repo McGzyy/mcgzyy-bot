@@ -6150,19 +6150,23 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     `• \`!lowcaps\` — Low-cap watchlist summary (newest first, dead excluded)\n` +
     `• \`!lowcapadd\` — Suggest a low-cap watch (staff review via **#mod-approvals**)\n` +
     `• \`!tracked\` / \`!tracked <ca>\` — Tracked summary or detail (live refresh)\n` +
-    `• \`!caller <name>\` or \`!caller @user\` — Caller stats (embed)\n` +
-    `• \`!callerboard\` — Top callers (embed)\n` +
-    `• \`!botstats\` — McGBot aggregate stats\n` +
+    `\n📊 **Stats / Leaderboards (core)**\n` +
+    `• \`!callerboard\` — Caller leaderboard\n` +
+    `• \`!caller <name>\` or \`!caller @user\` — Caller stats card\n` +
+    `• \`!botstats\` — McGBot performance stats\n` +
     `• \`!profile\` / \`!myprofile\` — Your caller profile (+ Verify X button)\n` +
     `• \`!credit anonymous\` / \`discord\` / \`xtag\` — Public credit label on calls\n` +
     `• \`!resetstats\` — Reset your tracked stat flags (mods: \`!resetstats @user\`)\n` +
     `• **X verification:** use **#verify-x** or **!profile → Verify X** (not a user \`!verifyx\` text command)\n` +
-    `• \`!bestcall24h\` / \`!bestcallweek\` / \`!bestcallmonth\` — Best user call windows\n` +
-    `• \`!topcaller24h\` / \`!topcallerweek\` / \`!topcallermonth\` — Top caller windows\n` +
-    `• \`!bestbot24h\` / \`!bestbotweek\` / \`!bestbotmonth\` — Best bot call windows\n` +
+    `\n🏆 **Best performers**\n` +
+    `• \`!bestcall24h\` / \`!bestcallweek\` / \`!bestcallmonth\` — Best user calls\n` +
+    `• \`!bestbot24h\` / \`!bestbotweek\` / \`!bestbotmonth\` — Best bot calls\n` +
+    `\n🧠 **Dev rankings**\n` +
+    `• \`!devleaderboard\` — Dev leaderboard\n` +
     `• \`!dev <wallet | @x | nickname>\` / \`!devcard …\` — Curated dev intel lookup\n` +
     `• \`!devsubmit\` — In **#dev-intel** / **#dev-feed**: suggest dev + CA for staff (**no** direct registry edit)\n` +
-    `• \`!devleaderboard\` — Dev leaderboard (embed)\n` +
+    `\n🧪 **Advanced (optional)**\n` +
+    `• \`!topcaller24h\` / \`!topcallerweek\` / \`!topcallermonth\` — Top caller windows\n` +
     `• \`!testreal <ca>\` — Live provider / token test (embed)\n` +
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
     `• \`!guide\` / \`!userguide\` — User guide (sent in DM)\n` +

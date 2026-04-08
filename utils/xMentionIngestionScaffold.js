@@ -19,11 +19,97 @@
 const { processVerifiedXMentionCallIntake, decideXMentionIntakeReply } = require('./xCallIntakeService');
 const { createPost } = require('./xPoster');
 const { resolveIntakeGuild } = require('./xIntakeGuildTrust');
+const { EmbedBuilder } = require('discord.js');
+const { extractFirstSolanaCaFromText, isLikelySolanaCA } = require('./solanaAddress');
+const { getOutsideCallerByHandle } = require('./outsideCallerRegistryService');
 const {
   fetchXMentionCandidatesFromApi,
   hasUserContextCredentials
 } = require('./xMentionFetch');
 const { emitXMentionStructuredLog } = require('./xActivityLog');
+
+const OUTSIDE_CALLERS_CHANNEL_NAME = 'outside-callers';
+const outsideCallerAlertDedupe = new Set();
+
+function getOutsideCallersChannel(guild) {
+  if (!guild) return null;
+  return (
+    guild.channels.cache.find(
+      (ch) =>
+        ch &&
+        ch.isTextBased &&
+        typeof ch.isTextBased === 'function' &&
+        ch.isTextBased() &&
+        String(ch.name || '').toLowerCase() === OUTSIDE_CALLERS_CHANNEL_NAME
+    ) || null
+  );
+}
+
+function buildOutsideCallerAlertEmbed({ entry, contractAddress, authorHandle, tweetId, tweetText }) {
+  const handleNorm = String(entry?.xHandle || authorHandle || '').trim().replace(/^@+/, '').toLowerCase();
+  const handleLabel = handleNorm ? `@${handleNorm}` : '@—';
+  const titleName = String(entry?.displayName || entry?.nickname || '').trim();
+  const tags = Array.isArray(entry?.tags) ? entry.tags : [];
+  const notes = String(entry?.notes || '').trim();
+
+  const ca = String(contractAddress || '').trim();
+  const caHint = ca.length >= 10 ? `${ca.slice(0, 4)}…${ca.slice(-4)}` : ca || '—';
+
+  const url =
+    handleNorm && tweetId
+      ? `https://x.com/${encodeURIComponent(handleNorm)}/status/${encodeURIComponent(String(tweetId))}`
+      : tweetId
+        ? `https://x.com/i/web/status/${encodeURIComponent(String(tweetId))}`
+        : '';
+
+  const descLines = [
+    `**Caller:** ${handleLabel}${titleName ? ` — ${titleName}` : ''}`,
+    notes ? `**Notes:** ${notes.slice(0, 300)}${notes.length > 300 ? '…' : ''}` : null,
+    tags.length ? `**Tags:** ${tags.slice(0, 10).map((t) => `\`${t}\``).join(' ')}` : null,
+    '',
+    `**Contract Address:** \`${ca}\``,
+    `**CA hint:** \`${caHint}\``,
+    url ? `**Source:** [View post](${url})` : (tweetId ? `**Source ID:** \`${tweetId}\`` : null),
+    tweetText ? `\n_${String(tweetText).trim().slice(0, 220)}${String(tweetText).trim().length > 220 ? '…' : ''}_` : null
+  ].filter(Boolean);
+
+  return new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setTitle('👀 Outside Caller Alert')
+    .setDescription(descLines.join('\n').slice(0, 3900))
+    .setFooter({ text: 'Outside caller signal • curated • V1' })
+    .setTimestamp();
+}
+
+async function maybeAlertOutsideCaller({ client, guild, authorHandle, tweetText, tweetId }) {
+  const handle = String(authorHandle || '').trim();
+  if (!handle) return;
+
+  const entry = getOutsideCallerByHandle(handle);
+  if (!entry || String(entry.status || '').toLowerCase() !== 'active') return;
+
+  const ca = extractFirstSolanaCaFromText(tweetText);
+  if (!ca || !isLikelySolanaCA(ca)) return;
+
+  const dedupeKey = `${String(entry.xHandle || '').toLowerCase()}:${String(ca).trim()}:${String(tweetId || '').trim()}`;
+  if (outsideCallerAlertDedupe.has(dedupeKey)) return;
+  outsideCallerAlertDedupe.add(dedupeKey);
+
+  const ch = getOutsideCallersChannel(guild || resolveDefaultGuild(client));
+  if (!ch) return;
+
+  const embed = buildOutsideCallerAlertEmbed({
+    entry,
+    contractAddress: ca,
+    authorHandle: handle,
+    tweetId,
+    tweetText
+  });
+
+  await ch.send({ embeds: [embed] }).catch((e) => {
+    console.error('[OutsideCallers] alert send failed:', e.message);
+  });
+}
 
 function truthyEnv(name) {
   return /^1|true|yes$/i.test(String(process.env[name] || '').trim());
@@ -88,6 +174,12 @@ async function processSingleCandidate(client, guild, candidate, options = {}) {
     console.warn('[XMentionIngest] Skip candidate — missing authorHandle, tweetText, or tweetId');
     return null;
   }
+
+  // Outside caller signal layer (curated): detect tracked outside callers + Solana CA.
+  // Runs regardless of verified-trust intake outcome; no tracked-call creation here.
+  await maybeAlertOutsideCaller({ client, guild, authorHandle, tweetText, tweetId }).catch((e) => {
+    console.error('[OutsideCallers] alert check failed:', e.message);
+  });
 
   const result = await processVerifiedXMentionCallIntake(
     { authorHandle, tweetText, tweetId },

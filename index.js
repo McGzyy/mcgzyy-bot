@@ -166,6 +166,13 @@ const { logReferralEvent } = require('./utils/referralEventLog');
 const { parseProCallCommandArgs } = require('./utils/proCallText');
 const { extractFirstSolanaCaFromText } = require('./utils/solanaAddress');
 const { readGuideFile, chunkGuideForDm } = require('./utils/guideDmService');
+const {
+  listOutsideCallers,
+  getOutsideCallerByHandle,
+  createOutsideCaller,
+  updateOutsideCaller,
+  deleteOutsideCaller
+} = require('./utils/outsideCallerRegistryService');
 
 function parseMentionedUserIdFromContent(message) {
   const mentioned = message?.mentions?.users?.first?.();
@@ -352,6 +359,83 @@ async function replyText(message, content) {
     content,
     allowedMentions: { repliedUser: false }
   });
+}
+
+function outsideCallerHandleLabel(xHandle) {
+  const h = String(xHandle || '').trim().replace(/^@+/, '').toLowerCase();
+  return h ? `@${h}` : '@—';
+}
+
+function buildOutsideCallerPublicEmbed(entry) {
+  if (!entry) {
+    return new EmbedBuilder()
+      .setColor(0x64748b)
+      .setTitle('👀 Outside Caller')
+      .setDescription('This outside caller is not currently tracked.')
+      .setFooter({ text: 'Tracked by McGBot' })
+      .setTimestamp();
+  }
+
+  const h = String(entry.xHandle || '').trim();
+  const handleLabel = outsideCallerHandleLabel(h);
+  const primary = String(entry.displayName || entry.nickname || '').trim() || handleLabel;
+  const tags = Array.isArray(entry.tags) ? entry.tags : [];
+  const notes = String(entry.notes || '').trim();
+
+  const lines = [
+    `**${primary}**`,
+    '',
+    `**Handle:** ${handleLabel}`,
+    notes ? `**Notes:** ${notes.slice(0, 500)}${notes.length > 500 ? '…' : ''}` : null,
+    tags.length ? `**Tags:** ${tags.join(', ').slice(0, 400)}` : null
+  ].filter(Boolean);
+
+  return new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setTitle('👀 Outside Caller')
+    .setDescription(lines.join('\\n').slice(0, 3900))
+    .setFooter({ text: 'Tracked by McGBot' })
+    .setTimestamp();
+}
+
+function buildOutsideCallerEmbed(entry) {
+  if (!entry) {
+    return new EmbedBuilder()
+      .setColor(0x64748b)
+      .setTitle('🛰️ Outside caller')
+      .setDescription('No outside caller found for that handle.')
+      .setTimestamp();
+  }
+
+  const h = String(entry.xHandle || '').trim();
+  const handleLabel = outsideCallerHandleLabel(h);
+  const status = String(entry.status || 'active');
+  const tags = Array.isArray(entry.tags) ? entry.tags : [];
+  const createdAt = Number(entry?.metadata?.createdAt || 0);
+  const updatedAt = Number(entry?.metadata?.updatedAt || 0);
+
+  const createdIso = createdAt ? new Date(createdAt).toISOString() : '';
+  const updatedIso = updatedAt ? new Date(updatedAt).toISOString() : '';
+
+  const lines = [
+    `**Handle:** ${handleLabel} ${h ? `([view](https://x.com/${encodeURIComponent(h)}))` : ''}`,
+    (entry.displayName || entry.nickname)
+      ? `**Name:** ${String(entry.displayName || entry.nickname).slice(0, 120)}`
+      : null,
+    `**Status:** \`${status}\``,
+    entry.addedByUserId ? `**Added by:** <@${entry.addedByUserId}>` : null,
+    tags.length ? `**Tags:** ${tags.map((t) => `\`${t}\``).join(' ')}` : null,
+    entry.notes ? `**Notes:** ${String(entry.notes).slice(0, 900)}${String(entry.notes).length > 900 ? '…' : ''}` : null,
+    createdIso ? `**Created:** ${formatIsoDateTime(createdIso)}` : null,
+    updatedIso ? `**Updated:** ${formatIsoDateTime(updatedIso)}` : null
+  ].filter(Boolean);
+
+  return new EmbedBuilder()
+    .setColor(status === 'inactive' ? 0x94a3b8 : 0x3b82f6)
+    .setTitle('🛰️ Outside caller (curated)')
+    .setDescription(lines.join('\n').slice(0, 3900))
+    .setFooter({ text: 'Curated outside caller registry • V1' })
+    .setTimestamp();
 }
 
 async function sendGuideViaDiscordDm(discordUser, filename) {
@@ -4577,6 +4661,173 @@ client.on('messageCreate', async (message) => {
         return;
       }
 
+      if (
+        lowerContent === '!outsidecallers' ||
+        lowerContent.startsWith('!outsidecalleradd ') ||
+        lowerContent.startsWith('!outsidecallerdisable ') ||
+        lowerContent.startsWith('!outsidecallerenable ') ||
+        lowerContent.startsWith('!outsidecallerremove ')
+      ) {
+        if (!memberCanManageGuild(message.member)) {
+          await replyText(message, '❌ Only mods/admins can use this command.');
+          return;
+        }
+
+        if (lowerContent === '!outsidecallers') {
+          const list = listOutsideCallers({ includeInactive: false });
+          const top = list.slice(0, 25);
+          const lines = top.map((e, i) => {
+            const handle = outsideCallerHandleLabel(e.xHandle);
+            const name = String(e.displayName || e.nickname || '').trim();
+            const tagPart =
+              Array.isArray(e.tags) && e.tags.length
+                ? ` ${e.tags.slice(0, 6).map((t) => `\`${t}\``).join(' ')}`
+                : '';
+            return `${i + 1}. **${handle}**${name ? ` — ${name}` : ''}${tagPart}`;
+          });
+
+          const embed = new EmbedBuilder()
+            .setColor(0x3b82f6)
+            .setTitle('🛰️ Outside callers (active)')
+            .setDescription(lines.length ? lines.join('\n') : 'No active outside callers are currently tracked.')
+            .setFooter({
+              text:
+                list.length > top.length
+                  ? `Showing ${top.length} of ${list.length}`
+                  : `${list.length} total`
+            })
+            .setTimestamp();
+
+          await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
+          return;
+        }
+
+        if (lowerContent.startsWith('!outsidecalleradd ')) {
+          const raw = content.replace(/^!outsidecalleradd\s+/i, '').trim();
+          const parts = raw.split('|').map((p) => p.trim());
+          const handleRaw = parts[0] || '';
+          const displayName = parts[1] || '';
+          const notes = parts[2] || '';
+          const tagsRaw = parts[3] || '';
+
+          if (!handleRaw) {
+            await replyText(
+              message,
+              '❌ Usage: `!outsidecalleradd <@handle> | <displayName?> | <notes?> | <tags?>`'
+            );
+            return;
+          }
+
+          const created = createOutsideCaller({
+            xHandle: handleRaw,
+            displayName,
+            notes,
+            tags: tagsRaw ? parseTagsCsv(tagsRaw) : [],
+            status: 'active',
+            addedByUserId: message.author.id,
+            sourceContext: { sourceType: 'mod', addedByUserId: message.author.id }
+          });
+
+          if (!created.ok) {
+            const msg =
+              created.reason === 'duplicate_x_handle'
+                ? '⚠️ That outside caller is already tracked.'
+                : created.reason === 'bad_x_handle'
+                  ? '❌ That does not look like a valid X handle.'
+                  : created.reason === 'missing_x_handle'
+                    ? '❌ Missing X handle.'
+                    : '❌ Could not add outside caller.';
+            await replyText(message, msg);
+            return;
+          }
+
+          await message.reply({
+            content: '✅ Outside caller added to curated registry.',
+            embeds: [buildOutsideCallerEmbed(created.entry)],
+            allowedMentions: { repliedUser: false }
+          });
+          return;
+        }
+
+        if (lowerContent.startsWith('!outsidecallerdisable ')) {
+          const raw = content.replace(/^!outsidecallerdisable\s+/i, '').trim();
+          if (!raw) {
+            await replyText(message, '❌ Usage: `!outsidecallerdisable <@handle>`');
+            return;
+          }
+          const updated = updateOutsideCaller(raw, { status: 'inactive' });
+          if (!updated.ok) {
+            await replyText(message, updated.reason === 'not_found' ? '❌ Not found.' : '❌ Could not disable.');
+            return;
+          }
+          await message.reply({
+            content: `✅ Disabled ${outsideCallerHandleLabel(updated.entry.xHandle)}.`,
+            embeds: [buildOutsideCallerEmbed(updated.entry)],
+            allowedMentions: { repliedUser: false }
+          });
+          return;
+        }
+
+        if (lowerContent.startsWith('!outsidecallerenable ')) {
+          const raw = content.replace(/^!outsidecallerenable\s+/i, '').trim();
+          if (!raw) {
+            await replyText(message, '❌ Usage: `!outsidecallerenable <@handle>`');
+            return;
+          }
+          const updated = updateOutsideCaller(raw, { status: 'active' });
+          if (!updated.ok) {
+            await replyText(message, updated.reason === 'not_found' ? '❌ Not found.' : '❌ Could not enable.');
+            return;
+          }
+          await message.reply({
+            content: `✅ Enabled ${outsideCallerHandleLabel(updated.entry.xHandle)}.`,
+            embeds: [buildOutsideCallerEmbed(updated.entry)],
+            allowedMentions: { repliedUser: false }
+          });
+          return;
+        }
+
+        if (lowerContent.startsWith('!outsidecallerremove ')) {
+          const raw = content.replace(/^!outsidecallerremove\s+/i, '').trim();
+          if (!raw) {
+            await replyText(message, '❌ Usage: `!outsidecallerremove <@handle>`');
+            return;
+          }
+          const existing = getOutsideCallerByHandle(raw);
+          if (!existing) {
+            await replyText(message, '❌ Not found.');
+            return;
+          }
+          const del = deleteOutsideCaller(raw);
+          if (!del.ok) {
+            await replyText(message, '❌ Could not remove.');
+            return;
+          }
+          await replyText(message, `🗑 Removed ${outsideCallerHandleLabel(existing.xHandle)} from the registry.`);
+          return;
+        }
+      }
+
+      if (lowerContent.startsWith('!outsidecaller ')) {
+        const raw = content.replace(/^!outsidecaller\s+/i, '').trim();
+        if (!raw) {
+          await replyText(message, '❌ Usage: `!outsidecaller <@handle>`');
+          return;
+        }
+
+        const entry = getOutsideCallerByHandle(raw);
+        if (!entry || String(entry.status || '').toLowerCase() !== 'active') {
+          await replyText(message, 'This outside caller is not currently tracked.');
+          return;
+        }
+
+        await message.reply({
+          embeds: [buildOutsideCallerPublicEmbed(entry)],
+          allowedMentions: { repliedUser: false }
+        });
+        return;
+      }
+
       if (lowerContent === '!scanner') {
   if (!message.member?.permissions?.has('ManageGuild')) {
     await replyText(message, '❌ Mods/admins only.');
@@ -6519,6 +6770,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     `• \`!lowcap <ca>\` — Low-cap watchlist entry (curated registry)\n` +
     `• \`!lowcaps\` — Low-cap watchlist summary (newest first, dead excluded)\n` +
     `• \`!lowcapadd\` — Suggest a low-cap watch (staff review via **#mod-approvals**)\n` +
+    `• \`!outsidecaller @handle\` — View info about a tracked outside caller\n` +
     `• \`!tracked\` / \`!tracked <ca>\` — Tracked summary or detail (live refresh)\n` +
     `\n📊 **Stats / Leaderboards (core)**\n` +
     `• \`!callerboard\` — Caller leaderboard\n` +
@@ -6548,6 +6800,8 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     contentOut +=
       `🛡️ **Mod / Manage Server**\n` +
       `• \`!modguide\` / \`!adminguide\` — Staff guides (DM, **Manage Server**)\n` +
+      `• **Outside callers (curated):** \`!outsidecallers\`, \`!outsidecaller <@handle>\`, \`!outsidecalleradd @handle | name? | notes? | tags?\`\n` +
+      `  \`!outsidecallerdisable @handle\` / \`!outsidecallerenable @handle\` / \`!outsidecallerremove @handle\`\n` +
       `• Approval buttons in **#mod-approvals**\n` +
       `• \`!approvalstats\` — Approval queue counts\n` +
       `• \`!pendingapprovals\` — Pending X verifications + top pending **bot** approvals\n` +

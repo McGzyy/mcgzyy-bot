@@ -350,25 +350,45 @@ async function replyText(message, content) {
   });
 }
 
-async function tryDmGuideToUser(message, filename) {
+async function sendGuideViaDiscordDm(discordUser, filename) {
   const read = readGuideFile(filename);
-  if (!read.ok) {
-    await replyText(message, '❌ That guide is unavailable right now.');
-    return;
-  }
+  if (!read.ok) return { ok: false, reason: 'unavailable' };
 
   const chunks = chunkGuideForDm(read.text);
   try {
     for (const chunk of chunks) {
-      await message.author.send(chunk);
+      await discordUser.send(chunk);
     }
-    await replyText(message, '📩 Sent you a DM.');
+    return { ok: true };
   } catch (_) {
-    await replyText(
-      message,
-      "❌ I couldn't DM you. Please enable DMs and try again."
-    );
+    return { ok: false, reason: 'dm_failed' };
   }
+}
+
+async function tryDmGuideToUser(message, filename) {
+  const res = await sendGuideViaDiscordDm(message.author, filename);
+  if (!res.ok) {
+    if (res.reason === 'dm_failed') {
+      await replyText(message, "❌ I couldn't DM you. Please enable DMs and try again.");
+      return;
+    }
+    await replyText(message, '❌ That guide is unavailable right now.');
+    return;
+  }
+  await replyText(message, '📩 Sent you a DM.');
+}
+
+function buildGuideDestinationChooserRow(userId, guideFile) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`guide_dest:discord:${userId}:${guideFile}`)
+      .setLabel('Discord')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`guide_dest:x:${userId}:${guideFile}`)
+      .setLabel('X')
+      .setStyle(ButtonStyle.Secondary)
+  );
 }
 
 function buildTestXIntakeResultEmbed(result, { applyMode, authorHandle, tweetId, tweetTextSample }) {
@@ -2876,6 +2896,46 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isButton()) {
       const parts = interaction.customId.split(':');
 
+      if (parts[0] === 'guide_dest') {
+        const dest = parts[1];
+        const requestUserId = parts[2];
+        const guideFile = parts[3];
+
+        if (!dest || !requestUserId || !guideFile) return;
+
+        if (String(interaction.user.id) !== String(requestUserId)) {
+          await interaction.reply({
+            content: '❌ That guide chooser isn’t for you.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        if (dest === 'discord') {
+          const res = await sendGuideViaDiscordDm(interaction.user, guideFile);
+          if (!res.ok) {
+            const msg =
+              res.reason === 'dm_failed'
+                ? "❌ I couldn't DM you. Please enable DMs and try again."
+                : '❌ That guide is unavailable right now.';
+            await interaction.reply({ content: msg, ephemeral: true });
+            return;
+          }
+          await interaction.reply({ content: '📩 Sent you a DM.', ephemeral: true });
+          return;
+        }
+
+        if (dest === 'x') {
+          await interaction.reply({
+            content: "❌ X guide delivery isn't available yet. I can still send it on Discord.",
+            ephemeral: true
+          });
+          return;
+        }
+
+        return;
+      }
+
       if (parts[0] === 'topcaller_approve' || parts[0] === 'topcaller_dismiss') {
         if (!interaction.member?.permissions?.has('ManageGuild')) {
           await interaction.reply({ content: '❌ Only mods/admins can use this action.', ephemeral: true });
@@ -4203,7 +4263,19 @@ client.on('messageCreate', async (message) => {
         else if (lowerContent === '!modguide') guideFile = 'mod.md';
         else if (lowerContent === '!adminguide') guideFile = 'admin.md';
 
-        await tryDmGuideToUser(message, guideFile);
+        const profile = getUserProfileByDiscordId(message.author.id);
+        const isXVerified = !!profile?.isXVerified;
+
+        if (!isXVerified) {
+          await tryDmGuideToUser(message, guideFile);
+          return;
+        }
+
+        await message.reply({
+          content: 'Where would you like this guide sent?',
+          components: [buildGuideDestinationChooserRow(message.author.id, guideFile)],
+          allowedMentions: { repliedUser: false }
+        });
         return;
       }
 

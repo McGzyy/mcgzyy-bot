@@ -396,26 +396,35 @@ function buildGuideDestinationChooserRow(userId, guideFile) {
 }
 
 function formatCompactCallLine(call) {
-  if (!call) return 'No data available.';
-  const name = call.tokenName || 'Unknown';
-  const tick = call.ticker ? `$${call.ticker}` : '$—';
+  if (!call) return 'No leaderboard data available yet.';
+
+  const name = String(call.tokenName || 'Unknown').trim() || 'Unknown';
+  const tick = call.ticker ? `$${String(call.ticker).replace(/^\$+/, '')}` : '$—';
+
   const x = Number(call.x || 0);
   const ath = Number(call.ath || 0);
   const firstMc = Number(call.firstCalledMarketCap || 0);
+
   const ca = String(call.contractAddress || '').trim();
   const caHint = ca.length >= 10 ? `${ca.slice(0, 4)}…${ca.slice(-4)}` : ca || '—';
+
   const caller =
-    call.firstCallerPublicName ||
-    call.firstCallerDisplayName ||
-    call.firstCallerUsername ||
-    'Unknown';
+    String(
+      call.firstCallerPublicName ||
+        call.firstCallerDisplayName ||
+        call.firstCallerUsername ||
+        ''
+    ).trim() || 'Unknown';
+
+  const mcLine = (label, value) =>
+    Number.isFinite(value) && value > 0 ? `$${value.toLocaleString()}` : '—';
 
   return [
-    `**Token:** ${name} (${tick})`,
+    `**${name}** (${tick})`,
     `**Caller:** ${caller}`,
-    `**From call:** ${Number.isFinite(x) && x > 0 ? `${x.toFixed(2)}x` : '—'}`,
-    `**ATH MC:** ${Number.isFinite(ath) && ath > 0 ? `$${ath.toLocaleString()}` : '—'}`,
-    `**First called MC:** ${Number.isFinite(firstMc) && firstMc > 0 ? `$${firstMc.toLocaleString()}` : '—'}`,
+    `**ATH X:** ${Number.isFinite(x) && x > 0 ? `**${x.toFixed(2)}x**` : '—'}`,
+    `**ATH MC:** ${mcLine('ATH', ath)}`,
+    `**First-called MC:** ${mcLine('First', firstMc)}`,
     `**CA:** \`${caHint}\``
   ].join('\n');
 }
@@ -426,19 +435,20 @@ function buildUserLeaderboardHighlightEmbed(days, label) {
 
   const topBlock = top
     ? [
-        `**Caller:** ${top.username || 'Unknown'}`,
-        `**Total calls:** ${Number(top.totalCalls || 0)}`,
-        `**Avg X:** ${Number(top.avgX || 0).toFixed(2)}x`,
-        `**Avg ATH:** $${Number(top.avgAth || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+        `**${top.username || 'Unknown'}**`,
+        `Calls: **${Number(top.totalCalls || 0)}**`,
+        `Avg X: **${Number(top.avgX || 0).toFixed(2)}x**`,
+        `Avg ATH: **$${Number(top.avgAth || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}**`
       ].join('\n')
-    : 'No data available.';
+    : 'No leaderboard data available yet.';
 
   return new EmbedBuilder()
     .setColor(0x3b82f6)
     .setTitle(`🏆 ${label} User Leaderboard`)
+    .setDescription('A quick snapshot of community performance.')
     .addFields(
-      { name: `👑 Top Caller (${label.toLowerCase()})`, value: topBlock.slice(0, 1024), inline: false },
-      { name: `🔥 Best User Call (${label.toLowerCase()})`, value: formatCompactCallLine(best).slice(0, 1024), inline: false }
+      { name: '👑 Top Caller', value: topBlock.slice(0, 1024), inline: true },
+      { name: '🔥 Best User Call', value: formatCompactCallLine(best).slice(0, 1024), inline: true }
     )
     .setFooter({ text: 'McGBot • Leaderboards' })
     .setTimestamp();
@@ -449,8 +459,9 @@ function buildBotLeaderboardHighlightEmbed(days, label) {
   return new EmbedBuilder()
     .setColor(0x1d9bf0)
     .setTitle(`🤖 ${label} McGBot Leaderboard`)
+    .setDescription('A quick snapshot of McGBot’s strongest tracked call.')
     .addFields({
-      name: `🔥 Best McGBot Call (${label.toLowerCase()})`,
+      name: '🔥 Best McGBot Call',
       value: formatCompactCallLine(best).slice(0, 1024),
       inline: false
     })

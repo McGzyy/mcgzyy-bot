@@ -2059,25 +2059,28 @@ async function handleBasicCommands(message, options = {}) {
 
       const top = entries.slice(0, 12);
       const lines = top.map((e) => {
+        const ca = String(e.contractAddress || '').trim();
+        const caHint = ca.length >= 10 ? `\`${ca.slice(0, 4)}…${ca.slice(-4)}\`` : (ca ? `\`${ca}\`` : '`—`');
         const label = e.ticker
           ? `$${e.ticker}`
           : e.name && String(e.name).trim()
             ? String(e.name).trim()
             : `\`${String(e.contractAddress || '').slice(0, 8)}…\``;
         const raw = (e.narrative || e.notes || '').replace(/\s+/g, ' ').trim();
-        const snippet = raw.length > 72 ? `${raw.slice(0, 71)}…` : raw || '—';
-        return `${label} — ${snippet} — ${e.lifecycle || 'watching'}`;
+        const snippet = raw.length > 80 ? `${raw.slice(0, 79)}…` : raw || '—';
+        const life = `\`${e.lifecycle || 'watching'}\``;
+        return `${label} • ${caHint} • ${life}\n_${snippet}_`;
       });
 
       const embed = new EmbedBuilder()
         .setColor(0x8b5cf6)
         .setTitle('🧠 Low Cap Watchlist')
-        .setDescription(lines.join('\n'))
+        .setDescription(lines.join('\n\n'))
         .setFooter({
           text:
             entries.length > top.length
-              ? `Showing ${top.length} of ${entries.length} (dead excluded)`
-              : `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} (dead excluded)`
+              ? `Showing ${top.length} of ${entries.length} (dead excluded) • Use !lowcap <CA> for details`
+              : `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} (dead excluded) • Use !lowcap <CA> for details`
         })
         .setTimestamp();
 

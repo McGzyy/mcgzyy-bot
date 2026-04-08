@@ -521,12 +521,177 @@ function getBotStatsRaw() {
   };
 }
 
+/**
+ * =========================
+ * TIMEFRAME STATS (V1)
+ * =========================
+ */
+
+function getCallTimeMs(call) {
+  const t =
+    call?.calledAt ||
+    call?.firstCalledAt ||
+    call?.createdAt ||
+    call?.lastUpdatedAt ||
+    0;
+  const ms = new Date(t).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function filterCallsInLastNDays(calls, days) {
+  const d = Number(days);
+  const daysSafe = Number.isFinite(d) && d > 0 ? d : 1;
+  const since = Date.now() - daysSafe * 24 * 60 * 60 * 1000;
+  return calls.filter(c => getCallTimeMs(c) >= since);
+}
+
+function getBestCallInTimeframe(days = 1) {
+  const pool = filterCallsInLastNDays(
+    getAllTrackedCalls().filter(isHumanUserCall).filter(isValid),
+    days
+  );
+  if (!pool.length) return null;
+
+  let best = null;
+  let bestX = 0;
+
+  for (const call of pool) {
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+    if (!best || x > bestX) {
+      best = call;
+      bestX = x;
+    }
+  }
+
+  if (!best) return null;
+  return {
+    tokenName: best.tokenName,
+    ticker: best.ticker,
+    x: bestX,
+    ath: getAth(best),
+    contractAddress: best.contractAddress,
+    firstCalledMarketCap: best.firstCalledMarketCap,
+
+    firstCallerUsername: best.firstCallerUsername,
+    firstCallerDisplayName: best.firstCallerDisplayName,
+    firstCallerPublicName: best.firstCallerPublicName
+  };
+}
+
+function getBestBotCallInTimeframe(days = 1) {
+  const pool = filterCallsInLastNDays(
+    getAllTrackedCalls().filter(isBotCall).filter(isValid),
+    days
+  );
+  if (!pool.length) return null;
+
+  let best = null;
+  let bestX = 0;
+
+  for (const call of pool) {
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+    if (!best || x > bestX) {
+      best = call;
+      bestX = x;
+    }
+  }
+
+  if (!best) return null;
+  return {
+    tokenName: best.tokenName,
+    ticker: best.ticker,
+    x: bestX,
+    ath: getAth(best),
+    contractAddress: best.contractAddress,
+    firstCalledMarketCap: best.firstCalledMarketCap,
+
+    firstCallerUsername: best.firstCallerUsername,
+    firstCallerDisplayName: best.firstCallerDisplayName,
+    firstCallerPublicName: best.firstCallerPublicName
+  };
+}
+
+function getTopCallerInTimeframe(days = 1) {
+  const pool = filterCallsInLastNDays(
+    getAllTrackedCalls().filter(isHumanUserCall).filter(isValid),
+    days
+  );
+  if (!pool.length) return null;
+
+  const map = new Map();
+
+  for (const call of pool) {
+    const key =
+      call.firstCallerDiscordId ||
+      call.firstCallerId ||
+      normalize(call.firstCallerUsername) ||
+      normalize(call.firstCallerDisplayName) ||
+      normalize(call.firstCallerPublicName);
+    if (!key) continue;
+
+    if (!map.has(key)) {
+      map.set(key, { calls: [], totalX: 0, totalAth: 0 });
+    }
+
+    const entry = map.get(key);
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+    entry.calls.push(call);
+    entry.totalX += x;
+    entry.totalAth += ath;
+  }
+
+  let best = null;
+  for (const entry of map.values()) {
+    const totalCalls = entry.calls.length;
+    const avgX = totalCalls ? entry.totalX / totalCalls : 0;
+    if (!best || avgX > best.avgX) {
+      best = { ...entry, totalCalls, avgX };
+    }
+  }
+
+  if (!best) return null;
+
+  const totalCalls = best.totalCalls;
+  const avgX = best.avgX;
+  const avgAth = totalCalls ? best.totalAth / totalCalls : 0;
+
+  let bestCall = null;
+  let bestX = 0;
+  for (const call of best.calls) {
+    const x = calculateX(call.firstCalledMarketCap, getAth(call));
+    if (!bestCall || x > bestX) {
+      bestCall = call;
+      bestX = x;
+    }
+  }
+
+  return {
+    username: resolveBestName(best.calls),
+    totalCalls,
+    avgX,
+    avgAth,
+    bestCall: bestCall
+      ? {
+          tokenName: bestCall.tokenName,
+          ticker: bestCall.ticker,
+          x: bestX
+        }
+      : null
+  };
+}
+
 module.exports = {
   getCallerStats,
   getCallerStatsRaw,
   getCallerLeaderboard,
   getBotStats,
   getBotStatsRaw,
+  getTopCallerInTimeframe,
+  getBestCallInTimeframe,
+  getBestBotCallInTimeframe,
   getTopCallerEligibilityReport,
   TOP_CALLER_ELIGIBILITY
 };

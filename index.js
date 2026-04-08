@@ -267,6 +267,10 @@ function saveBotSettings(settings) {
 let BOT_SETTINGS = loadBotSettings();
 let SCANNER_ENABLED = BOT_SETTINGS.scannerEnabled;
 
+// One-time guards for interval-based background loops (prevents accidental duplicate registration).
+let leaderboardsLoopsStarted = false;
+let leaderboardsIntervalHandles = [];
+
 function extractSolanaAddress(text) {
   return extractFirstSolanaCaFromText(text);
 }
@@ -389,6 +393,69 @@ function buildGuideDestinationChooserRow(userId, guideFile) {
       .setLabel('X')
       .setStyle(ButtonStyle.Secondary)
   );
+}
+
+function formatCompactCallLine(call) {
+  if (!call) return 'No data available.';
+  const name = call.tokenName || 'Unknown';
+  const tick = call.ticker ? `$${call.ticker}` : '$—';
+  const x = Number(call.x || 0);
+  const ath = Number(call.ath || 0);
+  const firstMc = Number(call.firstCalledMarketCap || 0);
+  const ca = String(call.contractAddress || '').trim();
+  const caHint = ca.length >= 10 ? `${ca.slice(0, 4)}…${ca.slice(-4)}` : ca || '—';
+  const caller =
+    call.firstCallerPublicName ||
+    call.firstCallerDisplayName ||
+    call.firstCallerUsername ||
+    'Unknown';
+
+  return [
+    `**Token:** ${name} (${tick})`,
+    `**Caller:** ${caller}`,
+    `**From call:** ${Number.isFinite(x) && x > 0 ? `${x.toFixed(2)}x` : '—'}`,
+    `**ATH MC:** ${Number.isFinite(ath) && ath > 0 ? `$${ath.toLocaleString()}` : '—'}`,
+    `**First called MC:** ${Number.isFinite(firstMc) && firstMc > 0 ? `$${firstMc.toLocaleString()}` : '—'}`,
+    `**CA:** \`${caHint}\``
+  ].join('\n');
+}
+
+function buildUserLeaderboardHighlightEmbed(days, label) {
+  const top = getTopCallerInTimeframe(days);
+  const best = getBestCallInTimeframe(days);
+
+  const topBlock = top
+    ? [
+        `**Caller:** ${top.username || 'Unknown'}`,
+        `**Total calls:** ${Number(top.totalCalls || 0)}`,
+        `**Avg X:** ${Number(top.avgX || 0).toFixed(2)}x`,
+        `**Avg ATH:** $${Number(top.avgAth || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+      ].join('\n')
+    : 'No data available.';
+
+  return new EmbedBuilder()
+    .setColor(0x3b82f6)
+    .setTitle(`🏆 ${label} User Leaderboard`)
+    .addFields(
+      { name: `👑 Top Caller (${label.toLowerCase()})`, value: topBlock.slice(0, 1024), inline: false },
+      { name: `🔥 Best User Call (${label.toLowerCase()})`, value: formatCompactCallLine(best).slice(0, 1024), inline: false }
+    )
+    .setFooter({ text: 'McGBot • Leaderboards' })
+    .setTimestamp();
+}
+
+function buildBotLeaderboardHighlightEmbed(days, label) {
+  const best = getBestBotCallInTimeframe(days);
+  return new EmbedBuilder()
+    .setColor(0x1d9bf0)
+    .setTitle(`🤖 ${label} McGBot Leaderboard`)
+    .addFields({
+      name: `🔥 Best McGBot Call (${label.toLowerCase()})`,
+      value: formatCompactCallLine(best).slice(0, 1024),
+      inline: false
+    })
+    .setFooter({ text: 'McGBot • Leaderboards' })
+    .setTimestamp();
 }
 
 function buildTestXIntakeResultEmbed(result, { applyMode, authorHandle, tweetId, tweetTextSample }) {
@@ -820,6 +887,20 @@ function getLowCapTrackerChannel(guild) {
       ch.isTextBased() &&
       String(ch.name || '').toLowerCase() === 'low-cap-tracker'
   ) || null;
+}
+
+function getLeaderboardsChannel(guild) {
+  if (!guild) return null;
+  return (
+    guild.channels.cache.find(
+      (ch) =>
+        ch &&
+        ch.isTextBased &&
+        typeof ch.isTextBased === 'function' &&
+        ch.isTextBased() &&
+        String(ch.name || '').toLowerCase() === 'leaderboards'
+    ) || null
+  );
 }
 
 /** Staff edits in #tracked-devs: visibility only (no approval). */
@@ -2159,8 +2240,8 @@ function buildLowCapSubmitModal() {
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId('lowcap_optional')
-          .setLabel('Optional: ticker | MC | ATH | tags')
-          .setPlaceholder('e.g. ABC | 50000 | 1.2M | meme, cto — or leave blank')
+          .setLabel('Optional (format): ticker | current MC | previous ATH | tags')
+          .setPlaceholder('PEPE | 25000 | 1.2M | cto, revival, og')
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(false)
           .setMaxLength(400)
@@ -2832,6 +2913,9 @@ async function ensureVerifyXPrompt(guild) {
 }
 
 client.once('clientReady', async () => {
+  console.log(
+    `[LEADERBOARDS DEBUG] clientReady fired at ${new Date().toISOString()}, pid=${process.pid}`
+  );
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   const guilds = client.guilds.cache;
@@ -2881,6 +2965,118 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
       console.error('[ModApprovals] Interval cleanup failed:', err.message);
     });
   }, 10 * 60 * 1000);
+
+  // =========================
+  // LEADERBOARD POSTING (V1)
+  // =========================
+  console.log(
+    `[LEADERBOARDS DEBUG] Attempting leaderboard loop registration, started=${leaderboardsLoopsStarted}, pid=${process.pid}`
+  );
+  if (!leaderboardsLoopsStarted) {
+    leaderboardsLoopsStarted = true;
+
+    const leaderboardsChannel = getLeaderboardsChannel(firstGuild);
+    if (leaderboardsChannel) {
+    const postUser = async (days, label) => {
+      console.log(
+        `[LEADERBOARDS DEBUG] postUser called days=${days} label=${label} at ${new Date().toISOString()} pid=${process.pid}`
+      );
+      try {
+        const embed = buildUserLeaderboardHighlightEmbed(days, label);
+        await leaderboardsChannel.send({ embeds: [embed] });
+      } catch (e) {
+        console.error('[Leaderboards] user post failed:', e.message);
+      }
+    };
+
+    const postBot = async (days, label) => {
+      console.log(
+        `[LEADERBOARDS DEBUG] postBot called days=${days} label=${label} at ${new Date().toISOString()} pid=${process.pid}`
+      );
+      try {
+        const embed = buildBotLeaderboardHighlightEmbed(days, label);
+        await leaderboardsChannel.send({ embeds: [embed] });
+      } catch (e) {
+        console.error('[Leaderboards] bot post failed:', e.message);
+      }
+    };
+
+    // USER
+    console.log('[LEADERBOARDS DEBUG] Registered DAILY USER interval');
+    leaderboardsIntervalHandles.push(setInterval(() => void postUser(1, 'Daily'), 24 * 60 * 60 * 1000));
+
+    console.log('[LEADERBOARDS DEBUG] Registered DAILY BOT interval');
+    leaderboardsIntervalHandles.push(setInterval(() => void postBot(1, 'Daily'), 24 * 60 * 60 * 1000));
+
+    // Weekly/monthly: calendar-based scheduler (no long timers; no 30d/7d elapsed intervals).
+    // Runs hourly and posts:
+    // - Weekly on Mondays (once per calendar week key)
+    // - Monthly on the 1st (once per YYYY-MM key)
+    let lastWeeklyPostKey = '';
+    let lastMonthlyPostKey = '';
+
+    function pad2(n) {
+      return String(n).padStart(2, '0');
+    }
+
+    // ISO week key: YYYY-WW (Monday-based week, ISO 8601)
+    function isoWeekKey(d) {
+      const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      // Thursday in current week decides the year.
+      const day = date.getUTCDay() || 7;
+      date.setUTCDate(date.getUTCDate() + 4 - day);
+      const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+      const weekNo = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+      return `${date.getUTCFullYear()}-${pad2(weekNo)}`;
+    }
+
+    function monthKey(d) {
+      return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+    }
+
+    async function checkLeaderboardSchedules() {
+      const now = new Date();
+      const pid = process.pid;
+
+      // Monthly: post on 1st of month
+      if (now.getDate() === 1) {
+        const key = monthKey(now);
+        if (key !== lastMonthlyPostKey) {
+          console.log(`[LEADERBOARDS DEBUG] Monthly schedule hit key=${key} pid=${pid}`);
+          lastMonthlyPostKey = key;
+          await postUser(30, 'Monthly');
+          await postBot(30, 'Monthly');
+        }
+      }
+
+      // Weekly: post on Monday
+      if (now.getDay() === 1) {
+        const key = isoWeekKey(now);
+        if (key !== lastWeeklyPostKey) {
+          console.log(`[LEADERBOARDS DEBUG] Weekly schedule hit key=${key} pid=${pid}`);
+          lastWeeklyPostKey = key;
+          await postUser(7, 'Weekly');
+          await postBot(7, 'Weekly');
+        }
+      }
+    }
+
+    console.log('[LEADERBOARDS DEBUG] Registered hourly calendar scheduler interval');
+    leaderboardsIntervalHandles.push(setInterval(() => {
+      void checkLeaderboardSchedules().catch((e) => {
+        console.error('[Leaderboards] schedule check failed:', e.message);
+      });
+    }, 60 * 60 * 1000));
+
+    console.log(
+      `[LEADERBOARDS DEBUG] Registered leaderboard loops: ${leaderboardsIntervalHandles.length}, pid=${process.pid}`
+    );
+    } else {
+      console.log(
+        `[LEADERBOARDS DEBUG] Skipping leaderboard loops: #leaderboards channel not found, pid=${process.pid}`
+      );
+    }
+  }
 });
 
 client.on('guildMemberAdd', (member) => {
@@ -4022,12 +4218,46 @@ let updated = null;
         }
 
         const ok = await routeLowCapSubmissionToModHub(interaction.guild, created.submission);
-        await interaction.reply({
-          content: ok
-            ? 'Low-cap submission sent for review. If it’s approved, it’ll be added to the watchlist. Thanks for the lead.'
-            : 'Saved for review, but the bot couldn’t find the staff review channel. Please ask an admin to finish setup so submissions can be reviewed.',
-          ephemeral: true
+        const receiptFields = [
+          { name: 'Name', value: `**${name}**`, inline: false },
+          { name: 'Contract Address', value: `\`${ca}\``, inline: false },
+          { name: 'Narrative', value: narrative.length > 180 ? `${narrative.slice(0, 179)}…` : narrative, inline: false },
+          { name: "Why it's interesting", value: why.length > 400 ? `${why.slice(0, 399)}…` : why, inline: false }
+        ];
+
+        const parsedLines = [];
+        if (opt.ticker) parsedLines.push(`**Ticker:** $${opt.ticker.replace(/^\$+/, '')}`);
+        if (opt.currentMarketCap != null) parsedLines.push(`**Current MC:** $${Number(opt.currentMarketCap).toLocaleString()}`);
+        if (opt.previousAthMarketCap != null) parsedLines.push(`**Previous ATH:** $${Number(opt.previousAthMarketCap).toLocaleString()}`);
+        if (Array.isArray(opt.tags) && opt.tags.length) parsedLines.push(`**Tags:** ${opt.tags.map((t) => `\`${t}\``).join(' ')}`);
+
+        if (parsedLines.length) {
+          receiptFields.push({
+            name: 'Parsed (optional)',
+            value: parsedLines.join('\n').slice(0, 1024),
+            inline: false
+          });
+        }
+
+        receiptFields.push({
+          name: 'Submission ID',
+          value: `\`${created.submission.submissionId}\``,
+          inline: false
         });
+
+        const embed = new EmbedBuilder()
+          .setColor(ok ? 0x22c55e : 0xf59e0b)
+          .setTitle('✅ Low-cap submission received')
+          .setDescription(
+            ok
+              ? 'Sent for review. If it’s approved, it’ll be added to the watchlist.'
+              : 'Saved for review, but the bot couldn’t find the staff review channel. Please ask an admin to finish setup so submissions can be reviewed.'
+          )
+          .addFields(receiptFields)
+          .setFooter({ text: 'Curated low-cap watchlist • submission receipt' })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed], ephemeral: true });
         return;
       }
 
@@ -4276,6 +4506,63 @@ client.on('messageCreate', async (message) => {
           components: [buildGuideDestinationChooserRow(message.author.id, guideFile)],
           allowedMentions: { repliedUser: false }
         });
+        return;
+      }
+
+      if (lowerContent.startsWith('!testleaderboard')) {
+        if (message.author.id !== process.env.BOT_OWNER_ID) {
+          await replyText(message, '❌ Only the bot owner can use this command.');
+          return;
+        }
+
+        const rest = content.replace(/^!testleaderboard\s*/i, '').trim();
+        const parts = rest.split(/\s+/).filter(Boolean);
+
+        console.log(
+          `[LEADERBOARDS DEBUG] Manual testleaderboard invoked by ${message.author.id} args=${JSON.stringify(parts)} at ${new Date().toISOString()} pid=${process.pid}`
+        );
+
+        if (parts.length < 2) {
+          await replyText(
+            message,
+            '❌ Usage: `!testleaderboard <daily|weekly|monthly> <user|bot>`\n' +
+              'Examples: `!testleaderboard daily user`, `!testleaderboard weekly bot`'
+          );
+          return;
+        }
+
+        const timeframe = String(parts[0] || '').toLowerCase();
+        const kind = String(parts[1] || '').toLowerCase();
+
+        const tfMap = {
+          daily: { days: 1, label: 'Daily' },
+          weekly: { days: 7, label: 'Weekly' },
+          monthly: { days: 30, label: 'Monthly' }
+        };
+
+        const tf = tfMap[timeframe];
+        if (!tf || !['user', 'bot'].includes(kind)) {
+          await replyText(
+            message,
+            '❌ Usage: `!testleaderboard <daily|weekly|monthly> <user|bot>`\n' +
+              'Examples: `!testleaderboard daily user`, `!testleaderboard weekly bot`'
+          );
+          return;
+        }
+
+        const ch = getLeaderboardsChannel(message.guild);
+        if (!ch) {
+          await replyText(message, '❌ Could not find a text channel named `leaderboards`.');
+          return;
+        }
+
+        const embed =
+          kind === 'user'
+            ? buildUserLeaderboardHighlightEmbed(tf.days, tf.label)
+            : buildBotLeaderboardHighlightEmbed(tf.days, tf.label);
+
+        await ch.send({ embeds: [embed] });
+        await replyText(message, `✅ Posted **${tf.label.toLowerCase()} ${kind}** leaderboard to #leaderboards.`);
         return;
       }
 

@@ -32,6 +32,7 @@ const {
   createDevCheckEmbed,
   createDevLaunchAddedEmbed,
   createDevLeaderboardEmbed,
+  createDevLookupEmbed,
   createCallerCardEmbed,
   createCallerLeaderboardEmbed,
   createSingleCallEmbed,
@@ -51,8 +52,31 @@ const {
   removeTrackedDev,
   removeLaunchFromTrackedDev,
   getDevRankData,
-  getDevLeaderboard
+  getDevLeaderboard,
+  mergeDevTags,
+  setTrackedDevTags,
+  getTrackedDevByXHandle
 } = require('./utils/devRegistryService');
+
+const {
+  createSubmission,
+  getSubmission,
+  updateSubmission,
+  getSubmissionsNeedingModMessage,
+  getResolvedSubmissionsForChannelCleanup,
+  parseTagsCsv
+} = require('./utils/devIntelSubmissionService');
+
+const { findTrackedDevForLookup, buildDevLookupView } = require('./utils/devLookupService');
+
+const {
+  getLowCapSubmissionById,
+  getPendingLowCapSubmissions,
+  createLowCapSubmission,
+  approveLowCapSubmission,
+  denyLowCapSubmission,
+  updateLowCapSubmissionReviewMessage
+} = require('./utils/lowCapSubmissionService');
 
 const {
   getCallerStats,
@@ -141,6 +165,7 @@ const { syncMembershipRole } = require('./utils/membershipRoleSync');
 const { logReferralEvent } = require('./utils/referralEventLog');
 const { parseProCallCommandArgs } = require('./utils/proCallText');
 const { extractFirstSolanaCaFromText } = require('./utils/solanaAddress');
+const { readGuideFile, chunkGuideForDm } = require('./utils/guideDmService');
 
 function parseMentionedUserIdFromContent(message) {
   const mentioned = message?.mentions?.users?.first?.();
@@ -172,13 +197,42 @@ const xVerificationSessions = new Map();
 const X_VERIFY_SESSION_TTL_MS = 30 * 60 * 1000;
 const X_VERIFY_CHANNEL_NAME = 'verify-x';
 const X_VERIFIED_ROLE_NAME = 'X Verified';
-const MOD_CHANNEL_NAME = 'mod-chat';
 const MOD_APPROVALS_CHANNEL_NAME = 'mod-approvals';
+
+/** Throttle repeated "missing #mod-approvals" logs from interval jobs (per guild + context). */
+const missingModApprovalsLogAt = new Map();
+
+function warnMissingModApprovalsChannel(guild, context, options = {}) {
+  const throttleMs = Number(options.throttleMs) || 0;
+  const guildId = guild?.id || 'unknown-guild';
+  const guildName = guild?.name || '';
+  const key = `${guildId}:${context}`;
+  const now = Date.now();
+  if (throttleMs > 0) {
+    const last = missingModApprovalsLogAt.get(key) || 0;
+    if (now - last < throttleMs) return;
+    missingModApprovalsLogAt.set(key, now);
+  }
+  console.warn(
+    `[ModApprovals] Missing text channel "${MOD_APPROVALS_CHANNEL_NAME}" ` +
+      `(guildId=${guildId} guildName=${JSON.stringify(guildName)}). ` +
+      `Context: ${context}. Create a text channel named "${MOD_APPROVALS_CHANNEL_NAME}" for moderation/review posts.`
+  );
+}
 
 const SOL_MEMBERSHIP_WALLET = String(process.env.SOL_MEMBERSHIP_WALLET || '').trim();
 const SOL_MEMBERSHIP_AMOUNT_SOL = Number(process.env.SOL_MEMBERSHIP_AMOUNT_SOL || 0.5);
 const SOL_MEMBERSHIP_TIER = String(process.env.SOL_MEMBERSHIP_TIER || 'premium').trim() || 'premium';
 const SOL_MEMBERSHIP_MONTHS = Number(process.env.SOL_MEMBERSHIP_MONTHS || 1);
+
+/** Mod/admin gate for Discord message or button interaction members (Manage Server). */
+function memberCanManageGuild(member) {
+  try {
+    return Boolean(member?.permissions?.has('ManageGuild'));
+  } catch (_) {
+    return false;
+  }
+}
 
 const BOT_SETTINGS_PATH = path.join(__dirname, 'data', 'botSettings.json');
 
@@ -294,6 +348,27 @@ async function replyText(message, content) {
     content,
     allowedMentions: { repliedUser: false }
   });
+}
+
+async function tryDmGuideToUser(message, filename) {
+  const read = readGuideFile(filename);
+  if (!read.ok) {
+    await replyText(message, '❌ That guide is unavailable right now.');
+    return;
+  }
+
+  const chunks = chunkGuideForDm(read.text);
+  try {
+    for (const chunk of chunks) {
+      await message.author.send(chunk);
+    }
+    await replyText(message, '📩 Sent you a DM.');
+  } catch (_) {
+    await replyText(
+      message,
+      "❌ I couldn't DM you. Please enable DMs and try again."
+    );
+  }
 }
 
 function buildTestXIntakeResultEmbed(result, { applyMode, authorHandle, tweetId, tweetTextSample }) {
@@ -702,19 +777,6 @@ function getBotCallsChannel(guild) {
   ) || null;
 }
 
-function getModChannel(guild) {
-  if (!guild) return null;
-
-  return guild.channels.cache.find(
-    ch =>
-      ch &&
-      ch.isTextBased &&
-      typeof ch.isTextBased === 'function' &&
-      ch.isTextBased() &&
-      ch.name === MOD_CHANNEL_NAME
-  ) || null;
-}
-
 function getModApprovalsChannel(guild) {
   if (!guild) return null;
 
@@ -724,21 +786,46 @@ function getModApprovalsChannel(guild) {
       ch.isTextBased &&
       typeof ch.isTextBased === 'function' &&
       ch.isTextBased() &&
-      ch.isTextBased() &&
       ch.name === MOD_APPROVALS_CHANNEL_NAME
   ) || null;
 }
-function getXApprovalChannel(guild) {
-  if (!guild) return null;
 
+function getLowCapTrackerChannel(guild) {
+  if (!guild) return null;
   return guild.channels.cache.find(
-    ch =>
+    (ch) =>
       ch &&
       ch.isTextBased &&
       typeof ch.isTextBased === 'function' &&
       ch.isTextBased() &&
-      ch.name === 'x-approvals'
+      String(ch.name || '').toLowerCase() === 'low-cap-tracker'
   ) || null;
+}
+
+/** Staff edits in #tracked-devs: visibility only (no approval). */
+async function postTrackedDevAuditLog(guild, { action, actor, wallet, extraLines = [] }) {
+  if (!guild) return;
+  const ch = getModApprovalsChannel(guild);
+  if (!ch?.isTextBased?.()) return;
+  const actorTag = actor?.id ? `<@${actor.id}> (${actor.username || 'staff'})` : 'Unknown';
+  const w = String(wallet || '').trim() || '—';
+  const body = [
+    `**Action:** ${action}`,
+    `**By:** ${actorTag}`,
+    `**Dev wallet:** \`${w}\``,
+    ...extraLines.map((l) => String(l))
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5b6470)
+    .setTitle('📋 Dev registry — staff audit')
+    .setDescription(body.slice(0, 3900))
+    .setFooter({ text: 'Informational · no action required' })
+    .setTimestamp();
+
+  await ch.send({ embeds: [embed] }).catch((e) => console.error('[DevAudit]', e.message));
 }
 async function assignXVerifiedRole(member) {
   try {
@@ -1157,7 +1244,10 @@ async function upsertSolMembershipReviewCard(guild, userId) {
   if (!profile) return { ok: false, reason: 'no_profile' };
 
   const modApprovals = getModApprovalsChannel(guild);
-  if (!modApprovals) return { ok: false, reason: 'missing_mod_approvals_channel' };
+  if (!modApprovals) {
+    warnMissingModApprovalsChannel(guild, 'upsertSolMembershipReviewCard');
+    return { ok: false, reason: 'missing_mod_approvals_channel' };
+  }
 
   const claim = profile?.payments?.solMembership || {};
   const expected = claim.expected || {};
@@ -1599,7 +1689,10 @@ async function cleanupResolvedModApprovals() {
     if (!guild) return;
 
     const modApprovals = getModApprovalsChannel(guild);
-    if (!modApprovals) return;
+    if (!modApprovals) {
+      warnMissingModApprovalsChannel(guild, 'cleanupResolvedModApprovals', { throttleMs: 30 * 60 * 1000 });
+      return;
+    }
 
     const now = Date.now();
     const TTL_MS = 24 * 60 * 60 * 1000;
@@ -1692,6 +1785,16 @@ async function cleanupResolvedModApprovals() {
         });
       }
     }
+
+    const intelResolved = getResolvedSubmissionsForChannelCleanup(modApprovals.id, TTL_MS);
+    for (const sub of intelResolved) {
+      const msg = await modApprovals.messages.fetch(String(sub.reviewMessageId)).catch(() => null);
+      if (msg) await msg.delete().catch(() => null);
+      updateSubmission(sub.id, {
+        reviewMessageId: null,
+        reviewChannelId: null
+      });
+    }
   } catch (error) {
     console.error('[ModApprovals] Resolved cleanup error:', error.message);
   }
@@ -1703,7 +1806,10 @@ async function syncModApprovalsChannel() {
     if (!guild) return;
 
     const modApprovals = getModApprovalsChannel(guild);
-    if (!modApprovals) return;
+    if (!modApprovals) {
+      warnMissingModApprovalsChannel(guild, 'syncModApprovalsChannel', { throttleMs: 30 * 60 * 1000 });
+      return;
+    }
 
     // Use centralized snapshot so categories stay consistent and extensible.
     const snapshot = getModQueuesSnapshot({
@@ -1801,6 +1907,9 @@ async function syncModApprovalsChannel() {
         setTopCallerReviewMessageMeta(userId, { channelId: posted.channel.id, messageId: posted.id });
       }
     }
+
+    await syncDevIntelPendingModPosts(guild);
+    await syncLowCapPendingModPosts(guild);
   } catch (error) {
     console.error('[ModApprovals] Sync error:', error.message);
   }
@@ -1879,9 +1988,394 @@ function buildXVerifyDenyModal(userId, handle) {
     );
 }
 
+function buildDevIntelSubmitModal() {
+  return new ModalBuilder()
+    .setCustomId('devintel_submit_modal')
+    .setTitle('Suggest dev ↔ coin intel')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('devintel_ca')
+          .setLabel('Token contract (CA) — required')
+          .setPlaceholder('Solana mint / contract address')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(64)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('devintel_wallet')
+          .setLabel('Dev wallet (optional if X below)')
+          .setPlaceholder('Solana wallet — or leave blank if you only know X')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(64)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('devintel_x')
+          .setLabel('Dev X handle (optional)')
+          .setPlaceholder('handle without @')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(32)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('devintel_note')
+          .setLabel('Context / why (optional)')
+          .setPlaceholder('Short note for mods')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setMaxLength(500)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('devintel_tags')
+          .setLabel('Suggested tags (optional)')
+          .setPlaceholder('comma-separated e.g. migration, runner')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(120)
+      )
+    );
+}
+
+function parseLooseUsdNumber(raw) {
+  const s = String(raw || '')
+    .trim()
+    .replace(/\$/g, '')
+    .replace(/,/g, '');
+  if (!s) return null;
+  const m = s.match(/^([\d.]+)\s*([kmb])?$/i);
+  if (m) {
+    let n = Number(m[1]);
+    if (!Number.isFinite(n)) return null;
+    const suf = (m[2] || '').toLowerCase();
+    if (suf === 'k') n *= 1e3;
+    else if (suf === 'm') n *= 1e6;
+    else if (suf === 'b') n *= 1e9;
+    return n;
+  }
+  const plain = Number(s);
+  return Number.isFinite(plain) ? plain : null;
+}
+
+/**
+ * Optional modal row: ticker | current MC | previous ATH | tags
+ * (Discord allows max 5 inputs; optional fields are combined here.)
+ */
+function parseLowCapModalOptionalBlob(raw) {
+  const text = String(raw || '').trim();
+  const out = {
+    ticker: null,
+    currentMarketCap: null,
+    previousAthMarketCap: null,
+    tags: []
+  };
+  if (!text) return out;
+
+  const parts = text.split('|').map((p) => p.trim());
+  if (parts.length === 1) {
+    const only = parts[0].trim();
+    if (/[,;]/.test(only)) {
+      out.tags = parseTagsCsv(only);
+      return out;
+    }
+    const stripped = only.replace(/^\$+/, '').trim();
+    if (stripped) out.ticker = stripped.toUpperCase().slice(0, 32);
+    return out;
+  }
+
+  const tick = parts[0] ? parts[0].replace(/^\$+/, '').trim().toUpperCase().slice(0, 32) : '';
+  if (tick) out.ticker = tick;
+  if (parts[1]) out.currentMarketCap = parseLooseUsdNumber(parts[1]);
+  if (parts[2]) out.previousAthMarketCap = parseLooseUsdNumber(parts[2]);
+  if (parts[3]) out.tags = parseTagsCsv(parts[3]);
+  return out;
+}
+
+function buildLowCapSubmitModal() {
+  return new ModalBuilder()
+    .setCustomId('lowcap_submit_modal')
+    .setTitle('Suggest a low-cap watch')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('lowcap_name')
+          .setLabel('Name (token / project)')
+          .setPlaceholder('Required')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(100)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('lowcap_ca')
+          .setLabel('Contract address (Solana)')
+          .setPlaceholder('Mint / CA — required')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(64)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('lowcap_narrative')
+          .setLabel('Narrative (short label)')
+          .setPlaceholder('e.g. revival, cto, meme, infra')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(120)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('lowcap_why')
+          .setLabel('Why it’s interesting')
+          .setPlaceholder('Thesis for mods — why track this? (required)')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setMaxLength(2000)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('lowcap_optional')
+          .setLabel('Optional: ticker | MC | ATH | tags')
+          .setPlaceholder('e.g. ABC | 50000 | 1.2M | meme, cto — or leave blank')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setMaxLength(400)
+      )
+    );
+}
+
+function buildDevIntelReviewCardContent(sub) {
+  return [
+    '🔎 **Dev intel submission** (pending staff review)',
+    `**From:** <@${sub.submittedByUserId}>`,
+    sub.devWallet ? `**Wallet:** \`${sub.devWallet}\`` : '_Wallet: —_',
+    sub.devXHandle ? `**X:** @${sub.devXHandle}` : '_X: —_',
+    `**CA:** \`${sub.contractAddress}\``,
+    sub.note ? `**Context:** ${String(sub.note).slice(0, 400)}` : null,
+    sub.tagsSuggested?.length
+      ? `**Suggested tags:** ${sub.tagsSuggested.map((t) => `\`${t}\``).join(', ')}`
+      : null,
+    `\`${sub.id}\``
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function buildDevIntelReviewButtons(submissionId) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`devintel_approve:${submissionId}`)
+        .setLabel('Approve')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`devintel_deny:${submissionId}`)
+        .setLabel('Deny')
+        .setStyle(ButtonStyle.Danger)
+    )
+  ];
+}
+
+async function routeDevIntelSubmissionToModHub(guild, submission) {
+  const modApprovals = getModApprovalsChannel(guild);
+  if (!modApprovals) {
+    warnMissingModApprovalsChannel(guild, 'routeDevIntelSubmissionToModHub');
+    return false;
+  }
+  const msg = await modApprovals.send({
+    content: buildDevIntelReviewCardContent(submission),
+    components: buildDevIntelReviewButtons(submission.id)
+  });
+  updateSubmission(submission.id, {
+    reviewMessageId: msg.id,
+    reviewChannelId: modApprovals.id
+  });
+  return true;
+}
+
+async function syncDevIntelPendingModPosts(guild) {
+  if (!guild) return;
+  for (const sub of getSubmissionsNeedingModMessage()) {
+    try {
+      await routeDevIntelSubmissionToModHub(guild, sub);
+    } catch (e) {
+      console.error('[DevIntel] sync post failed:', e.message);
+    }
+  }
+}
+
+// =========================
+// LOW-CAP MOD APPROVALS (V1)
+// =========================
+
+function formatCompactUsd(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  if (num >= 1_000_000_000) return `$${(num / 1_000_000_000).toFixed(2)}B`;
+  if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
+  if (num >= 1_000) return `$${(num / 1_000).toFixed(1)}K`;
+  return `$${num.toFixed(0)}`;
+}
+
+function buildLowCapReviewEmbed(sub) {
+  const tags = Array.isArray(sub.tags) ? sub.tags : [];
+  const currentMc = formatCompactUsd(sub.currentMarketCap);
+  const prevAth = formatCompactUsd(sub.previousAthMarketCap);
+
+  const titleLine =
+    sub.name && sub.ticker
+      ? `${sub.name} ($${String(sub.ticker).replace(/^\$+/, '')})`
+      : sub.name
+        ? `${sub.name}`
+        : sub.ticker
+          ? `$${String(sub.ticker).replace(/^\$+/, '')}`
+          : 'Unknown token';
+
+  const desc = [
+    '🚨 **Low-Cap Submission**',
+    `**Token:** ${titleLine}`,
+    `**CA:** \`${sub.contractAddress}\``,
+    currentMc ? `**Current MC:** ${currentMc}` : null,
+    prevAth ? `**Previous ATH:** ${prevAth}` : null,
+    tags.length ? `**Tags:** ${tags.map((t) => `\`${t}\``).join(' ')}` : null,
+    '',
+    `**Narrative:** ${String(sub.narrative).slice(0, 700)}`,
+    `**Notes:** ${String(sub.notes).slice(0, 700)}`,
+    '',
+    `**Submitted by:** <@${sub.submittedByUserId}>`,
+    `\`${sub.submissionId}\``
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return new EmbedBuilder()
+    .setColor(0xf97316)
+    .setTitle(' ')
+    .setDescription(desc.slice(0, 3900))
+    .setFooter({ text: 'Curated low-cap watchlist • pending staff review' })
+    .setTimestamp();
+}
+
+function buildLowCapReviewButtons(submissionId) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`lowcap_approve:${submissionId}`)
+        .setLabel('Approve')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`lowcap_deny:${submissionId}`)
+        .setLabel('Deny')
+        .setStyle(ButtonStyle.Danger)
+    )
+  ];
+}
+
+function buildLowCapApprovedTrackerEmbed(entry) {
+  const tags = Array.isArray(entry.tags) ? entry.tags : [];
+  const currentMc = formatCompactUsd(entry.currentMarketCap);
+  const prevAth = formatCompactUsd(entry.previousAthMarketCap);
+
+  const titleLine =
+    entry.name && entry.ticker
+      ? `${entry.name} ($${String(entry.ticker).replace(/^\$+/, '')})`
+      : entry.name
+        ? `${entry.name}`
+        : entry.ticker
+          ? `$${String(entry.ticker).replace(/^\$+/, '')}`
+          : 'Low-Cap Watch';
+
+  const desc = [
+    '🧠 **Low-Cap Watchlist**',
+    `**Token:** ${titleLine}`,
+    `**CA:** \`${entry.contractAddress}\``,
+    currentMc ? `**Current MC:** ${currentMc}` : null,
+    prevAth ? `**Previous ATH:** ${prevAth}` : null,
+    tags.length ? `**Tags:** ${tags.map((t) => `\`${t}\``).join(' ')}` : null,
+    `**Lifecycle:** \`${entry.lifecycle || 'watching'}\``,
+    '',
+    `**Narrative:** ${String(entry.narrative).slice(0, 900)}`,
+    `**Why it’s interesting:** ${String(entry.notes).slice(0, 900)}`
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return new EmbedBuilder()
+    .setColor(0x22c55e)
+    .setTitle(' ')
+    .setDescription(desc.slice(0, 3900))
+    .setFooter({ text: 'Curated low-cap tracker • V1' })
+    .setTimestamp();
+}
+
+async function routeLowCapSubmissionToModHub(guild, sub) {
+  const modApprovals = getModApprovalsChannel(guild);
+  if (!modApprovals) {
+    warnMissingModApprovalsChannel(guild, 'routeLowCapSubmissionToModHub');
+    return false;
+  }
+
+  const embed = buildLowCapReviewEmbed(sub);
+  const posted = await modApprovals.send({
+    embeds: [embed],
+    components: buildLowCapReviewButtons(sub.submissionId)
+  });
+
+  updateLowCapSubmissionReviewMessage(sub.submissionId, {
+    reviewMessageId: posted.id,
+    reviewChannelId: modApprovals.id
+  });
+
+  return true;
+}
+
+async function syncLowCapPendingModPosts(guild) {
+  if (!guild) return;
+  const modApprovals = getModApprovalsChannel(guild);
+  if (!modApprovals) return;
+
+  const pending = getPendingLowCapSubmissions();
+  for (const sub of pending) {
+    const existingMsgId = String(sub?.review?.reviewMessageId || '');
+    const existingChId = String(sub?.review?.reviewChannelId || '');
+
+    if (existingMsgId && existingChId === String(modApprovals.id)) {
+      const msg = await modApprovals.messages.fetch(existingMsgId).catch(() => null);
+      if (msg) continue;
+      updateLowCapSubmissionReviewMessage(sub.submissionId, {
+        reviewMessageId: '',
+        reviewChannelId: ''
+      });
+    }
+
+    const hasMsg = String(sub?.review?.reviewMessageId || '').trim();
+    if (hasMsg) continue;
+
+    try {
+      await routeLowCapSubmissionToModHub(guild, sub);
+    } catch (e) {
+      console.error('[LowCap] sync post failed:', e.message);
+    }
+  }
+}
+
 async function handleDevSessionReply(message) {
   const session = getDevEditSession(message.author.id, message.channel.id);
   if (!session) return false;
+
+  const channelName = message.channel?.name || '';
+  if (isTrackedDevsChannel(channelName) && !memberCanManageGuild(message.member)) {
+    clearDevEditSession(message.author.id, message.channel.id);
+    await replyText(
+      message,
+      '❌ Only mods/admins (**Manage Server**) can curate devs in **#tracked-devs**. Public lookup: **#dev-intel**.'
+    );
+    return true;
+  }
 
   const content = message.content.trim();
   if (!content) return true;
@@ -1956,21 +2450,93 @@ async function handleDevSessionReply(message) {
     }
 
     if (content === '6') {
+      setDevEditSession(message.author.id, message.channel.id, {
+        walletAddress: session.walletAddress,
+        step: 'awaiting_x_handle'
+      });
+      await replyText(
+        message,
+        '𝕏 Reply with the dev’s **primary X handle** (no @), or `none` to clear.'
+      );
+      return true;
+    }
+
+    if (content === '7') {
+      setDevEditSession(message.author.id, message.channel.id, {
+        walletAddress: session.walletAddress,
+        step: 'awaiting_dev_tags'
+      });
+      await replyText(
+        message,
+        '🏷️ Reply with **tags** (comma-separated), or `none` to clear all tags.'
+      );
+      return true;
+    }
+
+    if (content === '8') {
       clearDevEditSession(message.author.id, message.channel.id);
       await replyText(message, '✅ Edit session cancelled.');
       return true;
     }
 
-    await replyText(message, '❌ Invalid option. Reply with `1`, `2`, `3`, `4`, `5`, or `6`.');
+    await replyText(message, '❌ Invalid option. Reply with `1`–`8` (see menu).');
+    return true;
+  }
+
+  if (session.step === 'awaiting_dev_tags') {
+    const tags = content.toLowerCase() === 'none' ? [] : parseTagsCsv(content);
+    const prevTags = (trackedDev.tags || []).slice();
+    const updated = setTrackedDevTags(session.walletAddress, tags);
+
+    clearDevEditSession(message.author.id, message.channel.id);
+
+    if (!updated) {
+      await replyText(message, '❌ Could not update tags.');
+      return true;
+    }
+
+    await postTrackedDevAuditLog(message.guild, {
+      action: 'Tags replaced',
+      actor: message.author,
+      wallet: session.walletAddress,
+      extraLines: [
+        `**Before:** ${prevTags.length ? prevTags.map((t) => `\`${t}\``).join(' ') : '_none_'}`,
+        `**After:** ${updated.tags?.length ? updated.tags.map((t) => `\`${t}\``).join(' ') : '_none_'}`
+      ]
+    });
+
+    const embed = createDevCheckEmbed({
+      walletAddress: session.walletAddress,
+      trackedDev: updated,
+      checkedBy: message.author.username,
+      contextLabel: 'Tags Updated',
+      rankData: getDevRankData(updated)
+    });
+
+    await message.reply({
+      embeds: [embed],
+      allowedMentions: { repliedUser: false }
+    });
+
     return true;
   }
 
   if (session.step === 'awaiting_new_nickname') {
+    const prevNick = String(trackedDev.nickname || '').trim() || '_none_';
     const updated = updateTrackedDev(session.walletAddress, {
       nickname: content.toLowerCase() === 'none' ? '' : content
     });
 
     clearDevEditSession(message.author.id, message.channel.id);
+
+    if (updated) {
+      await postTrackedDevAuditLog(message.guild, {
+        action: 'Nickname updated',
+        actor: message.author,
+        wallet: session.walletAddress,
+        extraLines: [`**Before:** ${prevNick}`, `**After:** ${String(updated.nickname || '').trim() || '_none_'}`]
+      });
+    }
 
     const embed = createDevCheckEmbed({
       walletAddress: session.walletAddress,
@@ -1989,17 +2555,79 @@ async function handleDevSessionReply(message) {
   }
 
   if (session.step === 'awaiting_new_note') {
+    const prevNote = String(trackedDev.note || '').trim();
     const updated = updateTrackedDev(session.walletAddress, {
       note: content.toLowerCase() === 'none' ? '' : content
     });
 
     clearDevEditSession(message.author.id, message.channel.id);
 
+    if (updated) {
+      const clip = (s) => (s.length > 220 ? `${s.slice(0, 220)}…` : s);
+      await postTrackedDevAuditLog(message.guild, {
+        action: 'Note updated',
+        actor: message.author,
+        wallet: session.walletAddress,
+        extraLines: [
+          `**Before:** ${prevNote ? clip(prevNote) : '_none_'}`,
+          `**After:** ${updated.note ? clip(String(updated.note)) : '_none_'}`
+        ]
+      });
+    }
+
     const embed = createDevCheckEmbed({
       walletAddress: session.walletAddress,
       trackedDev: updated,
       checkedBy: message.author.username,
       contextLabel: 'Notes Updated',
+      rankData: getDevRankData(updated)
+    });
+
+    await message.reply({
+      embeds: [embed],
+      allowedMentions: { repliedUser: false }
+    });
+
+    return true;
+  }
+
+  if (session.step === 'awaiting_x_handle') {
+    const prevX = String(trackedDev.xHandle || '').trim() || '_none_';
+    const raw =
+      content.trim().toLowerCase() === 'none' ? '' : normalizeXHandle(content.trim());
+    if (raw && !isLikelyXHandle(raw)) {
+      await replyText(message, '❌ That does not look like a valid X handle. Try again or `none`.');
+      return true;
+    }
+    const updated = updateTrackedDev(session.walletAddress, {
+      xHandle: raw ? raw.toLowerCase() : ''
+    });
+    if (!updated) {
+      await replyText(
+        message,
+        '❌ Could not save (handle may already be linked to another dev in the registry).'
+      );
+      clearDevEditSession(message.author.id, message.channel.id);
+      return true;
+    }
+
+    clearDevEditSession(message.author.id, message.channel.id);
+
+    await postTrackedDevAuditLog(message.guild, {
+      action: 'Primary X handle changed',
+      actor: message.author,
+      wallet: session.walletAddress,
+      extraLines: [
+        `**Before:** ${prevX}`,
+        `**After:** ${updated.xHandle ? `@${updated.xHandle}` : '_none_'}`
+      ]
+    });
+
+    const embed = createDevCheckEmbed({
+      walletAddress: session.walletAddress,
+      trackedDev: updated,
+      checkedBy: message.author.username,
+      contextLabel: 'X Handle Updated',
       rankData: getDevRankData(updated)
     });
 
@@ -2056,6 +2684,16 @@ async function handleDevSessionReply(message) {
 
     clearDevEditSession(message.author.id, message.channel.id);
 
+    await postTrackedDevAuditLog(message.guild, {
+      action: 'Launch attached to dev',
+      actor: message.author,
+      wallet: session.walletAddress,
+      extraLines: [
+        `**Token:** ${launchEntry.tokenName} ($${launchEntry.ticker})`,
+        `**CA:** \`${launchEntry.contractAddress}\``
+      ]
+    });
+
     const embed = createDevLaunchAddedEmbed(updatedDev, launchEntry);
 
     await message.reply({
@@ -2079,6 +2717,16 @@ async function handleDevSessionReply(message) {
 
     clearDevEditSession(message.author.id, message.channel.id);
 
+    await postTrackedDevAuditLog(message.guild, {
+      action: 'Launch removed from dev',
+      actor: message.author,
+      wallet: session.walletAddress,
+      extraLines: [
+        `**Token:** ${selectedLaunch.tokenName} ($${selectedLaunch.ticker})`,
+        `**CA:** \`${selectedLaunch.contractAddress}\``
+      ]
+    });
+
     const embed = createDevCheckEmbed({
       walletAddress: session.walletAddress,
       trackedDev: updated,
@@ -2101,6 +2749,16 @@ async function handleDevSessionReply(message) {
       clearDevEditSession(message.author.id, message.channel.id);
       return true;
     }
+
+    await postTrackedDevAuditLog(message.guild, {
+      action: 'Dev deleted from registry',
+      actor: message.author,
+      wallet: session.walletAddress,
+      extraLines: [
+        trackedDev.nickname ? `**Nickname:** ${trackedDev.nickname}` : null,
+        trackedDev.xHandle ? `**Was X:** @${trackedDev.xHandle}` : null
+      ].filter(Boolean)
+    });
 
     removeTrackedDev(session.walletAddress);
     clearDevEditSession(message.author.id, message.channel.id);
@@ -2431,8 +3089,290 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
+      if (parts[0] === 'devintel_approve' || parts[0] === 'devintel_deny') {
+        if (!memberCanManageGuild(interaction.member)) {
+          await interaction.reply({
+            content: '❌ Only mods/admins can review dev intel submissions.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const subId = parts[1];
+        if (!subId) return;
+
+        const sub = getSubmission(subId);
+        if (!sub || sub.status !== 'pending') {
+          await interaction.reply({
+            content: 'This submission was already handled.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        if (parts[0] === 'devintel_deny') {
+          updateSubmission(subId, {
+            status: 'denied',
+            resolvedAt: new Date().toISOString(),
+            moderatorUserId: interaction.user.id,
+            decisionReason: 'denied'
+          });
+          await interaction.update({
+            content: [
+              '❌ **Dev intel denied**',
+              buildDevIntelReviewCardContent(sub).replace(
+                'pending staff review',
+                'staff decision: denied'
+              ),
+              '',
+              `**Denied by:** <@${interaction.user.id}>`
+            ].join('\n'),
+            components: []
+          });
+          return;
+        }
+
+        const ca = String(sub.contractAddress || '').trim();
+        if (!isLikelySolanaCA(ca)) {
+          await interaction.reply({ content: '❌ Invalid CA on submission.', ephemeral: true });
+          return;
+        }
+
+        const tc = getTrackedCall(ca);
+        if (!tc) {
+          await interaction.reply({
+            content:
+              '❌ That CA is not in **tracked calls** yet. Have someone `!call` / `!watch` it first, then approve or ask for a new submission.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const w = String(sub.devWallet || '').trim();
+        const xFromSub = String(sub.devXHandle || '').trim().toLowerCase();
+
+        let dev = null;
+        let intelNoteAlreadyOnCreate = false;
+        if (w && isLikelySolWallet(w)) {
+          dev = getTrackedDev(w);
+          if (!dev) {
+            dev = addTrackedDev({
+              walletAddress: w,
+              addedById: interaction.user.id,
+              addedByUsername: interaction.user.username,
+              nickname: '',
+              note: sub.note ? String(sub.note).slice(0, 800) : '',
+              xHandle: xFromSub || ''
+            });
+            intelNoteAlreadyOnCreate = Boolean(sub.note);
+            if (!dev) {
+              await interaction.reply({
+                content:
+                  '❌ Could not create dev (check wallet, or **X handle** may already be linked to another dev).',
+                ephemeral: true
+              });
+              return;
+            }
+          }
+        } else if (xFromSub) {
+          dev = getTrackedDevByXHandle(xFromSub);
+          if (!dev) {
+            await interaction.reply({
+              content:
+                '❌ No tracked dev matches that X handle. Staff must add the wallet in **#tracked-devs** first, or the submitter must include a **dev wallet**.',
+              ephemeral: true
+            });
+            return;
+          }
+        } else {
+          await interaction.reply({
+            content: '❌ Submission has no resolvable dev (wallet or X).',
+            ephemeral: true
+          });
+          return;
+        }
+
+        if (xFromSub && !String(dev.xHandle || '').trim()) {
+          const patched = updateTrackedDev(dev.walletAddress, { xHandle: xFromSub });
+          if (patched) dev = patched;
+        }
+
+        if (Array.isArray(sub.tagsSuggested) && sub.tagsSuggested.length) {
+          mergeDevTags(dev.walletAddress, sub.tagsSuggested);
+        }
+
+        dev = getTrackedDev(dev.walletAddress);
+        if (sub.note && dev && !intelNoteAlreadyOnCreate) {
+          const line = `\n\n_[Intel ${new Date().toISOString().slice(0, 10)} · mod <@${interaction.user.id}>]_ ${String(sub.note).slice(0, 400)}`;
+          const base = String(dev.note || '').trim();
+          updateTrackedDev(dev.walletAddress, { note: (base + line).slice(0, 4000) });
+          dev = getTrackedDev(dev.walletAddress);
+        }
+
+        const athMarketCap = Number(
+          tc.ath ||
+            tc.athMc ||
+            tc.athMarketCap ||
+            tc.latestMarketCap ||
+            tc.firstCalledMarketCap ||
+            0
+        );
+        const firstCalledMarketCap = Number(tc.firstCalledMarketCap || 0);
+        let xFromCall = 0;
+        if (firstCalledMarketCap > 0 && athMarketCap > 0) {
+          xFromCall = Number((athMarketCap / firstCalledMarketCap).toFixed(2));
+        }
+
+        const launchEntry = {
+          tokenName: tc.tokenName || 'Unknown Token',
+          ticker: tc.ticker || 'UNKNOWN',
+          contractAddress: tc.contractAddress,
+          athMarketCap,
+          firstCalledMarketCap,
+          xFromCall,
+          discordMessageId: tc.discordMessageId || null,
+          addedAt: new Date().toISOString()
+        };
+
+        const updatedDev = addLaunchToTrackedDev(dev.walletAddress, launchEntry);
+
+        updateSubmission(subId, {
+          status: 'approved',
+          resolvedAt: new Date().toISOString(),
+          moderatorUserId: interaction.user.id,
+          decisionReason: 'approved'
+        });
+
+        await interaction.update({
+          content: [
+            '✅ **Dev intel approved** — launch linked to curated dev',
+            `**Dev:** \`${updatedDev?.walletAddress || dev.walletAddress}\``,
+            `**Token:** ${launchEntry.tokenName} ($${launchEntry.ticker})`,
+            `**Handled by:** <@${interaction.user.id}>`,
+            '',
+            '_Card above superseded; this record is final for the thread._'
+          ].join('\n'),
+          components: []
+        });
+        return;
+      }
+
+      if (parts[0] === 'lowcap_approve' || parts[0] === 'lowcap_deny') {
+        if (!memberCanManageGuild(interaction.member)) {
+          await interaction.reply({
+            content: '❌ Only mods/admins can review low-cap submissions.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const subId = parts[1];
+        if (!subId) return;
+
+        const sub = getLowCapSubmissionById(subId);
+        if (!sub) {
+          await interaction.reply({ content: 'This submission no longer exists.', ephemeral: true });
+          return;
+        }
+        if (sub.status !== 'pending') {
+          await interaction.reply({ content: 'This submission was already handled.', ephemeral: true });
+          return;
+        }
+
+        if (parts[0] === 'lowcap_deny') {
+          const denied = denyLowCapSubmission(subId, {
+            reviewedByUserId: interaction.user.id,
+            reviewedAt: Date.now()
+          });
+          if (!denied.ok) {
+            await interaction.reply({ content: 'This submission was already handled.', ephemeral: true });
+            return;
+          }
+
+          const embed = new EmbedBuilder()
+            .setColor(0x991b1b)
+            .setTitle(' ')
+            .setDescription(
+              [
+                '❌ **Low-Cap Denied**',
+                `**CA:** \`${sub.contractAddress}\``,
+                `**Submission:** \`${sub.submissionId}\``,
+                `**Denied by:** <@${interaction.user.id}>`
+              ].join('\n')
+            )
+            .setTimestamp();
+
+          await interaction.update({
+            embeds: [embed],
+            components: []
+          });
+          return;
+        }
+
+        const approved = approveLowCapSubmission(subId, {
+          reviewedByUserId: interaction.user.id,
+          reviewedAt: Date.now()
+        });
+        if (!approved.ok) {
+          const msg =
+            String(approved.reason || '').startsWith('registry_create_failed:')
+              ? `❌ Approval failed (${approved.reason}). Submission left **pending**.`
+              : '❌ Could not approve (already handled or invalid state).';
+          await interaction.reply({ content: msg, ephemeral: true });
+          return;
+        }
+
+        const entry = approved.entry;
+        const embed = new EmbedBuilder()
+          .setColor(0x166534)
+          .setTitle(' ')
+          .setDescription(
+            [
+              '✅ **Low-Cap Approved**',
+              `**CA:** \`${sub.contractAddress}\``,
+              `**Submission:** \`${sub.submissionId}\``,
+              `**Approved by:** <@${interaction.user.id}>`
+            ].join('\n')
+          )
+          .setTimestamp();
+
+        await interaction.update({
+          embeds: [embed],
+          components: []
+        });
+
+        const tracker = getLowCapTrackerChannel(interaction.guild);
+        if (tracker) {
+          const trackerEmbed = buildLowCapApprovedTrackerEmbed(entry);
+          await tracker.send({ embeds: [trackerEmbed] }).catch((e) => {
+            console.error('[LowCap] tracker post failed:', e.message);
+          });
+        }
+
+        return;
+      }
+
       if (interaction.customId === 'profile_open_verify_modal') {
         await interaction.showModal(buildVerifyXHandleModal());
+        return;
+      }
+
+      if (interaction.customId === 'devintel_open_submit_modal') {
+        const chName = interaction.channel?.name || '';
+        if (!isDevFeedChannel(chName)) {
+          await interaction.reply({
+            content:
+              '❌ Open this from **#dev-intel** or **#dev-feed** (`!devsubmit` is only available there).',
+            ephemeral: true
+          });
+          return;
+        }
+        await interaction.showModal(buildDevIntelSubmitModal());
+        return;
+      }
+
+      if (interaction.customId === 'lowcap_open_submit_modal') {
+        await interaction.showModal(buildLowCapSubmitModal());
         return;
       }
 
@@ -2486,29 +3426,23 @@ const buttons = buildXVerifyButtons(interaction.user.id, handle);
         }
 
         const modApprovals = getModApprovalsChannel(interaction.guild);
-        const modChannel = getModChannel(interaction.guild);
-        const xApprovalChannel = getXApprovalChannel(interaction.guild);
-
-        let posted = null;
-
-        // New primary: #mod-approvals. Transition-safe fallback: legacy channels if hub not present.
-        if (modApprovals) {
-          posted = await modApprovals.send({ embeds: [embed], components: buttons });
-        } else {
-          if (modChannel) {
-            posted = await modChannel.send({ embeds: [embed], components: buttons });
-          }
-          if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) {
-            await xApprovalChannel.send({ embeds: [embed], components: buttons });
-          }
-        }
-
-        if (posted) {
-          setXVerificationReviewMessageMeta(interaction.user.id, {
-            channelId: posted.channel.id,
-            messageId: posted.id
+        if (!modApprovals) {
+          warnMissingModApprovalsChannel(interaction.guild, 'xverify_submit_review');
+          await interaction.reply({
+            content:
+              '❌ **#mod-approvals** was not found, so your request could not be queued.\n' +
+              'Please ask an admin to create a text channel named **`mod-approvals`** and grant the bot **Send Messages** there, then try again.',
+            ephemeral: true
           });
+          return;
         }
+
+        const posted = await modApprovals.send({ embeds: [embed], components: buttons });
+
+        setXVerificationReviewMessageMeta(interaction.user.id, {
+          channelId: posted.channel.id,
+          messageId: posted.id
+        });
 
         await interaction.update({
           content: `✅ Your verification request has been submitted.\nA MOD will review and verify your request.`,
@@ -2540,6 +3474,14 @@ const buttons = buildXVerifyButtons(interaction.user.id, handle);
       }
 
       if (parts[0] === 'xverify_accept') {
+  if (!memberCanManageGuild(interaction.member)) {
+    await interaction.reply({
+      content: '❌ Only mods/admins can approve X verification.',
+      ephemeral: true
+    });
+    return;
+  }
+
   const userId = parts[1];
   const handle = parts[2];
 
@@ -2585,6 +3527,14 @@ const buttons = buildXVerifyButtons(interaction.user.id, handle);
 }
 
       if (parts[0] === 'xverify_deny') {
+  if (!memberCanManageGuild(interaction.member)) {
+    await interaction.reply({
+      content: '❌ Only mods/admins can deny X verification.',
+      ephemeral: true
+    });
+    return;
+  }
+
   const userId = parts[1];
   const handle = parts[2];
 
@@ -2599,11 +3549,29 @@ const buttons = buildXVerifyButtons(interaction.user.id, handle);
   }
 
   await interaction.showModal(buildXVerifyDenyModal(userId, handle));
-  return;
-}
+        return;
+      }
 
       const [action, contractAddress] = interaction.customId.split(':');
       if (!action || !contractAddress) return;
+
+      const moderationCoinActions = new Set([
+        'approve_call',
+        'deny_call',
+        'exclude_call',
+        'tag_call',
+        'note_call',
+        'done_call'
+      ]);
+      if (moderationCoinActions.has(action)) {
+        if (!memberCanManageGuild(interaction.member)) {
+          await interaction.reply({
+            content: '❌ Only mods/admins can use coin moderation actions.',
+            ephemeral: true
+          });
+          return;
+        }
+      }
 
       if (action === 'call_coin') {
         await interaction.deferReply({ ephemeral: false });
@@ -2824,6 +3792,14 @@ let updated = null;
       }
 
       if (parts[0] === 'xverify_deny_modal') {
+  if (!memberCanManageGuild(interaction.member)) {
+    await interaction.reply({
+      content: '❌ Only mods/admins can deny X verification.',
+      ephemeral: true
+    });
+    return;
+  }
+
   const userId = parts[1];
   const handle = parts[2];
   const reason = interaction.fields.getTextInputValue('deny_reason');
@@ -2858,6 +3834,142 @@ let updated = null;
   });
   return;
 }
+
+      if (interaction.customId === 'devintel_submit_modal') {
+        const chName = interaction.channel?.name || '';
+        if (!isDevFeedChannel(chName)) {
+          await interaction.reply({
+            content:
+              '❌ Submit dev intel from **#dev-intel** or **#dev-feed** only.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const ca = String(interaction.fields.getTextInputValue('devintel_ca') || '').trim();
+        const w = String(interaction.fields.getTextInputValue('devintel_wallet') || '').trim();
+        const xhRaw = String(interaction.fields.getTextInputValue('devintel_x') || '').trim();
+        const note = String(interaction.fields.getTextInputValue('devintel_note') || '').trim();
+        const tagsRaw = String(interaction.fields.getTextInputValue('devintel_tags') || '').trim();
+
+        if (!isLikelySolanaCA(ca)) {
+          await interaction.reply({
+            content: '❌ Please enter a valid **Solana contract address** (CA).',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const created = createSubmission({
+          submittedByUserId: interaction.user.id,
+          submittedByUsername: interaction.user.username,
+          devWallet: w,
+          devXHandle: xhRaw,
+          contractAddress: ca,
+          note,
+          tagsSuggested: parseTagsCsv(tagsRaw)
+        });
+
+        if (!created.ok) {
+          const msg =
+            created.reason === 'need_wallet_or_x'
+              ? '❌ Provide at least a **dev wallet** or **X handle** (in addition to the CA).'
+              : created.reason === 'duplicate_pending'
+                ? '⚠️ You already have a **pending** submission for that CA. Wait for staff review.'
+                : created.reason === 'bad_wallet'
+                  ? '❌ That dev wallet doesn’t look like a valid Solana address.'
+                  : '❌ Could not submit. Try again.';
+          await interaction.reply({ content: msg, ephemeral: true });
+          return;
+        }
+
+        const ok = await routeDevIntelSubmissionToModHub(interaction.guild, created.submission);
+        await interaction.reply({
+          content: ok
+            ? '✅ **Submitted** for staff review. Mods use **#mod-approvals**.\n_Curated database — staff may edit or deny._'
+            : '✅ Saved, but **#mod-approvals** was not found — an admin must create it so staff can review.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      if (interaction.customId === 'lowcap_submit_modal') {
+        const name = String(interaction.fields.getTextInputValue('lowcap_name') || '').trim();
+        const ca = String(interaction.fields.getTextInputValue('lowcap_ca') || '').trim();
+        const narrative = String(interaction.fields.getTextInputValue('lowcap_narrative') || '').trim();
+        const why = String(interaction.fields.getTextInputValue('lowcap_why') || '').trim();
+        const optionalRaw = String(interaction.fields.getTextInputValue('lowcap_optional') || '');
+
+        if (!name) {
+          await interaction.reply({
+            content: '❌ Add a **name** for the token or project.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        if (!isLikelySolanaCA(ca)) {
+          await interaction.reply({
+            content: '❌ That doesn’t look like a valid **Solana contract address**.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        if (!narrative) {
+          await interaction.reply({
+            content: '❌ Add a short **narrative** (label or category).',
+            ephemeral: true
+          });
+          return;
+        }
+
+        if (!why) {
+          await interaction.reply({
+            content:
+              '❌ **Why it’s interesting** is required — a sentence or two helps staff decide.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const opt = parseLowCapModalOptionalBlob(optionalRaw);
+
+        const created = createLowCapSubmission({
+          contractAddress: ca,
+          name,
+          ticker: opt.ticker,
+          narrative,
+          notes: why,
+          currentMarketCap: opt.currentMarketCap,
+          previousAthMarketCap: opt.previousAthMarketCap,
+          tags: opt.tags,
+          submittedByUserId: interaction.user.id,
+          submittedByUsername: interaction.user.username
+        });
+
+        if (!created.ok) {
+          const msg =
+            created.reason === 'already_in_registry'
+              ? 'That token is **already on** the low-cap watchlist.'
+              : created.reason === 'duplicate_pending_ca'
+                ? 'That contract is **already pending** staff review.'
+                : created.reason === 'bad_contract_address'
+                  ? 'That contract address isn’t valid for this list.'
+                  : 'Couldn’t save that submission. Try again in a moment.';
+          await interaction.reply({ content: msg, ephemeral: true });
+          return;
+        }
+
+        const ok = await routeLowCapSubmissionToModHub(interaction.guild, created.submission);
+        await interaction.reply({
+          content: ok
+            ? 'Low-cap submission sent for review. If it’s approved, it’ll be added to the watchlist. Thanks for the lead.'
+            : 'Saved for review, but the bot couldn’t find the staff review channel. Please ask an admin to finish setup so submissions can be reviewed.',
+          ephemeral: true
+        });
+        return;
+      }
 
       if (interaction.customId === 'solmember_claim_modal') {
         const userId = interaction.user.id;
@@ -2958,6 +4070,16 @@ let updated = null;
         return;
       }
 
+      if (action === 'tag_modal' || action === 'note_modal') {
+        if (!memberCanManageGuild(interaction.member)) {
+          await interaction.reply({
+            content: '❌ Only mods/admins can add tags or notes.',
+            ephemeral: true
+          });
+          return;
+        }
+      }
+
       if (action === 'tag_modal') {
         const tag = interaction.fields.getTextInputValue('tag_input')?.trim();
 
@@ -3052,6 +4174,39 @@ client.on('messageCreate', async (message) => {
     if (handledSession) return;
 
     if (content.startsWith('!')) {
+      if (!message.guild) {
+        await replyText(
+          message,
+          '❌ McGBot commands only work **inside the server**, not in DMs.'
+        );
+        return;
+      }
+
+      if (
+        lowerContent === '!guide' ||
+        lowerContent === '!userguide' ||
+        lowerContent === '!beginnerguide' ||
+        lowerContent === '!memecoinguide' ||
+        lowerContent === '!modguide' ||
+        lowerContent === '!adminguide'
+      ) {
+        if (lowerContent === '!modguide' || lowerContent === '!adminguide') {
+          if (!memberCanManageGuild(message.member)) {
+            await replyText(message, '❌ That guide is only available to staff.');
+            return;
+          }
+        }
+
+        let guideFile = 'user.md';
+        if (lowerContent === '!beginnerguide') guideFile = 'beginner.md';
+        else if (lowerContent === '!memecoinguide') guideFile = 'explanation.md';
+        else if (lowerContent === '!modguide') guideFile = 'mod.md';
+        else if (lowerContent === '!adminguide') guideFile = 'admin.md';
+
+        await tryDmGuideToUser(message, guideFile);
+        return;
+      }
+
       if (lowerContent === '!scanner') {
   if (!message.member?.permissions?.has('ManageGuild')) {
     await replyText(message, '❌ Mods/admins only.');
@@ -3116,6 +4271,11 @@ saveBotSettings(BOT_SETTINGS);
   return;
 }
       if (lowerContent === '!testx') {
+        if (!memberCanManageGuild(message.member)) {
+          await replyText(message, '❌ Only mods/admins (Manage Server) can use `!testx`.');
+          return;
+        }
+
         const result = await createPost('Test post from McGBot 🚀');
 
         if (result.success) {
@@ -4515,6 +5675,94 @@ saveBotSettings(BOT_SETTINGS);
         return;
       }
 
+      if (lowerContent === '!dev' || lowerContent === '!devcard') {
+        await replyText(
+          message,
+          '⚠️ Usage: `!dev <wallet | @x | nickname>` — same for `!devcard`.\n' +
+            'Wallet and **X** resolve in the **curated** registry; nickname must match exactly if multiple devs exist.'
+        );
+        return;
+      }
+
+      if (lowerContent === '!devsubmit') {
+        if (!isDevFeedChannel(channelName)) {
+          await replyText(
+            message,
+            'ℹ️ Use `!devsubmit` in **#dev-intel** (public dev lookup) or **#dev-feed** so submissions stay with that workflow.'
+          );
+          return;
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor(0x8b5cf6)
+          .setTitle('🧠 Suggest dev ↔ coin intel')
+          .setDescription(
+            [
+              'Submit a **wallet** and/or **X handle** tied to a **token CA** for staff to review.',
+              '',
+              'This does **not** edit the curated database directly — mods approve in **#mod-approvals**.',
+              '',
+              '**Tip:** The CA should usually be **tracked** (`!call` / `!watch`) before staff can approve.'
+            ].join('\n')
+          )
+          .setFooter({ text: 'Curated dev intelligence • McGBot' });
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId('devintel_open_submit_modal')
+            .setLabel('Open submission form')
+            .setStyle(ButtonStyle.Primary)
+        );
+
+        await message.reply({
+          embeds: [embed],
+          components: [row],
+          allowedMentions: { repliedUser: false }
+        });
+        return;
+      }
+
+      if (lowerContent.startsWith('!devcard ') || lowerContent.startsWith('!dev ')) {
+        const raw =
+          lowerContent.startsWith('!devcard ')
+            ? content.replace(/^!devcard\s+/i, '').trim()
+            : content.replace(/^!dev\s+/i, '').trim();
+
+        if (!raw) {
+          await replyText(
+            message,
+            '⚠️ Usage: `!dev <wallet | @x | nickname>` — same for `!devcard`.\nAlso: `!devsubmit` to suggest intel for staff.'
+          );
+          return;
+        }
+
+        const lookup = findTrackedDevForLookup(raw);
+        if (lookup.reason === 'ambiguous_nickname') {
+          await replyText(
+            message,
+            '❌ Multiple tracked devs use that nickname. Use **wallet** or **X handle** instead.'
+          );
+          return;
+        }
+        if (!lookup.dev) {
+          await replyText(
+            message,
+            '❌ Not in the **curated** dev registry. Try **#dev-intel** paste, or staff adds wallets in **#tracked-devs**.\nSuggest links with `!devsubmit`.'
+          );
+          return;
+        }
+
+        const view = buildDevLookupView(lookup.dev);
+        const embed = createDevLookupEmbed(view, { matchedBy: lookup.matchedBy });
+
+        await message.reply({
+          embeds: [embed],
+          allowedMentions: { repliedUser: false }
+        });
+
+        return;
+      }
+
       if (lowerContent === '!devleaderboard') {
         const leaderboard = getDevLeaderboard(10);
         const embed = createDevLeaderboardEmbed(leaderboard);
@@ -4898,6 +6146,9 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     `• \`!call <ca>\` — Official call + track\n` +
     `• \`!procall <ca> | <title> | <why> | <risk?>\` — Trusted Pro call (**trusted_pro only**)\n` +
     `• \`!watch <ca>\` — Track without caller credit\n` +
+    `• \`!lowcap <ca>\` — Low-cap watchlist entry (curated registry)\n` +
+    `• \`!lowcaps\` — Low-cap watchlist summary (newest first, dead excluded)\n` +
+    `• \`!lowcapadd\` — Suggest a low-cap watch (staff review via **#mod-approvals**)\n` +
     `• \`!tracked\` / \`!tracked <ca>\` — Tracked summary or detail (live refresh)\n` +
     `• \`!caller <name>\` or \`!caller @user\` — Caller stats (embed)\n` +
     `• \`!callerboard\` — Top callers (embed)\n` +
@@ -4909,23 +6160,29 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     `• \`!bestcall24h\` / \`!bestcallweek\` / \`!bestcallmonth\` — Best user call windows\n` +
     `• \`!topcaller24h\` / \`!topcallerweek\` / \`!topcallermonth\` — Top caller windows\n` +
     `• \`!bestbot24h\` / \`!bestbotweek\` / \`!bestbotmonth\` — Best bot call windows\n` +
+    `• \`!dev <wallet | @x | nickname>\` / \`!devcard …\` — Curated dev intel lookup\n` +
+    `• \`!devsubmit\` — In **#dev-intel** / **#dev-feed**: suggest dev + CA for staff (**no** direct registry edit)\n` +
     `• \`!devleaderboard\` — Dev leaderboard (embed)\n` +
-    `• \`!addlaunch <dev_wallet> <token_ca>\` — Log a launch on a tracked dev\n` +
     `• \`!testreal <ca>\` — Live provider / token test (embed)\n` +
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
-    `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n\n`;
+    `• \`!guide\` / \`!userguide\` — User guide (sent in DM)\n` +
+    `• \`!beginnerguide\` — Beginner guide (DM)\n` +
+    `• \`!memecoinguide\` — Memecoin explainer (DM)\n\n`;
 
   // MOD COMMANDS (Manage Server — bot owner always sees this block too)
   if (isModOrAdmin || isOwner) {
     contentOut +=
       `🛡️ **Mod / Manage Server**\n` +
-      `• Approval buttons in **#coin-approval** / mod flows\n` +
+      `• \`!modguide\` / \`!adminguide\` — Staff guides (DM, **Manage Server**)\n` +
+      `• Approval buttons in **#mod-approvals**\n` +
       `• \`!approvalstats\` — Approval queue counts\n` +
       `• \`!pendingapprovals\` — Pending X verifications + top pending **bot** approvals\n` +
       `• \`!recentcalls\` — Recent bot-tracked calls\n` +
       `• \`!monitorstatus\` — Active / archived / pending / scanner state\n` +
       `• \`!scanner\` — Show whether scanner is ON or OFF\n` +
       `• \`!scanner on\` / \`!scanner off\` — Start or stop scanner + monitor + auto-call\n` +
+      `• \`!testx\` — Post a test tweet to X\n` +
+      `• \`!addlaunch <dev_wallet> <token_ca>\` — Log a launch on a tracked dev\n` +
       `• \`!verifyx @user\` — Approve a member’s pending X verification (requires **Manage Server**)\n` +
       `• \`!resetbotstats\` — Reset bot-call stat exclusions on tracked data\n` +
       `• \`!backfillprofiles\` — Preview members missing bot profiles; \`!backfillprofiles run\` creates them once\n` +
@@ -5626,6 +6883,11 @@ if (lowerContent.startsWith('!truestats')) {
       }
 
       if (lowerContent.startsWith('!addlaunch ')) {
+        if (!memberCanManageGuild(message.member)) {
+          await replyText(message, '❌ Only mods/admins (Manage Server) can use `!addlaunch`.');
+          return;
+        }
+
         const parts = content.split(/\s+/).filter(Boolean);
 
         if (parts.length < 3) {
@@ -5839,9 +7101,19 @@ if (lowerContent.startsWith('!truestats')) {
       if (!wallet) return;
       if (!isLikelySolWallet(wallet)) return;
 
+      if (!memberCanManageGuild(message.member)) {
+        await replyText(
+          message,
+          '❌ **#tracked-devs** is **mod-only** for dev curation. Use **#dev-intel** for public lookup (`!dev` or paste wallet / X).'
+        );
+        return;
+      }
+
       const existing = getTrackedDev(wallet);
 
       if (existing) {
+        const view = buildDevLookupView(existing);
+        const publicCard = view ? createDevLookupEmbed(view, { matchedBy: 'wallet' }) : null;
         const embed = createDevCheckEmbed({
           walletAddress: wallet,
           trackedDev: existing,
@@ -5851,7 +7123,7 @@ if (lowerContent.startsWith('!truestats')) {
         });
 
         await message.reply({
-          embeds: [embed],
+          embeds: publicCard ? [publicCard, embed] : [embed],
           allowedMentions: { repliedUser: false }
         });
 
@@ -5873,6 +7145,18 @@ if (lowerContent.startsWith('!truestats')) {
         note
       });
 
+      if (trackedDev) {
+        await postTrackedDevAuditLog(message.guild, {
+          action: 'New dev added to registry',
+          actor: message.author,
+          wallet: trackedDev.walletAddress,
+          extraLines: [
+            nickname ? `**Nickname:** ${nickname}` : null,
+            note ? `**Note:** ${String(note).slice(0, 200)}${note.length > 200 ? '…' : ''}` : null
+          ].filter(Boolean)
+        });
+      }
+
       const embed = createDevAddedEmbed(trackedDev);
 
       await message.reply({
@@ -5888,20 +7172,39 @@ if (lowerContent.startsWith('!truestats')) {
 
       if (wallet && isLikelySolWallet(wallet)) {
         const trackedDev = getTrackedDev(wallet);
+        if (trackedDev) {
+          const view = buildDevLookupView(trackedDev);
+          const embed = createDevLookupEmbed(view, { matchedBy: 'wallet' });
+          await message.reply({
+            embeds: [embed],
+            allowedMentions: { repliedUser: false }
+          });
+        } else {
+          await replyText(
+            message,
+            '⚪ That wallet is not in the **curated** dev registry.\nStaff manage records in **#tracked-devs** · suggest links with `!devsubmit`.'
+          );
+        }
+        return;
+      }
 
-        const embed = createDevCheckEmbed({
-          walletAddress: wallet,
-          trackedDev,
-          checkedBy: message.author.username,
-          contextLabel: 'Dev Check',
-          rankData: trackedDev ? getDevRankData(trackedDev) : null
-        });
-
-        await message.reply({
-          embeds: [embed],
-          allowedMentions: { repliedUser: false }
-        });
-
+      const line = String(content || '').trim();
+      const xTry = line.startsWith('@') ? line.slice(1).trim() : line;
+      if (xTry && isLikelyXHandle(xTry)) {
+        const trackedDev = getTrackedDevByXHandle(xTry);
+        if (trackedDev) {
+          const view = buildDevLookupView(trackedDev);
+          const embed = createDevLookupEmbed(view, { matchedBy: 'x_handle' });
+          await message.reply({
+            embeds: [embed],
+            allowedMentions: { repliedUser: false }
+          });
+        } else {
+          await replyText(
+            message,
+            '⚪ No curated dev linked to that **X** handle yet.\n`!devsubmit` to suggest a wallet + CA for staff.'
+          );
+        }
         return;
       }
     }

@@ -252,28 +252,36 @@ function getHighestDump(drawdown, hits = []) {
  * =========================
  */
 
+const MOD_APPROVALS_CHANNEL_NAME = 'mod-approvals';
+const missingModApprovalsLogAt = new Map();
+
 function getApprovalChannel(guild) {
   if (!guild) return null;
 
-  // New primary moderation action channel (transition-safe: fallback to legacy channels).
   const modApprovals = guild.channels.cache.find(
     ch =>
       ch &&
       ch.isTextBased &&
       typeof ch.isTextBased === 'function' &&
       ch.isTextBased() &&
-      ch.name === 'mod-approvals'
+      ch.name === MOD_APPROVALS_CHANNEL_NAME
   );
-  if (modApprovals) return modApprovals;
 
-  return guild.channels.cache.find(
-    ch =>
-      ch &&
-      ch.isTextBased &&
-      typeof ch.isTextBased === 'function' &&
-      ch.isTextBased() &&
-      (ch.name === 'coin-approval' || ch.name === 'coin-approvals')
-  ) || null;
+  if (!modApprovals) {
+    const key = `${guild.id}:postApprovalReview`;
+    const now = Date.now();
+    const last = missingModApprovalsLogAt.get(key) || 0;
+    if (now - last >= 30 * 60 * 1000) {
+      missingModApprovalsLogAt.set(key, now);
+      console.warn(
+        `[ApprovalQueue] Missing text channel "${MOD_APPROVALS_CHANNEL_NAME}" ` +
+          `(guildId=${guild.id} guildName="${String(guild.name || '')}"). ` +
+          'Coin approval reviews will not post until this channel exists (no fallback to legacy channels).'
+      );
+    }
+  }
+
+  return modApprovals || null;
 }
 
 function buildApprovalButtons(contractAddress) {

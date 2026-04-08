@@ -50,6 +50,17 @@ function normalizeTrackedCall(call = {}) {
     callSourceType: call.callSourceType || 'user_call', // user_call | watch_only | bot_call
     wasWatched: call.wasWatched === true,
 
+    /** Optional dev attribution (conservative, conflict-free only). */
+    devAttribution:
+      call?.devAttribution && typeof call.devAttribution === 'object'
+        ? {
+            walletAddress: call.devAttribution.walletAddress || null,
+            matchedBy: call.devAttribution.matchedBy || null,
+            resolvedAt: call.devAttribution.resolvedAt || null,
+            source: call.devAttribution.source || null
+          }
+        : null,
+
     approvalStatus: call.approvalStatus || 'none',
     excludedFromStats: call.excludedFromStats === true,
     moderationTags: Array.isArray(call.moderationTags) ? call.moderationTags : [],

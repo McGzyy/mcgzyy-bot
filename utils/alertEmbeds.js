@@ -1,5 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { resolvePublicCallerName } = require('./userProfileService');
+const { buildKnownDevField } = require('./devAttributionDisplay');
 
 function formatUsd(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
@@ -227,6 +228,11 @@ function createAutoCallEmbed(scan, profileName = 'balanced') {
     });
   }
 
+  if (scan?.devAttribution?.dev && typeof scan.devAttribution.dev === 'object') {
+    const f = buildKnownDevField(scan.devAttribution.dev, { matchedBy: scan.devAttribution.matchedBy });
+    if (f) embed.addFields({ name: f.name, value: f.value, inline: false });
+  }
+
   return embed;
 }
 
@@ -395,7 +401,13 @@ function createDevAddedEmbed(dev) {
     descriptionParts.push(`**Notes:** ${dev.note}`);
   }
 
-  descriptionParts.push('', `📌 This wallet is now in your tracked dev registry.`);
+  if (dev.xHandle) {
+    descriptionParts.push(
+      `**Primary X:** [@${formatValue(dev.xHandle)}](https://x.com/${formatValue(dev.xHandle)})`
+    );
+  }
+
+  descriptionParts.push('', `📌 This wallet is now in your **curated** dev registry.`);
 
   return new EmbedBuilder()
     .setColor(0x8b5cf6)
@@ -449,13 +461,22 @@ function createDevCheckEmbed({
     '',
     `**Dev:** ${displayName}`,
     `**Wallet:** \`${formatValue(walletAddress, 'Unknown')}\``,
+    trackedDev?.xHandle
+      ? `**Primary X:** [@${formatValue(trackedDev.xHandle)}](https://x.com/${formatValue(trackedDev.xHandle)})`
+      : null,
     `**Checked By:** ${formatValue(checkedBy, 'Unknown')}`,
     '',
     `**Tracked Status:** ${isTracked ? '✅ Tracked' : '⚪ Not Tracked'}`
-  ];
+  ].filter(Boolean);
 
   if (trackedDev?.note) {
     descriptionParts.push(`**Registry Notes:** ${trackedDev.note}`);
+  }
+
+  if (isTracked && Array.isArray(trackedDev.tags) && trackedDev.tags.length) {
+    descriptionParts.push(
+      `**Tags:** ${trackedDev.tags.slice(0, 20).map((t) => `\`${t}\``).join(' ')}`
+    );
   }
 
   if (rankData && isTracked) {
@@ -491,17 +512,22 @@ function createDevCheckEmbed({
       `\`3\` Add launch`,
       `\`4\` Remove launch`,
       `\`5\` Delete dev`,
-      `\`6\` Cancel`
+      `\`6\` Set primary **X** handle`,
+      `\`7\` **Replace tags** (comma-separated, or \`none\` to clear)`,
+      `\`8\` Cancel`
     );
   }
 
-  descriptionParts.push('', `⚠️ Live wallet activity tracking is coming in Phase 2.`);
+  descriptionParts.push(
+    '',
+    `📌 **Staff channel** — curated registry only. Public lookups: **#dev-intel** (or **#dev-feed**) / \`!dev\`.`
+  );
 
   return new EmbedBuilder()
     .setColor(isTracked ? 0x22c55e : 0x64748b)
     .setTitle(' ')
     .setDescription(descriptionParts.join('\n'))
-    .setFooter({ text: 'Crypto Scanner Bot • Dev Feed' })
+    .setFooter({ text: 'Crypto Scanner Bot • Dev intelligence' })
     .setTimestamp();
 }
 
@@ -520,6 +546,110 @@ function createDevLeaderboardEmbed(devs = []) {
     .setDescription(lines.length ? lines.join('\n\n') : 'No ranked devs yet.')
     .setFooter({ text: 'Crypto Scanner Bot • Dev Rankings' })
     .setTimestamp();
+}
+
+function formatLookupLaunchLine(launch, index) {
+  const name = formatValue(launch.tokenName, 'Unknown');
+  const tick = formatValue(launch.ticker, '?');
+  const flag = launch.enrichedFromTracked ? '🔄' : '📌';
+  const life = launch.lifecycleStatus ? ` · _${formatValue(launch.lifecycleStatus)}_` : '';
+  const ca = String(launch.contractAddress || '').trim();
+  const caLine = ca.length > 48 ? `${ca.slice(0, 20)}…${ca.slice(-8)}` : ca;
+  return `${index}. ${flag} **${name}** ($${tick}) · ${formatX(launch.displayX)} · ATH ${formatUsd(launch.displayAth)}${life}\n\`${caLine || '—'}\``;
+}
+
+/**
+ * Dev lookup card (!dev / !devcard). `view` from buildDevLookupView().
+ * @param {object} view
+ * @param {{ matchedBy?: string }} [meta]
+ */
+function createDevLookupEmbed(view, meta = {}) {
+  if (!view?.dev) {
+    return new EmbedBuilder()
+      .setColor(0x64748b)
+      .setTitle('🧠 Dev card')
+      .setDescription('No dev data.')
+      .setFooter({ text: 'Crypto Scanner Bot • Dev lookup' })
+      .setTimestamp();
+  }
+
+  const { dev, rankData, bestLaunch, topByAth, recentByDate, displayAvgAthTop5, displayAvgXTop5 } =
+    view;
+  const matchedBy = meta.matchedBy || 'wallet';
+
+  const displayName = dev.nickname
+    ? `${dev.nickname} (${shortenWallet(dev.walletAddress)})`
+    : shortenWallet(dev.walletAddress);
+
+  const notable =
+    Number(rankData?.score || 0) >= 75 ||
+    rankData?.tier === 'S Tier' ||
+    rankData?.tier === 'A Tier';
+  const tagHighlight = Array.isArray(dev.tags) && dev.tags.length >= 3;
+
+  const descParts = [
+    notable
+      ? '⭐ **Strong curated track record** — tier/scores reflect linked launches (staff-maintained).'
+      : null,
+    tagHighlight ? '📌 **Multiple intel tags** on file — see below.' : null,
+    `**Wallet:** \`${formatValue(dev.walletAddress)}\``,
+    dev.xHandle
+      ? `**Primary X:** [@${formatValue(dev.xHandle)}](https://x.com/${formatValue(dev.xHandle)})`
+      : null,
+    `**Status:** ${dev.isActive === false ? '⚪ Inactive in registry' : '✅ Tracked (curated)'}`,
+    matchedBy === 'nickname'
+      ? '_Matched by exact nickname._'
+      : matchedBy === 'x_handle'
+        ? '_Matched by primary X handle._'
+        : null,
+    Array.isArray(dev.tags) && dev.tags.length
+      ? `**Tags:** ${dev.tags.slice(0, 15).map((t) => `\`${t}\``).join(' ')}`
+      : null,
+    dev.note ? `**Context:** ${String(dev.note).slice(0, 500)}${dev.note.length > 500 ? '…' : ''}` : null,
+    '',
+    `**Launches on record:** ${rankData.launchCount}`,
+    `**Tier / score:** ${formatValue(rankData.tier)} · **${rankData.score}**/100 _(${rankData.launchCount ? 'from stored launch rows' : 'unranked'})_`,
+    rankData.launchCount > 0
+      ? `**Best run (merged):** ${formatX(bestLaunch?.displayX)} · ATH ${formatUsd(bestLaunch?.displayAth)}`
+      : null,
+    rankData.launchCount > 0
+      ? `**Avg of top 5 by ATH (merged w/ tracked calls):** ${formatX(displayAvgXTop5)} · ${formatUsd(displayAvgAthTop5)}`
+      : null
+  ].filter(Boolean);
+
+  const embedColor = notable ? 0x7c3aed : 0x8b5cf6;
+
+  const embed = new EmbedBuilder()
+    .setColor(embedColor)
+    .setTitle(`🧠 Dev card — ${displayName}`)
+    .setDescription(descParts.join('\n').slice(0, 4096))
+    .addFields({
+      name: '🔥 Top launches (by ATH)',
+      value:
+        topByAth.length > 0
+          ? topByAth.map((l, i) => formatLookupLaunchLine(l, i + 1)).join('\n').slice(0, 1024)
+          : '_No launches linked yet — add from #tracked-devs or `!addlaunch`._',
+      inline: false
+    })
+    .setFooter({
+      text:
+        '🔄 live · 📌 snapshot · Suggest intel: !devsubmit · Alerts later: wallet + X + CAs'
+    })
+    .setTimestamp();
+
+  if (recentByDate.length > 0) {
+    const recentBlock = recentByDate.map((l, i) => formatLookupLaunchLine(l, i + 1)).join('\n');
+    const topBlock = topByAth.map((l, i) => formatLookupLaunchLine(l, i + 1)).join('\n');
+    if (recentBlock !== topBlock) {
+      embed.addFields({
+        name: '🕐 Recent (by date added)',
+        value: recentBlock.slice(0, 1024),
+        inline: false
+      });
+    }
+  }
+
+  return embed;
 }
 
 function createCallerCardEmbed(stats) {
@@ -632,6 +762,72 @@ function createTopCallerTimeframeEmbed(stats, title = '👤 TOP CALLER') {
     .setTimestamp();
 }
 
+const LOWCAP_FIELD_MAX = 900;
+
+function clampLowCapFieldText(value) {
+  if (value === null || value === undefined) return '—';
+  const s = String(value).trim();
+  if (!s) return '—';
+  if (s.length <= LOWCAP_FIELD_MAX) return s;
+  return `${s.slice(0, LOWCAP_FIELD_MAX - 1)}…`;
+}
+
+function formatLowCapDevLine(devLink) {
+  if (!devLink || typeof devLink !== 'object') return null;
+  const parts = [];
+  if (devLink.walletAddress) parts.push(`Wallet: \`${shortenWallet(devLink.walletAddress)}\``);
+  if (devLink.xHandle) parts.push(`X: @${devLink.xHandle}`);
+  if (devLink.linkedWalletAddress) {
+    parts.push(`Linked: \`${shortenWallet(devLink.linkedWalletAddress)}\``);
+  }
+  return parts.length ? parts.join('\n') : null;
+}
+
+/**
+ * Single low-cap registry entry for public `!lowcap` lookup.
+ * @param {object} entry — normalized shape from lowCapRegistryService
+ */
+function createLowCapLookupEmbed(entry) {
+  const ca = formatValue(entry?.contractAddress, '');
+  const ticker = entry?.ticker ? String(entry.ticker).trim() : '';
+  const name = formatValue(entry?.name, '—');
+
+  let titleSuffix;
+  if (ticker) titleSuffix = `$${ticker}`;
+  else if (entry?.name && String(entry.name).trim()) titleSuffix = String(entry.name).trim();
+  else if (ca && ca.length >= 12) titleSuffix = `${ca.slice(0, 6)}…${ca.slice(-4)}`;
+  else titleSuffix = ca || 'Unknown';
+
+  const fields = [
+    { name: 'Name', value: clampLowCapFieldText(name === '—' ? '' : name), inline: false },
+    { name: 'Contract Address', value: ca ? `\`${ca}\`` : '—', inline: false },
+    { name: 'Narrative', value: clampLowCapFieldText(entry?.narrative), inline: false },
+    { name: "Why It's Interesting", value: clampLowCapFieldText(entry?.notes), inline: false },
+    { name: 'Current MC', value: formatUsd(entry?.currentMarketCap), inline: true },
+    { name: 'Previous ATH', value: formatUsd(entry?.previousAthMarketCap), inline: true },
+    { name: 'Lifecycle', value: clampLowCapFieldText(entry?.lifecycle || 'watching'), inline: true }
+  ];
+
+  const tags = Array.isArray(entry?.tags) ? entry.tags.filter(Boolean) : [];
+  fields.push({
+    name: 'Tags',
+    value: tags.length ? clampLowCapFieldText(tags.join(', ')) : '—',
+    inline: false
+  });
+
+  const devLine = formatLowCapDevLine(entry?.devLink);
+  if (devLine) {
+    fields.push({ name: 'Dev', value: devLine, inline: false });
+  }
+
+  return new EmbedBuilder()
+    .setColor(0x8b5cf6)
+    .setTitle(`🧠 Low Cap Watch — ${titleSuffix}`)
+    .addFields(fields)
+    .setFooter({ text: 'Crypto Scanner Bot • Low Cap Watch' })
+    .setTimestamp();
+}
+
 module.exports = {
   createAutoCallEmbed,
   createMilestoneEmbed,
@@ -640,8 +836,10 @@ module.exports = {
   createDevCheckEmbed,
   createDevLaunchAddedEmbed,
   createDevLeaderboardEmbed,
+  createDevLookupEmbed,
   createCallerCardEmbed,
   createCallerLeaderboardEmbed,
   createSingleCallEmbed,
-  createTopCallerTimeframeEmbed
+  createTopCallerTimeframeEmbed,
+  createLowCapLookupEmbed
 };

@@ -1,4 +1,5 @@
 const { fetchDexScreenerTokenData } = require('./dexScreenerProvider');
+const { fetchMintAuthorities } = require('./solanaAuthorityProvider');
 
 function toNumber(value, fallback = 0) {
   const num = Number(value);
@@ -510,8 +511,32 @@ function buildFallbackErrorObject(contractAddress) {
 async function fetchRealTokenData(contractAddress) {
   try {
     const dex = await fetchDexScreenerTokenData(contractAddress);
+    const normalized = normalizeDexData(dex, contractAddress);
 
-    return normalizeDexData(dex, contractAddress);
+    // On-chain identity surfaces (authorities). These are conservative fields:
+    // they are factual, but they do not guarantee "deployer/creator" identity.
+    try {
+      const auth = await fetchMintAuthorities(
+        normalized?.token?.contractAddress || contractAddress
+      );
+      normalized.identity = {
+        mintAuthority: auth.ok ? auth.mintAuthority ?? null : null,
+        freezeAuthority: auth.ok ? auth.freezeAuthority ?? null : null,
+        authoritySource: auth.ok ? 'solana_rpc_mint' : null,
+        authorityFetchedAt: auth.ok ? new Date().toISOString() : null,
+        authorityError: auth.ok ? null : auth.error || 'error'
+      };
+    } catch (e) {
+      normalized.identity = {
+        mintAuthority: null,
+        freezeAuthority: null,
+        authoritySource: null,
+        authorityFetchedAt: null,
+        authorityError: e?.message || 'error'
+      };
+    }
+
+    return normalized;
   } catch (error) {
     console.error('[RealTokenProvider] Error:', error.message);
     return buildFallbackErrorObject(contractAddress);

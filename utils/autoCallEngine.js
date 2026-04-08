@@ -8,6 +8,7 @@ const {
   getTrackedCall,
   updateTrackedCallData
 } = require('./trackedCallsService');
+const { getTrackedDev } = require('./devRegistryService');
 const { fetchGeckoTerminalCandidatePools } = require('../providers/geckoTerminalProvider');
 const { enqueueAlert } = require('./alertQueue');
 
@@ -432,7 +433,26 @@ if (selected.length === 0 && fallbackCandidates.length > 0) {
     const scan = item.scan;
 
     enqueueAlert(async () => {
-      const embed = createAutoCallEmbed(scan, profileName);
+      // If this coin already has a persisted dev link (from earlier strong attribution),
+      // surface it on auto-call posts too (read-only; no new matching here).
+      let scanForEmbed = scan;
+      const existing = getTrackedCall(scan.contractAddress);
+      const w = existing?.devAttribution?.walletAddress ? String(existing.devAttribution.walletAddress) : '';
+      if (w) {
+        const dev = getTrackedDev(w);
+        if (dev) {
+          scanForEmbed = {
+            ...scan,
+            devAttribution: {
+              walletAddress: dev.walletAddress,
+              matchedBy: existing?.devAttribution?.matchedBy || 'wallet',
+              dev
+            }
+          };
+        }
+      }
+
+      const embed = createAutoCallEmbed(scanForEmbed, profileName);
 
       const sentMessage = await channel.send({ embeds: [embed] });
 

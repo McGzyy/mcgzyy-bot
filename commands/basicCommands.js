@@ -27,6 +27,8 @@ const {
 } = require('../utils/tokenChartImage');
 const { getAlertEmbedLayoutMode } = require('../config/alertEmbedLayout');
 const { getCallerTrustLevel } = require('../utils/userProfileService');
+const { resolveTrackedDevIdentity } = require('../utils/devIdentityResolve');
+const { buildKnownDevField } = require('../utils/devAttributionDisplay');
 
 function formatUsd(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
@@ -99,6 +101,11 @@ function safeLink(label, url) {
 }
 
 const { isLikelySolanaCA } = require('../utils/solanaAddress');
+const { createLowCapLookupEmbed } = require('../utils/alertEmbeds');
+const {
+  getLowCapEntryByContractAddress,
+  listLowCapEntries
+} = require('../utils/lowCapRegistryService');
 
 function shortenCA(ca) {
   if (!ca || ca.length < 14) return ca || 'Unknown';
@@ -468,9 +475,10 @@ function createCommandsEmbed() {
       {
         name: '🛠 More (text `!help`)',
         value:
-          'Highlights: `!bestcall24h` … `!addlaunch` … `!devleaderboard`\n' +
+          'Highlights: `!bestcall24h` … `!dev` / `!devcard` … `!addlaunch` … `!devleaderboard`\n' +
           '**Manage Server:** `!scanner` / `!scanner on|off`, approvals, `!pendingapprovals`, `!verifyx @user`, `!resetmonitor`, …\n' +
-          '**Bot owner:** scanner thresholds & sanity filters — see `!help` (`!testx` / channel permissions)',
+          '**Manage Server:** `!testx` (live X test post)\n' +
+          '**Bot owner:** scanner thresholds & sanity filters — see `!help`',
         inline: false
       }
     )
@@ -948,6 +956,10 @@ function buildTraderScanEmbeds(scan, options = {}) {
       .addFields(...collectTraderScanEmbedFields(scan))
       .setFooter({ text: 'Crypto Scanner Bot • Call details' })
       .setTimestamp();
+    if (scan?.devAttribution?.dev && typeof scan.devAttribution.dev === 'object') {
+      const f = buildKnownDevField(scan.devAttribution.dev, { matchedBy: scan.devAttribution.matchedBy });
+      if (f) main.addFields({ name: f.name, value: f.value, inline: false });
+    }
     return { embeds: [chartEmbed, main], chartEmbedIndex: 0 };
   }
 
@@ -963,6 +975,10 @@ function buildTraderScanEmbeds(scan, options = {}) {
       .addFields(...collectTraderScanEmbedFields(scan))
       .setFooter({ text: 'Crypto Scanner Bot • Call details' })
       .setTimestamp();
+    if (scan?.devAttribution?.dev && typeof scan.devAttribution.dev === 'object') {
+      const f = buildKnownDevField(scan.devAttribution.dev, { matchedBy: scan.devAttribution.matchedBy });
+      if (f) main.addFields({ name: f.name, value: f.value, inline: false });
+    }
     return { embeds: [chartEmbed, main], chartEmbedIndex: 0 };
   }
 
@@ -970,6 +986,10 @@ function buildTraderScanEmbeds(scan, options = {}) {
     .setColor(0x34d399)
     .setTitle(formatCallAlertEmbedTitle(scan))
     .setDescription(buildLayoutBHeroDescription(scan, chartPhase));
+  if (scan?.devAttribution?.dev && typeof scan.devAttribution.dev === 'object') {
+    const f = buildKnownDevField(scan.devAttribution.dev, { matchedBy: scan.devAttribution.matchedBy });
+    if (f) hero.addFields({ name: f.name, value: f.value, inline: false });
+  }
   const details = buildTraderDetailsEmbed(scan, showTrackedMeta);
   return { embeds: [hero, details], chartEmbedIndex: 0 };
 }
@@ -1394,9 +1414,24 @@ function buildUserCallAnnouncementPayload(realData, scan, trackedCall, wasNewCal
   const xMentionAttributionHandle =
     xH != null && String(xH).trim() ? String(xH).trim().replace(/^@+/, '') : '';
 
+  // Conservative dev attribution (V1): exact wallet or exact X only. No guesses from project socials.
+  let devAttribution = null;
+  const priorWallet = trackedCall?.devAttribution?.walletAddress || '';
+  const candidateWallet = priorWallet ? String(priorWallet).trim() : '';
+  const candidateX = xMentionAttributionHandle || '';
+  const resolved = resolveTrackedDevIdentity({ wallet: candidateWallet, xHandle: candidateX });
+  if (resolved?.dev && !resolved?.conflict) {
+    devAttribution = {
+      walletAddress: resolved.dev.walletAddress,
+      matchedBy: resolved.matchedBy,
+      dev: resolved.dev
+    };
+  }
+
   const { embeds, chartEmbedIndex } = buildTraderScanEmbeds(
     {
       ...scan,
+      ...(devAttribution ? { devAttribution } : {}),
       greenFlags,
       redFlags,
       riskLevel: scan.riskLevel || 'Low',
@@ -1609,6 +1644,30 @@ async function handleCallCommand(message, contractAddress, source = 'command', e
     scan,
     { callSourceType: 'user_call' }
   );
+
+  // Persist dev link on tracked call when the match is strong + conflict-free.
+  // V1 only uses exact wallet or exact X (typically from X intake via `extras.xOriginHandle`).
+  try {
+    const x = extras?.xOriginHandle ? String(extras.xOriginHandle).trim().replace(/^@+/, '') : '';
+    const prior = trackedCall?.devAttribution?.walletAddress || '';
+    const resolved = resolveTrackedDevIdentity({ wallet: prior, xHandle: x });
+    if (resolved?.dev && !resolved?.conflict) {
+      const existing = trackedCall?.devAttribution?.walletAddress
+        ? String(trackedCall.devAttribution.walletAddress)
+        : '';
+      const nextWallet = resolved.dev.walletAddress;
+      if (!existing || existing === nextWallet) {
+        updateTrackedCallData(contractAddress, {
+          devAttribution: {
+            walletAddress: nextWallet,
+            matchedBy: resolved.matchedBy,
+            resolvedAt: new Date().toISOString(),
+            source: x ? 'x_origin_handle' : 'existing'
+          }
+        });
+      }
+    }
+  } catch (_) {}
 
   const needsDeferredChart =
     wasNewCall &&
@@ -1959,6 +2018,106 @@ async function handleBasicCommands(message, options = {}) {
       await message.reply(`❌ Watch failed: ${error.message}`);
       return true;
     }
+  }
+
+  if (lowerContent.startsWith('!lowcap ')) {
+    const parts = content.trim().split(/\s+/);
+    const contractAddress = parts[1];
+
+    if (!contractAddress) {
+      await message.reply('⚠️ Usage: `!lowcap [SOLANA_CONTRACT_ADDRESS]`');
+      return true;
+    }
+
+    if (!isLikelySolanaCA(contractAddress)) {
+      await message.reply('⚠️ That does not look like a valid Solana contract address.');
+      return true;
+    }
+
+    try {
+      const entry = getLowCapEntryByContractAddress(contractAddress);
+      if (!entry) {
+        await message.reply('No low-cap entry found for this contract address.');
+        return true;
+      }
+      await message.reply({ embeds: [createLowCapLookupEmbed(entry)] });
+      return true;
+    } catch (error) {
+      console.error(error);
+      await message.reply(`❌ Low-cap lookup failed: ${error.message}`);
+      return true;
+    }
+  }
+
+  if (lowerContent === '!lowcaps') {
+    try {
+      const entries = listLowCapEntries();
+      if (!entries.length) {
+        await message.reply('No low-cap entries are currently tracked.');
+        return true;
+      }
+
+      const top = entries.slice(0, 12);
+      const lines = top.map((e) => {
+        const label = e.ticker
+          ? `$${e.ticker}`
+          : e.name && String(e.name).trim()
+            ? String(e.name).trim()
+            : `\`${String(e.contractAddress || '').slice(0, 8)}…\``;
+        const raw = (e.narrative || e.notes || '').replace(/\s+/g, ' ').trim();
+        const snippet = raw.length > 72 ? `${raw.slice(0, 71)}…` : raw || '—';
+        return `${label} — ${snippet} — ${e.lifecycle || 'watching'}`;
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x8b5cf6)
+        .setTitle('🧠 Low Cap Watchlist')
+        .setDescription(lines.join('\n'))
+        .setFooter({
+          text:
+            entries.length > top.length
+              ? `Showing ${top.length} of ${entries.length} (dead excluded)`
+              : `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'} (dead excluded)`
+        })
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+      return true;
+    } catch (error) {
+      console.error(error);
+      await message.reply(`❌ Low-cap list failed: ${error.message}`);
+      return true;
+    }
+  }
+
+  if (lowerContent === '!lowcapadd') {
+    const embed = new EmbedBuilder()
+      .setColor(0x8b5cf6)
+      .setTitle('🧠 Suggest a low-cap watch')
+      .setDescription(
+        [
+          'Submit a token for the curated low-cap watchlist.',
+          '',
+          'Every submission is reviewed before anything is added.',
+          '',
+          'Use the form for the contract address, a short narrative, and **why it’s worth tracking**.'
+        ].join('\n')
+      )
+      .setFooter({ text: 'Curated low-cap • McGBot' });
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('lowcap_open_submit_modal')
+        .setLabel('Open submission form')
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    await message.reply({
+      embeds: [embed],
+      components: [row],
+      allowedMentions: { repliedUser: false }
+    });
+    return true;
   }
 
   if (isLikelySolanaCA(content)) {

@@ -1,0 +1,28 @@
+{
+  "submissions": [
+    {
+      "submissionId": "lcs_1775614058807_ad13a8",
+      "status": "denied",
+      "contractAddress": "2HnVG3qaNKXm61viQ6ko8Nx6gqA2FRmgDqoUYHswpump",
+      "name": "Test Coin",
+      "ticker": "TESTING HERE..!",
+      "narrative": "This is a test narrative",
+      "notes": "This is a test thesis explaining why they think they coin could possibly go back up",
+      "currentMarketCap": null,
+      "previousAthMarketCap": null,
+      "tags": [],
+      "submittedByUserId": "732566370914664499",
+      "submittedByUsername": "mcgzyy",
+      "review": {
+        "reviewMessageId": "1491258193454694571",
+        "reviewChannelId": "1490630701920419921",
+        "reviewedByUserId": "732566370914664499",
+        "reviewedAt": 1775614088272
+      },
+      "metadata": {
+        "createdAt": 1775614058806,
+        "updatedAt": 1775614088276
+      }
+    }
+  ]
+}

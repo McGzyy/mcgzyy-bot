@@ -380,6 +380,11 @@ function buildScanObject(base) {
     twitter: base.twitter || null,
     telegram: base.telegram || null,
 
+    // On-chain authority surfaces (factual but not guaranteed deployer/creator identity).
+    mintAuthority: base.mintAuthority || null,
+    freezeAuthority: base.freezeAuthority || null,
+    authoritySource: base.authoritySource || null,
+
     marketCap: toNumber(base.marketCap),
     liquidity: toNumber(base.liquidity),
     volume5m: toNumber(base.volume5m),
@@ -565,6 +570,9 @@ async function generateRealScan(contractAddress, geckoCandidate = null) {
     website: realData.token?.website || null,
     twitter: realData.token?.twitter || null,
     telegram: realData.token?.telegram || null,
+    mintAuthority: realData.identity?.mintAuthority || null,
+    freezeAuthority: realData.identity?.freezeAuthority || null,
+    authoritySource: realData.identity?.authoritySource || null,
 
     marketCap,
     liquidity,

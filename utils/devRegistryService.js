@@ -1,10 +1,16 @@
 const fs = require('fs');
 const path = require('path');
+const { normalizeXHandle } = require('./userProfileService');
 
 const trackedDevsFilePath = path.join(__dirname, '../data/trackedDevs.json');
 
-const TRACKED_DEVS_CHANNEL_NAMES = ['tracked-devs'];
-const DEV_FEED_CHANNEL_NAMES = ['dev-feed'];
+/** Staff-only: curated dev database (add / edit). */
+const DEV_STAFF_CHANNEL_NAMES = ['tracked-devs'];
+/** Public: dev lookup only (#dev-intel recommended; #dev-feed = legacy alias). */
+const DEV_PUBLIC_INTEL_CHANNEL_NAMES = ['dev-intel', 'dev-feed'];
+
+const TRACKED_DEVS_CHANNEL_NAMES = DEV_STAFF_CHANNEL_NAMES;
+const DEV_FEED_CHANNEL_NAMES = DEV_PUBLIC_INTEL_CHANNEL_NAMES;
 
 function ensureTrackedDevsFile() {
   try {
@@ -16,11 +22,29 @@ function ensureTrackedDevsFile() {
   }
 }
 
+/** Canonical stored form for primary X handle (lowercase, no @). */
+function normalizeStoredDevXHandle(value) {
+  const h = normalizeXHandle(value);
+  return h ? h.toLowerCase() : '';
+}
+
+function ensureTrackedDevShape(dev) {
+  if (!dev || typeof dev !== 'object') return dev;
+  return {
+    ...dev,
+    xHandle: normalizeStoredDevXHandle(dev.xHandle || ''),
+    tags: Array.isArray(dev.tags) ? dev.tags : [],
+    previousLaunches: Array.isArray(dev.previousLaunches) ? dev.previousLaunches : []
+  };
+}
+
 function loadTrackedDevs() {
   try {
     ensureTrackedDevsFile();
     const rawData = fs.readFileSync(trackedDevsFilePath, 'utf-8');
-    return JSON.parse(rawData);
+    const parsed = JSON.parse(rawData);
+    const arr = Array.isArray(parsed) ? parsed : [];
+    return arr.map(ensureTrackedDevShape);
   } catch (error) {
     console.error('[DevRegistry] Failed to load tracked devs:', error.message);
     return [];
@@ -44,18 +68,47 @@ function isLikelySolWallet(wallet) {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(clean);
 }
 
-function isTrackedDevsChannel(channelName = '') {
-  return TRACKED_DEVS_CHANNEL_NAMES.includes(String(channelName || '').toLowerCase());
+function isDevStaffChannel(channelName = '') {
+  return DEV_STAFF_CHANNEL_NAMES.includes(String(channelName || '').toLowerCase());
 }
 
+function isDevPublicIntelChannel(channelName = '') {
+  return DEV_PUBLIC_INTEL_CHANNEL_NAMES.includes(String(channelName || '').toLowerCase());
+}
+
+/** @deprecated use isDevStaffChannel */
+function isTrackedDevsChannel(channelName = '') {
+  return isDevStaffChannel(channelName);
+}
+
+/** @deprecated use isDevPublicIntelChannel */
 function isDevFeedChannel(channelName = '') {
-  return DEV_FEED_CHANNEL_NAMES.includes(String(channelName || '').toLowerCase());
+  return isDevPublicIntelChannel(channelName);
 }
 
 function getTrackedDev(walletAddress) {
   const clean = normalizeWallet(walletAddress);
   const devs = loadTrackedDevs();
   return devs.find(dev => dev.walletAddress === clean) || null;
+}
+
+function getTrackedDevByXHandle(handle) {
+  const norm = normalizeStoredDevXHandle(handle);
+  if (!norm) return null;
+  const devs = loadTrackedDevs();
+  return devs.find((d) => normalizeStoredDevXHandle(d.xHandle || '') === norm) || null;
+}
+
+/** @param {string} xHandleNorm - normalized lowercase handle */
+function assertUniqueXHandle(xHandleNorm, excludeWallet = '') {
+  if (!xHandleNorm) return { ok: true };
+  const devs = loadTrackedDevs();
+  const conflict = devs.find(
+    (d) =>
+      normalizeStoredDevXHandle(d.xHandle || '') === xHandleNorm &&
+      d.walletAddress !== excludeWallet
+  );
+  return conflict ? { ok: false, conflict } : { ok: true };
 }
 
 function parseDevInput(text, wallet) {
@@ -75,7 +128,8 @@ function addTrackedDev({
   addedById = null,
   addedByUsername = 'Unknown',
   nickname = '',
-  note = ''
+  note = '',
+  xHandle = ''
 }) {
   const clean = normalizeWallet(walletAddress);
   const devs = loadTrackedDevs();
@@ -83,17 +137,24 @@ function addTrackedDev({
   const existing = devs.find(dev => dev.walletAddress === clean);
   if (existing) return existing;
 
-  const newDev = {
+  const xh = normalizeStoredDevXHandle(xHandle);
+  if (xh) {
+    const u = assertUniqueXHandle(xh, clean);
+    if (!u.ok) return null;
+  }
+
+  const newDev = ensureTrackedDevShape({
     walletAddress: clean,
     nickname: String(nickname || '').trim(),
     note: String(note || '').trim(),
+    xHandle: xh,
     addedById,
     addedByUsername,
     addedAt: new Date().toISOString(),
     isActive: true,
     tags: [],
     previousLaunches: []
-  };
+  });
 
   devs.push(newDev);
   saveTrackedDevs(devs);
@@ -158,11 +219,54 @@ function updateTrackedDev(walletAddress, updates = {}) {
 
   if (index === -1) return null;
 
-  devs[index] = {
+  const merged = {
     ...devs[index],
     ...updates
   };
+  if (updates.xHandle !== undefined) {
+    const xh = normalizeStoredDevXHandle(updates.xHandle);
+    const u = assertUniqueXHandle(xh, clean);
+    if (!u.ok) return null;
+    merged.xHandle = xh;
+  }
 
+  devs[index] = ensureTrackedDevShape(merged);
+
+  saveTrackedDevs(devs);
+  return devs[index];
+}
+
+/** Replace tags (lowercase), max 24 — staff curation */
+function setTrackedDevTags(walletAddress, newTags = []) {
+  const clean = normalizeWallet(walletAddress);
+  const devs = loadTrackedDevs();
+  const index = devs.findIndex((d) => d.walletAddress === clean);
+  if (index === -1) return null;
+  const list = Array.isArray(newTags) ? newTags : [];
+  const normalized = [
+    ...new Set(
+      list
+        .map((t) => String(t || '').toLowerCase().trim().slice(0, 40))
+        .filter(Boolean)
+    )
+  ].slice(0, 24);
+  devs[index].tags = normalized;
+  saveTrackedDevs(devs);
+  return ensureTrackedDevShape(devs[index]);
+}
+
+/** Merge unique tags (lowercase) onto a dev, max total 24 */
+function mergeDevTags(walletAddress, newTags = []) {
+  const clean = normalizeWallet(walletAddress);
+  const devs = loadTrackedDevs();
+  const index = devs.findIndex((d) => d.walletAddress === clean);
+  if (index === -1) return null;
+  const set = new Set((devs[index].tags || []).map((t) => String(t).toLowerCase().slice(0, 40)));
+  for (const t of newTags) {
+    const v = String(t || '').toLowerCase().slice(0, 40);
+    if (v) set.add(v);
+  }
+  devs[index].tags = [...set].slice(0, 24);
   saveTrackedDevs(devs);
   return devs[index];
 }
@@ -275,10 +379,18 @@ function getDevLeaderboard(limit = 10) {
 module.exports = {
   isTrackedDevsChannel,
   isDevFeedChannel,
+  isDevStaffChannel,
+  isDevPublicIntelChannel,
+  DEV_STAFF_CHANNEL_NAMES,
+  DEV_PUBLIC_INTEL_CHANNEL_NAMES,
   isLikelySolWallet,
   loadTrackedDevs,
   saveTrackedDevs,
   getTrackedDev,
+  getTrackedDevByXHandle,
+  normalizeStoredDevXHandle,
+  mergeDevTags,
+  setTrackedDevTags,
   addTrackedDev,
   removeTrackedDev,
   getAllTrackedDevs,

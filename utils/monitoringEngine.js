@@ -282,14 +282,24 @@ function getHighestDump(drawdown, hits = []) {
 function getApprovalChannel(guild) {
   if (!guild) return null;
 
-  return guild.channels.cache.find(
-    ch =>
-      ch &&
-      ch.isTextBased &&
-      typeof ch.isTextBased === 'function' &&
-      ch.isTextBased() &&
-      (ch.name === 'coin-approval' || ch.name === 'coin-approvals')
-  ) || null;
+  const pick = (name) =>
+    guild.channels.cache.find(
+      ch =>
+        ch &&
+        ch.isTextBased &&
+        typeof ch.isTextBased === 'function' &&
+        ch.isTextBased() &&
+        ch.name === name
+    ) || null;
+
+  // Formal moderation queue hub (must match index.js interaction hardening for approve/deny/tag/note).
+  return (
+    pick('mod-approvals') ||
+    // Legacy channel names — prefer migrating to #mod-approvals so buttons work with hardening.
+    pick('coin-approval') ||
+    pick('coin-approvals') ||
+    null
+  );
 }
 
 function buildApprovalButtons(contractAddress) {

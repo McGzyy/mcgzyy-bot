@@ -119,7 +119,10 @@ const xVerificationSessions = new Map();
 const X_VERIFY_SESSION_TTL_MS = 30 * 60 * 1000;
 const X_VERIFY_CHANNEL_NAME = 'verify-x';
 const X_VERIFIED_ROLE_NAME = 'X Verified';
-const MOD_CHANNEL_NAME = 'mod-chat';
+/** Structured review queue: approval cards, verify review embeds + action buttons. */
+const MOD_APPROVALS_CHANNEL_NAME = 'mod-approvals';
+/** General staff discussion / informal mod notices (not the formal review hub). */
+const MOD_CHAT_CHANNEL_NAME = 'mod-chat';
 
 const BOT_SETTINGS_PATH = path.join(__dirname, 'data', 'botSettings.json');
 
@@ -238,6 +241,21 @@ async function replyText(message, content) {
   });
 }
 
+function isBotOwnerId(userId) {
+  const owner = String(process.env.BOT_OWNER_ID || '').trim();
+  if (!owner) return false;
+  return String(userId || '').trim() === owner;
+}
+
+function memberCanManageGuild(member) {
+  return Boolean(member?.permissions?.has('ManageGuild'));
+}
+
+function interactionIsFromModApprovals(interaction) {
+  const chName = String(interaction?.channel?.name || '').toLowerCase();
+  return chName && chName === MOD_APPROVALS_CHANNEL_NAME;
+}
+
 function getBotCallsChannel(guild) {
   if (!guild) return null;
 
@@ -251,7 +269,7 @@ function getBotCallsChannel(guild) {
   ) || null;
 }
 
-function getModChannel(guild) {
+function getModApprovalsChannel(guild) {
   if (!guild) return null;
 
   return guild.channels.cache.find(
@@ -260,7 +278,20 @@ function getModChannel(guild) {
       ch.isTextBased &&
       typeof ch.isTextBased === 'function' &&
       ch.isTextBased() &&
-      ch.name === MOD_CHANNEL_NAME
+      ch.name === MOD_APPROVALS_CHANNEL_NAME
+  ) || null;
+}
+
+function getModChatChannel(guild) {
+  if (!guild) return null;
+
+  return guild.channels.cache.find(
+    ch =>
+      ch &&
+      ch.isTextBased &&
+      typeof ch.isTextBased === 'function' &&
+      ch.isTextBased() &&
+      ch.name === MOD_CHAT_CHANNEL_NAME
   ) || null;
 }
 function getXApprovalChannel(guild) {
@@ -1243,17 +1274,17 @@ client.on('interactionCreate', async (interaction) => {
 
 const buttons = buildXVerifyButtons(interaction.user.id, handle);
 
-const modChannel = getModChannel(interaction.guild);
+const modApprovalsCh = getModApprovalsChannel(interaction.guild);
 const xApprovalChannel = getXApprovalChannel(interaction.guild);
 
-if (modChannel) {
-  await modChannel.send({
+if (modApprovalsCh) {
+  await modApprovalsCh.send({
     embeds: [embed],
     components: buttons
   });
 }
 
-if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) {
+if (xApprovalChannel && (!modApprovalsCh || xApprovalChannel.id !== modApprovalsCh.id)) {
   await xApprovalChannel.send({
     embeds: [embed],
     components: buttons
@@ -1290,6 +1321,21 @@ if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) 
       }
 
       if (parts[0] === 'xverify_accept') {
+  if (!interactionIsFromModApprovals(interaction)) {
+    await interaction.reply({
+      content: '❌ This action can only be used from **#mod-approvals**.',
+      ephemeral: true
+    });
+    return;
+  }
+  if (!memberCanManageGuild(interaction.member)) {
+    await interaction.reply({
+      content: '❌ Only mods/admins can approve X verification.',
+      ephemeral: true
+    });
+    return;
+  }
+
   const userId = parts[1];
   const handle = parts[2];
 
@@ -1330,6 +1376,21 @@ if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) 
 }
 
       if (parts[0] === 'xverify_deny') {
+  if (!interactionIsFromModApprovals(interaction)) {
+    await interaction.reply({
+      content: '❌ This action can only be used from **#mod-approvals**.',
+      ephemeral: true
+    });
+    return;
+  }
+  if (!memberCanManageGuild(interaction.member)) {
+    await interaction.reply({
+      content: '❌ Only mods/admins can deny X verification.',
+      ephemeral: true
+    });
+    return;
+  }
+
   const userId = parts[1];
   const handle = parts[2];
 
@@ -1407,6 +1468,25 @@ if (!trackedCall) {
     ephemeral: true
   });
   return;
+}
+
+if (
+  ['approve_call', 'deny_call', 'exclude_call', 'tag_call', 'note_call', 'done_call'].includes(action)
+) {
+  if (!interactionIsFromModApprovals(interaction)) {
+    await interaction.reply({
+      content: '❌ Moderation actions can only be used from **#mod-approvals**.',
+      ephemeral: true
+    });
+    return;
+  }
+  if (!memberCanManageGuild(interaction.member)) {
+    await interaction.reply({
+      content: '❌ Only mods/admins can use moderation actions.',
+      ephemeral: true
+    });
+    return;
+  }
 }
 
 if (
@@ -1565,6 +1645,21 @@ let updated = null;
       }
 
       if (parts[0] === 'xverify_deny_modal') {
+  if (!interactionIsFromModApprovals(interaction)) {
+    await interaction.reply({
+      content: '❌ This action can only be used from **#mod-approvals**.',
+      ephemeral: true
+    });
+    return;
+  }
+  if (!memberCanManageGuild(interaction.member)) {
+    await interaction.reply({
+      content: '❌ Only mods/admins can deny X verification.',
+      ephemeral: true
+    });
+    return;
+  }
+
   const userId = parts[1];
   const handle = parts[2];
   const reason = interaction.fields.getTextInputValue('deny_reason');
@@ -1607,6 +1702,21 @@ let updated = null;
       }
 
       if (action === 'tag_modal') {
+        if (!interactionIsFromModApprovals(interaction)) {
+          await interaction.reply({
+            content: '❌ Moderation actions can only be used from **#mod-approvals**.',
+            ephemeral: true
+          });
+          return;
+        }
+        if (!memberCanManageGuild(interaction.member)) {
+          await interaction.reply({
+            content: '❌ Only mods/admins can add tags.',
+            ephemeral: true
+          });
+          return;
+        }
+
         const tag = interaction.fields.getTextInputValue('tag_input')?.trim();
 
         if (!tag) {
@@ -1634,6 +1744,21 @@ let updated = null;
       }
 
       if (action === 'note_modal') {
+        if (!interactionIsFromModApprovals(interaction)) {
+          await interaction.reply({
+            content: '❌ Moderation actions can only be used from **#mod-approvals**.',
+            ephemeral: true
+          });
+          return;
+        }
+        if (!memberCanManageGuild(interaction.member)) {
+          await interaction.reply({
+            content: '❌ Only mods/admins can add notes.',
+            ephemeral: true
+          });
+          return;
+        }
+
         const note = interaction.fields.getTextInputValue('note_input')?.trim();
 
         if (!note) {
@@ -1714,8 +1839,8 @@ client.on('messageCreate', async (message) => {
 }
 
 if (lowerContent === '!scanner on') {
-  if (!message.member?.permissions?.has('ManageGuild')) {
-    await replyText(message, '❌ Mods/admins only.');
+  if (!isBotOwnerId(message.author.id)) {
+    await replyText(message, '❌ Only the bot owner can use this command.');
     return;
   }
 
@@ -1743,8 +1868,8 @@ startAutoCallLoop(botChannel);
 }
 
 if (lowerContent === '!scanner off') {
-  if (!message.member?.permissions?.has('ManageGuild')) {
-    await replyText(message, '❌ Mods/admins only.');
+  if (!isBotOwnerId(message.author.id)) {
+    await replyText(message, '❌ Only the bot owner can use this command.');
     return;
   }
 
@@ -1764,6 +1889,11 @@ saveBotSettings(BOT_SETTINGS);
   return;
 }
       if (lowerContent === '!testx') {
+        if (!isBotOwnerId(message.author.id)) {
+          await replyText(message, '❌ Only the bot owner can use this command.');
+          return;
+        }
+
         const result = await createPost('Test post from McGBot 🚀');
 
         if (result.success) {
@@ -1896,6 +2026,15 @@ saveBotSettings(BOT_SETTINGS);
           await verifyChannel.send(
             `✅ <@${mentionedUser.id}> has been verified as **@${pendingHandle}**`
           );
+        }
+
+        const modChatCh = getModChatChannel(message.guild);
+        if (modChatCh) {
+          await modChatCh.send({
+            content:
+              `📋 **Manual \`!verifyx\`** — <@${mentionedUser.id}> verified as **@${pendingHandle}** by <@${message.author.id}>.`,
+            allowedMentions: { users: [mentionedUser.id, message.author.id] }
+          });
         }
 
         await replyText(
@@ -2302,13 +2441,13 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     `• \`!addlaunch <dev_wallet> <token_ca>\` — Log a launch on a tracked dev\n` +
     `• \`!testreal <ca>\` — Live provider / token test (embed)\n` +
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
-    `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n\n`;
+      `• \`!testx\` — Post a test tweet **(bot owner only)**\n\n`;
 
   // MOD COMMANDS (Manage Server — bot owner always sees this block too)
   if (isModOrAdmin || isOwner) {
     contentOut +=
       `🛡️ **Mod / Manage Server**\n` +
-      `• Approval buttons in **#coin-approval** / mod flows\n` +
+      `• Approval / review actions: use **#mod-approvals** (queue hub); staff chat: **#mod-chat**\n` +
       `• \`!approvalstats\` — Approval queue counts\n` +
       `• \`!pendingapprovals\` — Pending X verifications + top pending **bot** approvals\n` +
       `• \`!recentcalls\` — Recent bot-tracked calls\n` +
@@ -2512,10 +2651,8 @@ if (lowerContent === '!monitorstatus') {
   return;
 }
 if (lowerContent === '!resetmonitor') {
-  const isModOrAdmin = message.member?.permissions?.has('ManageGuild');
-
-  if (!isModOrAdmin) {
-    await replyText(message, '❌ Only mods/admins can use this command.');
+  if (!isBotOwnerId(message.author.id)) {
+    await replyText(message, '❌ Only the bot owner can use this command.');
     return;
   }
 

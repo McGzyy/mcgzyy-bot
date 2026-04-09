@@ -45,7 +45,16 @@ const autoCallConfig = {
 
     // minimum meaningful project floor
     minMeaningfulMarketCap: 15000,
-    minMeaningfulLiquidity: 3500
+    minMeaningfulLiquidity: 15000,
+
+    // FaSol-inspired bot-call quality gates (only enforce when data is available)
+    minAgeMinutes: 5,
+    requireMigrated: true,
+    minVolume5m: 25000,
+    minVolume24h: 40000,
+    minTrades24h: 1500,
+    minBuys24h: 250,
+    minHolders: 300
   },
 
   /**
@@ -55,15 +64,23 @@ const autoCallConfig = {
    */
   naming: {
     blockedTokenNames: [
+      'anonymous',
       'unknown',
       'unknown token',
+      'untitled',
+      'unnamed',
+      'null',
+      'undefined',
       'test',
       'coin',
       'token'
     ],
     blockedTickers: [
       '???',
+      'anonymous',
       'unknown',
+      'null',
+      'undefined',
       'test'
     ],
     minTokenNameLength: 3,
@@ -89,8 +106,8 @@ const autoCallConfig = {
   profiles: {
     balanced: {
       minScore: 52,
-      minLiquidity: 6000,
-      minVolume5m: 1800,
+      minLiquidity: 15000,
+      minVolume5m: 25000,
       minBuySellRatio5m: 1.01, // loosened further
       maxAgeMinutes: 240,
       maxCallsPerHour: 8

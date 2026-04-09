@@ -21,6 +21,24 @@ function formatAgeMinutes(value) {
   return `${Number(value)} min`;
 }
 
+function formatAgo(isoOrDateLike) {
+  if (!isoOrDateLike) return null;
+  const ts = new Date(isoOrDateLike).getTime();
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+
+  const diffMs = Date.now() - ts;
+  if (!Number.isFinite(diffMs) || diffMs < 0) return null;
+
+  const s = Math.floor(diffMs / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  return `${d}d`;
+}
+
 function shortenWallet(wallet) {
   if (!wallet || wallet.length < 12) return formatValue(wallet, 'Unknown');
   return `${wallet.slice(0, 6)}...${wallet.slice(-6)}`;
@@ -239,6 +257,7 @@ function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent) {
   const firstCalledMc = getSafeFirstCalledMc(coin);
   const currentMc = getSafeLatestMc(coin, scan);
   const originalCaller = getOriginalCallerLabel(coin, 'Auto Bot');
+  const alertedAgo = formatAgo(coin?.firstCalledAt || coin?.calledAt || coin?.createdAt || null);
 
   const quickTradeLinks = buildQuickTradeLinksLine(contractAddress, pairAddress);
   const socialLinks = buildSocialLinksLine(scan);
@@ -259,7 +278,8 @@ function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent) {
   descriptionParts.push(
     '',
     `**Original Caller:** ${originalCaller}`,
-    `**Since First Call:** ${formatPercent(performancePercent)}`
+    `**Since First Call:** ${formatPercent(performancePercent)}`,
+    alertedAgo ? `**Alerted:** ${alertedAgo} ago` : ''
   );
 
   const embed = new EmbedBuilder()

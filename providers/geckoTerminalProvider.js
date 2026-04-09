@@ -2,10 +2,6 @@ const axios = require('axios');
 
 const GECKO_BASE = 'https://api.geckoterminal.com/api/v2';
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
@@ -28,9 +24,33 @@ function getAgeMinutes(createdAt) {
 
 const SEARCH_TERMS = ['sol', 'ai', 'meme'];
 
-let rotationIndex = 0;
+/** 0 .. SEARCH_TERMS.length - 1 only — never out of range */
+let searchTermIndex = 0;
 let currentPage = 1;
 const MAX_PAGE = 4;
+
+/**
+ * =========================
+ * NETWORK FILTER (search — multi-chain results)
+ * =========================
+ */
+
+function isSolanaNetworkPool(pool) {
+  if (!pool) return false;
+
+  const networkId = pool.relationships?.network?.data?.id;
+  if (networkId != null && String(networkId).trim() !== '') {
+    return String(networkId).toLowerCase() === 'solana';
+  }
+
+  const poolId = String(pool.id || '');
+  const u = poolId.indexOf('_');
+  if (u > 0) {
+    return poolId.slice(0, u).toLowerCase() === 'solana';
+  }
+
+  return poolId.toLowerCase().includes('solana');
+}
 
 /**
  * =========================
@@ -96,26 +116,24 @@ function normalizePool(pool) {
   };
 }
 
-/**
- * =========================
- * FETCH SINGLE PAGE
- * =========================
- */
+function dedupeRawPoolsById(pools) {
+  const seen = new Set();
+  const out = [];
 
-async function fetchSinglePage() {
+  for (const pool of pools) {
+    const id = pool?.id;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(pool);
+  }
+
+  return out;
+}
+
+async function fetchNewPoolsPage(page) {
   try {
-    let url;
-
-    const isNewPools = rotationIndex === 0;
-
-    if (isNewPools) {
-      url = `${GECKO_BASE}/networks/solana/new_pools?page=${currentPage}`;
-      console.log(`[GeckoTerminal] Fetching NEW pools page ${currentPage}`);
-    } else {
-      const term = SEARCH_TERMS[rotationIndex - 1];
-      url = `${GECKO_BASE}/search/pools?query=${encodeURIComponent(term)}&page=${currentPage}`;
-      console.log(`[GeckoTerminal] Fetching SEARCH "${term}" page ${currentPage}`);
-    }
+    const url = `${GECKO_BASE}/networks/solana/new_pools?page=${page}`;
+    console.log(`[GeckoTerminal] Fetching NEW pools page ${page}`);
 
     const response = await axios.get(url, {
       headers: { Accept: 'application/json' },
@@ -123,34 +141,48 @@ async function fetchSinglePage() {
     });
 
     let pools = response.data?.data || [];
-
     if (!Array.isArray(pools)) pools = [];
-
-    if (!isNewPools) {
-      pools = pools.filter(pool =>
-        String(pool?.id || '').toLowerCase().includes('solana')
-      );
-    }
 
     return pools;
   } catch (error) {
-    console.log(`[GeckoTerminal] Page fetch failed: ${error.message}`);
+    console.log(`[GeckoTerminal] NEW pools fetch failed: ${error.message}`);
+    return [];
+  }
+}
+
+async function fetchSearchPoolsPage(term, page) {
+  const safeTerm =
+    term != null && String(term).trim() !== ''
+      ? String(term).trim()
+      : SEARCH_TERMS[0];
+
+  try {
+    const url = `${GECKO_BASE}/search/pools?query=${encodeURIComponent(safeTerm)}&page=${page}`;
+    console.log(`[GeckoTerminal] Fetching SEARCH "${safeTerm}" page ${page}`);
+
+    const response = await axios.get(url, {
+      headers: { Accept: 'application/json' },
+      timeout: 15000
+    });
+
+    let pools = response.data?.data || [];
+    if (!Array.isArray(pools)) pools = [];
+
+    return pools.filter(isSolanaNetworkPool);
+  } catch (error) {
+    console.log(`[GeckoTerminal] SEARCH fetch failed: ${error.message}`);
     return [];
   }
 }
 
 /**
- * =========================
- * ROTATION ADVANCE
- * =========================
+ * After each full cycle (NEW + SEARCH): rotate term; bump page when term wraps.
  */
+function advanceRotationAfterCycle() {
+  searchTermIndex = (searchTermIndex + 1) % SEARCH_TERMS.length;
 
-function advanceRotation() {
-  rotationIndex++;
-
-  if (rotationIndex > SEARCH_TERMS.length) {
-    rotationIndex = 0;
-    currentPage++;
+  if (searchTermIndex === 0) {
+    currentPage += 1;
     if (currentPage > MAX_PAGE) currentPage = 1;
   }
 }
@@ -163,12 +195,18 @@ function advanceRotation() {
 
 async function fetchGeckoTerminalCandidatePools() {
   try {
-    const rawPools = await fetchSinglePage();
+    const term = SEARCH_TERMS[searchTermIndex];
 
-    // rotate AFTER fetch
-    advanceRotation();
+    const [newRaw, searchRaw] = await Promise.all([
+      fetchNewPoolsPage(currentPage),
+      fetchSearchPoolsPage(term, currentPage)
+    ]);
 
-    const normalized = rawPools.map(normalizePool).filter(Boolean);
+    const combined = dedupeRawPoolsById([...newRaw, ...searchRaw]);
+
+    advanceRotationAfterCycle();
+
+    const normalized = combined.map(normalizePool).filter(Boolean);
 
     const filtered = normalized.filter(pool => {
       if (!pool.contractAddress) return false;

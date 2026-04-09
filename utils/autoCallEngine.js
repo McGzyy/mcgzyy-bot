@@ -13,11 +13,26 @@ const { enqueueAlert } = require('./alertQueue');
 
 let isRunning = false;
 let intervalHandle = null;
+let queueIntervalHandle = null;
 
 // memory state
 const recentlyCalled = new Map();
 let callsThisHour = 0;
 let lastHourReset = Date.now();
+
+/**
+ * =========================
+ * BOT-CALL PACING (V1)
+ * =========================
+ *
+ * In-memory only. Controls posting cadence without changing detection.
+ */
+const BOT_CALL_COOLDOWN_MS = 45_000;
+const BOT_CALL_QUEUE_MAX_AGE_MS = 30 * 60_000;
+
+let lastBotCallPostedAt = 0;
+let botCallQueue = []; // [{ contractAddress, profileName, rankScore, enqueuedAt }]
+let isPostingQueued = false;
 
 /**
  * =========================
@@ -63,6 +78,128 @@ function logDebug(...args) {
   }
 }
 
+function isBotCallCooldownActive() {
+  return (now() - lastBotCallPostedAt) < BOT_CALL_COOLDOWN_MS;
+}
+
+function cleanupStaleBotCallQueue() {
+  const cutoff = now() - BOT_CALL_QUEUE_MAX_AGE_MS;
+  botCallQueue = botCallQueue.filter(item => item.enqueuedAt >= cutoff);
+}
+
+function isAlreadyQueued(contractAddress) {
+  return botCallQueue.some(x => x.contractAddress === contractAddress);
+}
+
+function enqueueBotCallCandidate({ contractAddress, profileName, rankScore }) {
+  if (!contractAddress) return false;
+
+  cleanupStaleBotCallQueue();
+
+  if (isAlreadyQueued(contractAddress)) return false;
+
+  botCallQueue.push({
+    contractAddress,
+    profileName,
+    rankScore: Number(rankScore || 0),
+    enqueuedAt: now()
+  });
+
+  // strongest first
+  botCallQueue.sort((a, b) => Number(b.rankScore || 0) - Number(a.rankScore || 0));
+  return true;
+}
+
+async function revalidateQueuedCandidate(contractAddress, profileName) {
+  // Smallest safe validation path: reuse existing real scan + existing filters.
+  const scan = await generateRealScan(contractAddress);
+  if (!scan || !scan.contractAddress) return null;
+
+  const sanityReject = getSanityRejectReason(scan);
+  if (sanityReject) return null;
+
+  if (autoCallConfig.alerts.skipUnknownTokens) {
+    const namingReject = getNamingRejectReason(scan);
+    if (namingReject) return null;
+  }
+
+  const profileReject = getProfileRejectReason(scan, profileName);
+  if (profileReject) return null;
+
+  const globalReject = getGlobalRejectReason(scan, profileName);
+  if (globalReject) return null;
+
+  const momentumReject = getMomentumRejectReason(scan);
+  if (momentumReject) return null;
+
+  return scan;
+}
+
+async function postBotCallScan(channel, scan, profileName) {
+  enqueueAlert(async () => {
+    const embed = createAutoCallEmbed(scan, profileName);
+    const sentMessage = await channel.send({ embeds: [embed] });
+
+    const tracked = trackAutoCall(scan);
+    if (tracked && sentMessage?.id) {
+      updateTrackedCallData(scan.contractAddress, {
+        discordMessageId: sentMessage.id,
+        discordChannelId: sentMessage.channel?.id || null
+      });
+    }
+
+    markCalled(scan.contractAddress);
+    callsThisHour += 1;
+    lastBotCallPostedAt = now();
+
+    console.log(
+      `[AutoCall] Posted ${scan.tokenName || scan.contractAddress} (${profileName})`
+    );
+  }, {
+    type: 'auto_call',
+    contractAddress: scan.contractAddress,
+    key: `auto_call_${scan.contractAddress}`
+  });
+}
+
+async function processBotCallQueue(channel) {
+  if (!channel) return;
+  if (isPostingQueued) return;
+
+  cleanupStaleBotCallQueue();
+  if (botCallQueue.length === 0) return;
+  if (isBotCallCooldownActive()) return;
+
+  isPostingQueued = true;
+  try {
+    // Process at most one per cooldown window
+    while (botCallQueue.length > 0) {
+      const next = botCallQueue.shift();
+      if (!next?.contractAddress) continue;
+
+      if (isDuplicate(next.contractAddress)) continue;
+      if (callsThisHour >= (autoCallConfig.profiles[next.profileName]?.maxCallsPerHour ?? 0)) return;
+
+      let scan;
+      try {
+        scan = await revalidateQueuedCandidate(next.contractAddress, next.profileName);
+      } catch (err) {
+        logDebug(`Revalidate failed for ${next.contractAddress}: ${err.message}`);
+        scan = null;
+      }
+
+      if (!scan) {
+        continue;
+      }
+
+      await postBotCallScan(channel, scan, next.profileName);
+      return;
+    }
+  } finally {
+    isPostingQueued = false;
+  }
+}
+
 /**
  * =========================
  * 🚨 SANITY FILTERS
@@ -75,6 +212,13 @@ const live = loadScannerSettings() || {};
 
 const cfg = {
   ...baseCfg,
+  minAgeMinutes: Number(live.minAgeMinutes ?? baseCfg.minAgeMinutes ?? 0),
+  requireMigrated: (live.requireMigrated ?? baseCfg.requireMigrated) === true,
+  minVolume5m: Number(live.minVolume5m ?? baseCfg.minVolume5m ?? 0),
+  minVolume24h: Number(live.minVolume24h ?? baseCfg.minVolume24h ?? 0),
+  minTrades24h: Number(live.minTrades24h ?? baseCfg.minTrades24h ?? 0),
+  minBuys24h: Number(live.minBuys24h ?? baseCfg.minBuys24h ?? 0),
+  minHolders: Number(live.minHolders ?? baseCfg.minHolders ?? 0),
   minMeaningfulMarketCap: Number(
     live.sanityMinMeaningfulMarketCap ?? baseCfg.minMeaningfulMarketCap ?? 0
   ),
@@ -102,8 +246,25 @@ const cfg = {
   const ratio5 = Number(scan.buySellRatio5m || 0);
   const ratio1 = Number(scan.buySellRatio1h || 0);
   const age = Number(scan.ageMinutes || 0);
+  const vol24 = Number(scan.volume24h || 0);
+  const trades24h = Number(scan.trades24h || 0);
+  const buys24h = Number(scan.buys24h || 0);
+  const holders = scan.holders === null || scan.holders === undefined ? null : Number(scan.holders);
 
   if (!mc || !liq) return 'sanity_missing_core';
+
+  if (cfg.minAgeMinutes > 0 && age > 0 && age < cfg.minAgeMinutes) return 'sanity_too_young';
+  if (cfg.requireMigrated && scan.migrated !== true) return 'sanity_not_migrated';
+
+  if (cfg.minVolume5m > 0 && vol5 < cfg.minVolume5m) return 'sanity_low_vol5';
+  if (cfg.minVolume24h > 0 && vol24 > 0 && vol24 < cfg.minVolume24h) return 'sanity_low_vol24h';
+
+  if (cfg.minTrades24h > 0 && trades24h > 0 && trades24h < cfg.minTrades24h) return 'sanity_low_trades24h';
+  if (cfg.minBuys24h > 0 && buys24h > 0 && buys24h < cfg.minBuys24h) return 'sanity_low_buys24h';
+
+  if (cfg.minHolders > 0 && holders !== null && Number.isFinite(holders) && holders < cfg.minHolders) {
+    return 'sanity_low_holders';
+  }
 
   /**
    * =========================
@@ -156,11 +317,12 @@ const cfg = {
 function getNamingRejectReason(scan) {
   const cfg = autoCallConfig.naming;
 
-  const name = String(scan.tokenName || '').toLowerCase().trim();
-  const ticker = String(scan.ticker || '').toLowerCase().trim();
+  const name = String(scan.tokenName || '').toLowerCase().trim().replace(/^\$+/, '');
+  const ticker = String(scan.ticker || '').toLowerCase().trim().replace(/^\$+/, '');
 
   if (!name || !ticker) return 'naming_missing';
 
+  if (/^\?+$/.test(name) || /^\?+$/.test(ticker)) return 'naming_blocked_ticker';
   if (cfg.blockedTokenNames.includes(name)) return 'naming_blocked_name';
   if (cfg.blockedTickers.includes(ticker)) return 'naming_blocked_ticker';
 
@@ -428,35 +590,6 @@ if (selected.length === 0 && fallbackCandidates.length > 0) {
   );
 }
 
-  for (const item of selected) {
-    const scan = item.scan;
-
-    enqueueAlert(async () => {
-      const embed = createAutoCallEmbed(scan, profileName);
-
-      const sentMessage = await channel.send({ embeds: [embed] });
-
-      const tracked = trackAutoCall(scan);
-
-      if (tracked && sentMessage?.id) {
-        updateTrackedCallData(scan.contractAddress, {
-          discordMessageId: sentMessage.id
-        });
-      }
-
-      markCalled(scan.contractAddress);
-      callsThisHour += 1;
-
-      console.log(
-        `[AutoCall] Posted ${scan.tokenName || scan.contractAddress} (${profileName})`
-      );
-    }, {
-      type: 'auto_call',
-      contractAddress: scan.contractAddress,
-      key: `auto_call_${scan.contractAddress}`
-    });
-  }
-
   if (debugEnabled()) {
     console.log('[AutoCall DEBUG] Reject counts:', rejectCounts);
     console.log('[AutoCall DEBUG] Selected:', selected.map(x => ({
@@ -466,6 +599,33 @@ if (selected.length === 0 && fallbackCandidates.length > 0) {
       rankScore: x.rankScore
     })));
   }
+
+  // V1 pacing: max 1 immediate post per cycle; queue the rest.
+  if (selected.length > 0) {
+    const immediate = selected[0];
+    const rest = selected.slice(1);
+
+    for (const item of rest) {
+      enqueueBotCallCandidate({
+        contractAddress: item.scan.contractAddress,
+        profileName,
+        rankScore: item.rankScore
+      });
+    }
+
+    if (!isBotCallCooldownActive()) {
+      await postBotCallScan(channel, immediate.scan, profileName);
+    } else {
+      enqueueBotCallCandidate({
+        contractAddress: immediate.scan.contractAddress,
+        profileName,
+        rankScore: immediate.rankScore
+      });
+    }
+  }
+
+  // Try to post one queued candidate if cooldown has expired.
+  await processBotCallQueue(channel);
 }
 
 /**
@@ -495,6 +655,13 @@ function startAutoCallLoop(channel) {
       console.error('[AutoCall] Cycle failed:', err.message);
     });
   }, intervalMs);
+
+  // queue processing tick (keeps pacing responsive even between cycles)
+  queueIntervalHandle = setInterval(() => {
+    processBotCallQueue(channel).catch(err => {
+      console.error('[AutoCall] Queue processing failed:', err.message);
+    });
+  }, 5000);
 }
 
 function stopAutoCallLoop() {
@@ -506,6 +673,11 @@ function stopAutoCallLoop() {
   if (intervalHandle) {
     clearInterval(intervalHandle);
     intervalHandle = null;
+  }
+
+  if (queueIntervalHandle) {
+    clearInterval(queueIntervalHandle);
+    queueIntervalHandle = null;
   }
 
   isRunning = false;

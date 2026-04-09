@@ -384,9 +384,21 @@ function buildScanObject(base) {
     liquidity: toNumber(base.liquidity),
     volume5m: toNumber(base.volume5m),
     volume1h: toNumber(base.volume1h),
+    volume24h: toNumber(base.volume24h),
     ageMinutes: Math.round(toNumber(base.ageMinutes)),
 
     priceChange5m: toNumber(base.priceChange5m),
+
+    trades5m: Math.round(toNumber(base.trades5m)),
+    trades1h: Math.round(toNumber(base.trades1h)),
+    trades24h: Math.round(toNumber(base.trades24h)),
+
+    buys5m: Math.round(toNumber(base.buys5m)),
+    sells5m: Math.round(toNumber(base.sells5m)),
+    buys1h: Math.round(toNumber(base.buys1h)),
+    sells1h: Math.round(toNumber(base.sells1h)),
+    buys24h: Math.round(toNumber(base.buys24h)),
+    sells24h: Math.round(toNumber(base.sells24h)),
 
     buySellRatio5m: Number(toNumber(base.buySellRatio5m).toFixed(2)),
     buySellRatio1h: Number(toNumber(base.buySellRatio1h).toFixed(2)),
@@ -533,13 +545,25 @@ async function generateRealScan(contractAddress, geckoCandidate = null) {
   const liquidity = toNumber(realData.market?.liquidity);
   const volume5m = toNumber(realData.market?.volume5m);
   const volume1h = toNumber(realData.market?.volume1h);
+  const volume24h = toNumber(realData.market?.volume24h);
   const ageMinutes = toNumber(realData.market?.ageMinutes);
   const priceChange5m = toNumber(realData.market?.priceChange5m);
+
+  const trades5m = toNumber(realData.market?.trades5m);
+  const trades1h = toNumber(realData.market?.trades1h);
+  const trades24h = toNumber(realData.market?.trades24h);
 
   let buySellRatio5m = toNumber(realData.tradeSignals?.buySellRatio5m);
   let buySellRatio1h = toNumber(realData.tradeSignals?.buySellRatio1h);
   let tradePressure = cleanString(realData.tradeSignals?.tradePressure);
   let volumeTrend = cleanString(realData.tradeSignals?.volumeTrend);
+
+  const buys5m = toNumber(realData.tradeSignals?.buys5m);
+  const sells5m = toNumber(realData.tradeSignals?.sells5m);
+  const buys1h = toNumber(realData.tradeSignals?.buys1h);
+  const sells1h = toNumber(realData.tradeSignals?.sells1h);
+  const buys24h = toNumber(realData.tradeSignals?.buys24h);
+  const sells24h = toNumber(realData.tradeSignals?.sells24h);
 
   if (!buySellRatio5m || buySellRatio5m <= 0) {
     buySellRatio5m = deriveBuySellRatio(volume5m, volume1h, priceChange5m);
@@ -570,8 +594,20 @@ async function generateRealScan(contractAddress, geckoCandidate = null) {
     liquidity,
     volume5m,
     volume1h,
+    volume24h,
     ageMinutes,
     priceChange5m,
+
+    trades5m,
+    trades1h,
+    trades24h,
+
+    buys5m,
+    sells5m,
+    buys1h,
+    sells1h,
+    buys24h,
+    sells24h,
 
     buySellRatio5m,
     buySellRatio1h,

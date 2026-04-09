@@ -48,7 +48,9 @@ function getApprovalMilestoneLadder() {
   }
 
   const filtered = baseLadder.filter(x => x >= trigger);
-  return filtered.length ? filtered : [trigger];
+  const rungs = filtered.length ? filtered : [trigger];
+  // Ensure approvalTriggerX is always an actual ladder rung (preset may skip it, e.g. trigger 4 vs first preset rung 5).
+  return normalizeLadderRungs([...rungs, trigger]);
 }
 
 function getHighestEligibleApprovalMilestone(currentX) {

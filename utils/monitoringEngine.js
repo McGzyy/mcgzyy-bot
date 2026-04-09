@@ -38,9 +38,16 @@ const DISCORD_MILESTONE_LEVELS = [
   { key: '2x', x: 2, threshold: 100 },
   { key: '4x', x: 4, threshold: 300 },
   { key: '8x', x: 8, threshold: 700 },
-  { key: '16x', x: 16, threshold: 1500 },
-  { key: '32x', x: 32, threshold: 3100 },
-  { key: '64x', x: 64, threshold: 6300 },
+  { key: '10x', x: 10, threshold: 900 },
+  { key: '12x', x: 12, threshold: 1100 },
+  { key: '15x', x: 15, threshold: 1400 },
+  { key: '20x', x: 20, threshold: 1900 },
+  { key: '25x', x: 25, threshold: 2400 },
+  { key: '30x', x: 30, threshold: 2900 },
+  { key: '35x', x: 35, threshold: 3400 },
+  { key: '40x', x: 40, threshold: 3900 },
+  { key: '50x', x: 50, threshold: 4900 },
+  { key: '60x', x: 60, threshold: 5900 },
   { key: '100x', x: 100, threshold: 9900 }
 ];
 
@@ -243,11 +250,12 @@ async function maybePublishApprovedMilestoneToX(trackedCall) {
  * DISCORD MILESTONES
  * =========================
  */
-function getNewMilestones(perf, milestonesHit = []) {
-  if (perf === null) return [];
+function getNewMilestones(currentX, milestonesHit = []) {
+  const x = Number(currentX);
+  if (!Number.isFinite(x) || x <= 0) return [];
 
   return DISCORD_MILESTONE_LEVELS.filter(m =>
-    perf >= m.threshold && !milestonesHit.includes(m.key)
+    x >= Number(m.x) && !milestonesHit.includes(m.key)
   );
 }
 
@@ -512,8 +520,14 @@ function queueApprovalReview(channel, trackedCall, scan, triggerX) {
  * REPLY TARGET HELPER
  * =========================
  */
-function buildReplyOptions(coin) {
+function buildReplyOptions(coin, channel) {
   if (!coin?.discordMessageId) return {};
+
+  // Only reply when we can safely target the original message in THIS channel.
+  // If we don't have a channel id, fall back to current behavior (reply in same channel).
+  if (coin.discordChannelId && channel?.id && coin.discordChannelId !== channel.id) {
+    return {};
+  }
 
   return {
     reply: {
@@ -531,7 +545,7 @@ function buildReplyOptions(coin) {
 
 function queueMilestone(channel, coin, scan, key, perf) {
   enqueueAlert(async () => {
-    const replyOptions = buildReplyOptions(coin);
+    const replyOptions = buildReplyOptions(coin, channel);
 
     await channel.send({
       embeds: [createMilestoneEmbed(coin, scan, key, perf)],
@@ -546,7 +560,7 @@ function queueMilestone(channel, coin, scan, key, perf) {
 
 function queueDump(channel, coin, scan, key, drawdown) {
   enqueueAlert(async () => {
-    const replyOptions = buildReplyOptions(coin);
+    const replyOptions = buildReplyOptions(coin, channel);
 
     await channel.send({
       embeds: [createDumpEmbed(coin, scan, key, drawdown)],
@@ -567,10 +581,15 @@ function queueDump(channel, coin, scan, key, drawdown) {
 
 async function checkTrackedCoins(channel) {
   const tracked = getAllTrackedCalls();
+  const activeCoins = tracked.filter(
+    coin => coin.lifecycleStatus !== 'archived' && coin.isActive !== false
+  );
 
-  console.log(`[Monitor] Checking ${tracked.length} coins`);
+  console.log(
+    `[Monitor] Checking ${activeCoins.length} active coins (${tracked.length} total tracked)`
+  );
 
-  for (const coin of tracked) {
+  for (const coin of activeCoins) {
     try {
       const scan = await generateRealScan(coin.contractAddress);
 
@@ -642,13 +661,17 @@ if (lifecycleStatus === 'archived') {
         `[Monitor] ${coin.tokenName} → ${perf?.toFixed(1) ?? 'N/A'}% (${formatX(currentX)})`
       );
 
-      const milestonesHit = Array.isArray(coin.milestonesHit) ? [...coin.milestonesHit] : [];
+      // Hardening: use latest persisted milestone state to reduce accidental re-sends.
+      const persisted = getTrackedCall(coin.contractAddress);
+      const milestonesHit = Array.isArray(persisted?.milestonesHit)
+        ? [...persisted.milestonesHit]
+        : (Array.isArray(coin.milestonesHit) ? [...coin.milestonesHit] : []);
       const dumpHits = Array.isArray(coin.dumpAlertsHit) ? [...coin.dumpAlertsHit] : [];
 
       /**
        * MILESTONES
        */
-      const newMilestones = getNewMilestones(perf, milestonesHit);
+      const newMilestones = getNewMilestones(currentX, milestonesHit);
 
       for (const m of newMilestones) {
         queueMilestone(channel, coin, scan, m.key, perf);

@@ -14,7 +14,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:07:28.763Z",
-    "lastUpdatedAt": "2026-04-09T03:29:08.648Z",
+    "lastUpdatedAt": "2026-04-09T03:59:21.996Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -60,7 +60,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:07:34.207Z",
-    "lastUpdatedAt": "2026-04-09T03:29:08.807Z",
+    "lastUpdatedAt": "2026-04-09T03:59:22.216Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -90,7 +90,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "The Neurodivergent Trader",
@@ -107,7 +107,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:09:28.586Z",
-    "lastUpdatedAt": "2026-04-09T03:29:08.965Z",
+    "lastUpdatedAt": "2026-04-09T03:59:22.540Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -137,7 +137,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Just a Chill Boob",
@@ -154,7 +154,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:10:30.344Z",
-    "lastUpdatedAt": "2026-04-09T03:29:09.155Z",
+    "lastUpdatedAt": "2026-04-09T03:59:22.729Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -184,7 +184,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Smart Buy",
@@ -201,7 +201,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:11:35.527Z",
-    "lastUpdatedAt": "2026-04-09T03:29:09.295Z",
+    "lastUpdatedAt": "2026-04-09T03:59:22.927Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -231,7 +231,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Prometheus Pantheon",
@@ -248,7 +248,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:13:35.260Z",
-    "lastUpdatedAt": "2026-04-09T03:29:09.436Z",
+    "lastUpdatedAt": "2026-04-09T03:59:23.087Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -294,7 +294,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:23:28.410Z",
-    "lastUpdatedAt": "2026-04-09T03:29:09.574Z",
+    "lastUpdatedAt": "2026-04-09T03:59:23.258Z",
     "milestonesHit": [
       "2x",
       "4x"
@@ -345,7 +345,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:38:32.212Z",
-    "lastUpdatedAt": "2026-04-09T03:29:09.757Z",
+    "lastUpdatedAt": "2026-04-09T03:59:23.541Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -372,7 +372,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Ahh Turtle",
@@ -389,7 +389,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:40:32.844Z",
-    "lastUpdatedAt": "2026-04-09T03:29:10.010Z",
+    "lastUpdatedAt": "2026-04-09T03:59:23.751Z",
     "milestonesHit": [
       "2x",
       "4x"
@@ -424,7 +424,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Paw Empire",
@@ -441,7 +441,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:43:58.887Z",
-    "lastUpdatedAt": "2026-04-09T03:29:10.177Z",
+    "lastUpdatedAt": "2026-04-09T03:59:24.052Z",
     "milestonesHit": [
       "2x",
       "4x",
@@ -495,7 +495,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:47:56.248Z",
-    "lastUpdatedAt": "2026-04-09T03:29:10.354Z",
+    "lastUpdatedAt": "2026-04-09T03:59:24.232Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -525,7 +525,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Ahh Turtle",
@@ -542,7 +542,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T02:49:59.858Z",
-    "lastUpdatedAt": "2026-04-09T03:29:10.518Z",
+    "lastUpdatedAt": "2026-04-09T03:59:24.400Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -588,7 +588,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-30T03:19:10.625Z",
-    "lastUpdatedAt": "2026-04-09T03:29:10.703Z",
+    "lastUpdatedAt": "2026-04-09T03:59:24.590Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -630,7 +630,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "BearMeat",
@@ -647,7 +647,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T03:22:03.618Z",
-    "lastUpdatedAt": "2026-04-09T03:29:11.307Z",
+    "lastUpdatedAt": "2026-04-09T03:59:24.822Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -677,7 +677,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "trader",
@@ -694,7 +694,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-30T03:31:12.005Z",
-    "lastUpdatedAt": "2026-04-09T03:29:11.492Z",
+    "lastUpdatedAt": "2026-04-09T03:59:25.025Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -736,7 +736,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Nvidia Mini",
@@ -753,7 +753,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-30T03:33:30.995Z",
-    "lastUpdatedAt": "2026-04-09T03:29:11.623Z",
+    "lastUpdatedAt": "2026-04-09T03:59:25.170Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -795,7 +795,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "7 DEADLY MEW",
@@ -812,7 +812,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T04:14:13.413Z",
-    "lastUpdatedAt": "2026-04-09T03:29:11.878Z",
+    "lastUpdatedAt": "2026-04-09T03:59:25.355Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -842,7 +842,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "AI Fish Dev",
@@ -859,7 +859,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-30T04:14:38.783Z",
-    "lastUpdatedAt": "2026-04-09T03:29:12.047Z",
+    "lastUpdatedAt": "2026-04-09T03:59:25.569Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -901,7 +901,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "President of The Untied States",
@@ -918,7 +918,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-30T05:11:48.168Z",
-    "lastUpdatedAt": "2026-04-09T03:29:12.252Z",
+    "lastUpdatedAt": "2026-04-09T03:59:25.803Z",
     "milestonesHit": [
       "2x"
     ],
@@ -968,7 +968,7 @@
     "ticker": "GIKO",
     "contractAddress": "BF524vUqHH93rM8qHYk6shpinwHSEqueFg9udtFpbguS",
     "firstCalledMarketCap": 44254,
-    "latestMarketCap": 1923,
+    "latestMarketCap": 1889,
     "entryScore": 83,
     "grade": "B",
     "alertType": "🔥 Strong Setup",
@@ -978,7 +978,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T05:45:58.747Z",
-    "lastUpdatedAt": "2026-04-09T03:29:12.377Z",
+    "lastUpdatedAt": "2026-04-09T03:59:25.972Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -1024,7 +1024,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T05:56:37.841Z",
-    "lastUpdatedAt": "2026-04-09T03:29:12.542Z",
+    "lastUpdatedAt": "2026-04-09T03:59:26.178Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -1070,7 +1070,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T05:59:37.364Z",
-    "lastUpdatedAt": "2026-04-09T03:29:12.737Z",
+    "lastUpdatedAt": "2026-04-09T03:59:26.401Z",
     "milestonesHit": [
       "2x",
       "4x"
@@ -1102,7 +1102,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "xAIHuman",
@@ -1119,7 +1119,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T06:11:37.227Z",
-    "lastUpdatedAt": "2026-04-09T03:29:12.937Z",
+    "lastUpdatedAt": "2026-04-09T03:59:26.613Z",
     "milestonesHit": [
       "2x"
     ],
@@ -1148,7 +1148,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Manko",
@@ -1165,7 +1165,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T06:21:07.843Z",
-    "lastUpdatedAt": "2026-04-09T03:29:13.153Z",
+    "lastUpdatedAt": "2026-04-09T03:59:26.821Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -1192,7 +1192,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "AI Fruit Gore",
@@ -1209,7 +1209,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T06:25:07.679Z",
-    "lastUpdatedAt": "2026-04-09T03:29:13.272Z",
+    "lastUpdatedAt": "2026-04-09T03:59:26.952Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -1255,7 +1255,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T06:27:07.734Z",
-    "lastUpdatedAt": "2026-04-09T03:29:13.479Z",
+    "lastUpdatedAt": "2026-04-09T03:59:27.123Z",
     "milestonesHit": [
       "2x",
       "4x"
@@ -1290,7 +1290,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "It’s just getting started",
@@ -1307,7 +1307,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T06:27:13.203Z",
-    "lastUpdatedAt": "2026-04-09T03:29:13.630Z",
+    "lastUpdatedAt": "2026-04-09T03:59:27.350Z",
     "milestonesHit": [
       "2x"
     ],
@@ -1336,7 +1336,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "meme king",
@@ -1353,7 +1353,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T06:29:07.649Z",
-    "lastUpdatedAt": "2026-04-09T03:29:13.797Z",
+    "lastUpdatedAt": "2026-04-09T03:59:27.636Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -1380,7 +1380,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "The Stranded Whale",
@@ -1397,7 +1397,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T06:39:54.019Z",
-    "lastUpdatedAt": "2026-04-09T03:29:13.982Z",
+    "lastUpdatedAt": "2026-04-09T03:59:27.966Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -1427,7 +1427,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "The Stranded Whale",
@@ -1444,7 +1444,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T06:51:07.502Z",
-    "lastUpdatedAt": "2026-04-09T03:29:14.166Z",
+    "lastUpdatedAt": "2026-04-09T03:59:28.160Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -1471,7 +1471,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Elon Coin",
@@ -1488,7 +1488,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T07:02:08.076Z",
-    "lastUpdatedAt": "2026-04-09T03:29:14.389Z",
+    "lastUpdatedAt": "2026-04-09T03:59:28.468Z",
     "milestonesHit": [
       "2x",
       "4x",
@@ -1524,7 +1524,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "United States of Japan",
@@ -1541,7 +1541,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T07:24:08.421Z",
-    "lastUpdatedAt": "2026-04-09T03:29:14.557Z",
+    "lastUpdatedAt": "2026-04-09T03:59:29.004Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -1568,7 +1568,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Suki Coin",
@@ -1585,7 +1585,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T07:26:24.574Z",
-    "lastUpdatedAt": "2026-04-09T03:29:14.751Z",
+    "lastUpdatedAt": "2026-04-09T03:59:29.383Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -1612,7 +1612,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "United States of Japan",
@@ -1629,7 +1629,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T07:26:29.967Z",
-    "lastUpdatedAt": "2026-04-09T03:29:14.960Z",
+    "lastUpdatedAt": "2026-04-09T03:59:29.763Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%"
@@ -1658,7 +1658,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Memeslop Monday",
@@ -1675,7 +1675,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T07:32:35.966Z",
-    "lastUpdatedAt": "2026-04-09T03:29:15.141Z",
+    "lastUpdatedAt": "2026-04-09T03:59:31.343Z",
     "milestonesHit": [
       "2x",
       "4x"
@@ -1709,7 +1709,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "AI Cock",
@@ -1726,7 +1726,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T08:37:36.066Z",
-    "lastUpdatedAt": "2026-04-09T03:29:15.327Z",
+    "lastUpdatedAt": "2026-04-09T03:59:32.579Z",
     "milestonesHit": [
       "2x"
     ],
@@ -1758,7 +1758,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Anime Mode",
@@ -1775,7 +1775,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T08:59:32.399Z",
-    "lastUpdatedAt": "2026-04-09T03:29:15.494Z",
+    "lastUpdatedAt": "2026-04-09T03:59:32.747Z",
     "milestonesHit": [
       "2x",
       "4x"
@@ -1826,7 +1826,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:00:29.526Z",
-    "lastUpdatedAt": "2026-04-09T03:29:15.668Z",
+    "lastUpdatedAt": "2026-04-09T03:59:32.980Z",
     "milestonesHit": [
       "2x",
       "4x",
@@ -1867,7 +1867,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "SUKI",
@@ -1884,7 +1884,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:01:45.987Z",
-    "lastUpdatedAt": "2026-04-09T03:29:15.828Z",
+    "lastUpdatedAt": "2026-04-09T03:59:33.181Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -1914,7 +1914,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Anime Mode",
@@ -1931,7 +1931,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:17:44.602Z",
-    "lastUpdatedAt": "2026-04-09T03:29:15.996Z",
+    "lastUpdatedAt": "2026-04-09T03:59:33.410Z",
     "milestonesHit": [
       "2x",
       "4x",
@@ -1969,7 +1969,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "SUKI",
@@ -1986,7 +1986,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:27:48.088Z",
-    "lastUpdatedAt": "2026-04-09T03:29:16.157Z",
+    "lastUpdatedAt": "2026-04-09T03:59:33.600Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -2016,7 +2016,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "The Stranded Whale",
@@ -2033,7 +2033,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:28:54.416Z",
-    "lastUpdatedAt": "2026-04-09T03:29:16.348Z",
+    "lastUpdatedAt": "2026-04-09T03:59:33.874Z",
     "milestonesHit": [
       "2x"
     ],
@@ -2081,7 +2081,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:37:50.914Z",
-    "lastUpdatedAt": "2026-04-09T03:29:16.490Z",
+    "lastUpdatedAt": "2026-04-09T03:59:34.087Z",
     "milestonesHit": [
       "2x"
     ],
@@ -2129,7 +2129,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:37:58.962Z",
-    "lastUpdatedAt": "2026-04-09T03:29:16.657Z",
+    "lastUpdatedAt": "2026-04-09T03:59:34.406Z",
     "milestonesHit": [
       "2x",
       "4x"
@@ -2165,7 +2165,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "ビットガールズ",
@@ -2182,7 +2182,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:39:48.805Z",
-    "lastUpdatedAt": "2026-04-09T03:29:16.821Z",
+    "lastUpdatedAt": "2026-04-09T03:59:34.598Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -2209,7 +2209,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Plateau",
@@ -2226,7 +2226,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:42:43.315Z",
-    "lastUpdatedAt": "2026-04-09T03:29:17.020Z",
+    "lastUpdatedAt": "2026-04-09T03:59:34.926Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -2256,7 +2256,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "SUKI",
@@ -2273,7 +2273,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:42:48.762Z",
-    "lastUpdatedAt": "2026-04-09T03:29:17.354Z",
+    "lastUpdatedAt": "2026-04-09T03:59:35.176Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -2303,7 +2303,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Anime BTC",
@@ -2320,7 +2320,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T09:58:21.742Z",
-    "lastUpdatedAt": "2026-04-09T03:29:17.505Z",
+    "lastUpdatedAt": "2026-04-09T03:59:35.351Z",
     "milestonesHit": [
       "2x"
     ],
@@ -2352,7 +2352,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "AI WON",
@@ -2369,7 +2369,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T10:21:57.491Z",
-    "lastUpdatedAt": "2026-04-09T03:29:17.708Z",
+    "lastUpdatedAt": "2026-04-09T03:59:35.625Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -2399,14 +2399,14 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "RAGE",
     "ticker": "RAGE",
     "contractAddress": "2vtuXdpMKHx8CsdeU1y2rr3tfyhPD51B2t5WTbUUpump",
     "firstCalledMarketCap": 48710,
-    "latestMarketCap": 18547,
+    "latestMarketCap": 19404,
     "entryScore": 78,
     "grade": "B",
     "alertType": "⚡ Moderate Setup",
@@ -2416,7 +2416,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T10:30:40.415Z",
-    "lastUpdatedAt": "2026-04-09T03:29:17.873Z",
+    "lastUpdatedAt": "2026-04-09T03:59:35.687Z",
     "milestonesHit": [
       "2x",
       "4x",
@@ -2462,7 +2462,7 @@
     "ticker": "ポーズ",
     "contractAddress": "85W89pranYtnGjWMg97cu5neScWXzhN1TfbhPrRzpump",
     "firstCalledMarketCap": 15330.06,
-    "latestMarketCap": 3232,
+    "latestMarketCap": 3214,
     "entryScore": 91,
     "grade": "A",
     "alertType": "🔥 Strong Setup",
@@ -2472,7 +2472,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T10:38:38.696Z",
-    "lastUpdatedAt": "2026-04-09T03:29:18.031Z",
+    "lastUpdatedAt": "2026-04-09T03:59:36.142Z",
     "milestonesHit": [
       "2x"
     ],
@@ -2520,7 +2520,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T10:38:44.220Z",
-    "lastUpdatedAt": "2026-04-09T03:29:18.257Z",
+    "lastUpdatedAt": "2026-04-09T03:59:36.439Z",
     "milestonesHit": [
       "2x"
     ],
@@ -2552,7 +2552,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Pro-Dog Movement",
@@ -2569,7 +2569,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T19:44:52.051Z",
-    "lastUpdatedAt": "2026-04-09T03:29:18.438Z",
+    "lastUpdatedAt": "2026-04-09T03:59:36.591Z",
     "milestonesHit": [
       "2x"
     ],
@@ -2617,7 +2617,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T19:49:48.998Z",
-    "lastUpdatedAt": "2026-04-09T03:29:18.733Z",
+    "lastUpdatedAt": "2026-04-09T03:59:36.724Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -2647,7 +2647,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "LOGOFF",
@@ -2664,7 +2664,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T20:06:47.228Z",
-    "lastUpdatedAt": "2026-04-09T03:29:18.914Z",
+    "lastUpdatedAt": "2026-04-09T03:59:36.924Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -2694,7 +2694,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "KitKat",
@@ -2711,7 +2711,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-30T20:07:50.768Z",
-    "lastUpdatedAt": "2026-04-09T03:29:19.103Z",
+    "lastUpdatedAt": "2026-04-09T03:59:37.179Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -2741,7 +2741,7 @@
     "xLastPostedAt": null,
     "callSourceType": "bot_call",
     "wasWatched": false,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "cyberdog",
@@ -2758,7 +2758,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-31T03:23:24.104Z",
-    "lastUpdatedAt": "2026-04-09T03:29:19.319Z",
+    "lastUpdatedAt": "2026-04-09T03:59:37.487Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -2800,7 +2800,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "MEME",
@@ -2817,7 +2817,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-31T03:48:00.368Z",
-    "lastUpdatedAt": "2026-04-09T03:29:19.528Z",
+    "lastUpdatedAt": "2026-04-09T03:59:37.776Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -2859,7 +2859,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "抖音爆火歪鼻小猫",
@@ -2876,7 +2876,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-31T03:48:32.443Z",
-    "lastUpdatedAt": "2026-04-09T03:29:19.723Z",
+    "lastUpdatedAt": "2026-04-09T03:59:38.101Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -2918,7 +2918,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Taro & Jiro",
@@ -2935,7 +2935,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-31T03:49:04.829Z",
-    "lastUpdatedAt": "2026-04-09T03:29:19.909Z",
+    "lastUpdatedAt": "2026-04-09T03:59:38.408Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -2977,7 +2977,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "マロン",
@@ -2994,7 +2994,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-31T03:50:10.034Z",
-    "lastUpdatedAt": "2026-04-09T03:29:20.076Z",
+    "lastUpdatedAt": "2026-04-09T03:59:38.719Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -3036,7 +3036,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "contractAddress": "5FTjho1tW63sQhaES2YAQ39PA6uCrPKrbHG3UVPGpump",
@@ -3048,7 +3048,7 @@
     "firstCallerDisplayName": null,
     "firstCallerPublicName": null,
     "firstCalledAt": "2026-03-31T03:59:14.444Z",
-    "lastUpdatedAt": "2026-04-09T03:29:20.256Z",
+    "lastUpdatedAt": "2026-04-09T03:59:38.939Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -3078,19 +3078,19 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "contractAddress": "7B6vb8LnJnJJfZP4dks2uGurcY5z39Ezd5jhX4Edpump",
     "firstCalledMarketCap": 9095.4,
-    "latestMarketCap": 6307,
+    "latestMarketCap": 6150,
     "firstCallerId": "732566370914664499",
     "firstCallerUsername": "mcgzyy",
     "firstCallerDiscordId": "732566370914664499",
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-31T04:27:43.886Z",
-    "lastUpdatedAt": "2026-04-09T03:29:20.414Z",
+    "lastUpdatedAt": "2026-04-09T03:59:39.205Z",
     "milestonesHit": [
       "2x",
       "4x"
@@ -3141,14 +3141,14 @@
   {
     "contractAddress": "4hcEYuhgESkmmKqVcM1JHNXjxZAvMcxat31FRTfwpump",
     "firstCalledMarketCap": 168997,
-    "latestMarketCap": 3890,
+    "latestMarketCap": 3889,
     "firstCallerId": null,
     "firstCallerUsername": null,
     "firstCallerDiscordId": null,
     "firstCallerDisplayName": null,
     "firstCallerPublicName": null,
     "firstCalledAt": "2026-03-31T04:28:25.477Z",
-    "lastUpdatedAt": "2026-04-09T03:29:20.566Z",
+    "lastUpdatedAt": "2026-04-09T03:59:39.516Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -3194,7 +3194,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T04:39:18.196Z",
-    "lastUpdatedAt": "2026-04-09T03:29:20.750Z",
+    "lastUpdatedAt": "2026-04-09T03:59:39.745Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -3224,7 +3224,7 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "まろん",
@@ -3241,7 +3241,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T04:43:18.077Z",
-    "lastUpdatedAt": "2026-04-09T03:29:20.923Z",
+    "lastUpdatedAt": "2026-04-09T03:59:39.939Z",
     "milestonesHit": [
       "2x"
     ],
@@ -3270,7 +3270,7 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Cryptococcosis Cat",
@@ -3287,7 +3287,7 @@
     "firstCallerDisplayName": null,
     "firstCallerPublicName": null,
     "firstCalledAt": "2026-03-31T06:43:58.594Z",
-    "lastUpdatedAt": "2026-04-09T03:29:21.084Z",
+    "lastUpdatedAt": "2026-04-09T03:59:40.135Z",
     "milestonesHit": [
       "2x",
       "4x",
@@ -3340,7 +3340,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-31T06:58:51.774Z",
-    "lastUpdatedAt": "2026-04-09T03:29:21.254Z",
+    "lastUpdatedAt": "2026-04-09T03:59:40.343Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%"
@@ -3397,7 +3397,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T07:01:51.276Z",
-    "lastUpdatedAt": "2026-04-09T03:29:21.429Z",
+    "lastUpdatedAt": "2026-04-09T03:59:40.552Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -3443,7 +3443,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-03-31T07:02:43.658Z",
-    "lastUpdatedAt": "2026-04-09T03:29:21.592Z",
+    "lastUpdatedAt": "2026-04-09T03:59:40.751Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%"
@@ -3500,7 +3500,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T07:07:52.467Z",
-    "lastUpdatedAt": "2026-04-09T03:29:21.748Z",
+    "lastUpdatedAt": "2026-04-09T03:59:41.000Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -3527,7 +3527,7 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Otter Wif Fish",
@@ -3544,7 +3544,7 @@
     "firstCallerDisplayName": null,
     "firstCallerPublicName": null,
     "firstCalledAt": "2026-03-31T07:12:02.048Z",
-    "lastUpdatedAt": "2026-04-09T03:29:21.936Z",
+    "lastUpdatedAt": "2026-04-09T03:59:41.259Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -3574,14 +3574,14 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Elan",
     "ticker": "Elan",
     "contractAddress": "2m8ts5Mhviqg9YgdngPxz2xwfhLRVgEMp6GBFERrpump",
     "firstCalledMarketCap": 38483,
-    "latestMarketCap": 9761,
+    "latestMarketCap": 9592,
     "entryScore": 96,
     "grade": "A",
     "alertType": "🔥 Strong Setup",
@@ -3591,7 +3591,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T07:41:51.712Z",
-    "lastUpdatedAt": "2026-04-09T03:29:22.032Z",
+    "lastUpdatedAt": "2026-04-09T03:59:41.408Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -3637,7 +3637,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T07:55:48.644Z",
-    "lastUpdatedAt": "2026-04-09T03:29:22.205Z",
+    "lastUpdatedAt": "2026-04-09T03:59:41.581Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -3667,7 +3667,7 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Winternitz Vault",
@@ -3684,7 +3684,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T07:59:47.991Z",
-    "lastUpdatedAt": "2026-04-09T03:29:22.324Z",
+    "lastUpdatedAt": "2026-04-09T03:59:41.778Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -3730,7 +3730,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T08:57:57.128Z",
-    "lastUpdatedAt": "2026-04-09T03:29:22.493Z",
+    "lastUpdatedAt": "2026-04-09T03:59:41.988Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -3757,7 +3757,7 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Starcloud",
@@ -3774,7 +3774,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T09:01:57.490Z",
-    "lastUpdatedAt": "2026-04-09T03:29:22.696Z",
+    "lastUpdatedAt": "2026-04-09T03:59:42.305Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -3801,7 +3801,7 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Paint it a little higher",
@@ -3818,7 +3818,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-03-31T09:27:46.993Z",
-    "lastUpdatedAt": "2026-04-09T03:29:22.901Z",
+    "lastUpdatedAt": "2026-04-09T03:59:42.600Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -3845,7 +3845,7 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Quantum Doge",
@@ -3862,7 +3862,7 @@
     "firstCallerDisplayName": "McGzyy",
     "firstCallerPublicName": "@McGzyy",
     "firstCalledAt": "2026-04-01T01:49:04.431Z",
-    "lastUpdatedAt": "2026-04-09T03:29:23.072Z",
+    "lastUpdatedAt": "2026-04-09T03:59:42.913Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -3904,7 +3904,7 @@
         "resetReason": "Self-requested stats reset"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Blicky",
@@ -3921,7 +3921,7 @@
     "firstCallerDisplayName": null,
     "firstCallerPublicName": null,
     "firstCalledAt": "2026-04-01T01:52:04.056Z",
-    "lastUpdatedAt": "2026-04-09T03:29:23.227Z",
+    "lastUpdatedAt": "2026-04-09T03:59:43.216Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -3951,7 +3951,7 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Linus Coin",
@@ -3968,7 +3968,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T02:13:00.402Z",
-    "lastUpdatedAt": "2026-04-09T03:29:23.461Z",
+    "lastUpdatedAt": "2026-04-09T03:59:43.527Z",
     "milestonesHit": [
       "2x"
     ],
@@ -4009,7 +4009,7 @@
         "resetReason": "Bot stats reset by mcgzyy"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Official Blicky Coin",
@@ -4026,7 +4026,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T02:13:05.987Z",
-    "lastUpdatedAt": "2026-04-09T03:29:23.652Z",
+    "lastUpdatedAt": "2026-04-09T03:59:43.809Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -4084,7 +4084,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T04:59:16.584Z",
-    "lastUpdatedAt": "2026-04-09T03:29:23.850Z",
+    "lastUpdatedAt": "2026-04-09T03:59:44.037Z",
     "milestonesHit": [
       "2x"
     ],
@@ -4128,7 +4128,7 @@
         "resetReason": "Bot stats reset by mcgzyy"
       }
     ],
-    "failedScans": 7
+    "failedScans": 27
   },
   {
     "tokenName": "Karafuto Inu",
@@ -4145,7 +4145,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T05:30:27.593Z",
-    "lastUpdatedAt": "2026-04-09T03:29:24.003Z",
+    "lastUpdatedAt": "2026-04-09T03:58:41.762Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-55%",
@@ -4203,7 +4203,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T06:43:01.740Z",
-    "lastUpdatedAt": "2026-04-09T03:29:24.191Z",
+    "lastUpdatedAt": "2026-04-09T03:58:41.943Z",
     "milestonesHit": [
       "2x"
     ],
@@ -4244,7 +4244,7 @@
         "resetReason": "Bot stats reset by mcgzyy"
       }
     ],
-    "failedScans": 7
+    "failedScans": 26
   },
   {
     "tokenName": "Oh My codeX",
@@ -4261,7 +4261,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T07:27:14.148Z",
-    "lastUpdatedAt": "2026-04-09T03:29:24.392Z",
+    "lastUpdatedAt": "2026-04-09T03:58:42.095Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -4319,7 +4319,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T07:31:14.237Z",
-    "lastUpdatedAt": "2026-04-09T03:29:24.599Z",
+    "lastUpdatedAt": "2026-04-09T03:58:42.342Z",
     "milestonesHit": [
       "2x"
     ],
@@ -4350,7 +4350,7 @@
     "xOriginalPostId": null,
     "xLastReplyPostId": null,
     "xLastPostedAt": null,
-    "failedScans": 7
+    "failedScans": 26
   },
   {
     "tokenName": "STEEL BALL RUN",
@@ -4367,7 +4367,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T07:35:14.567Z",
-    "lastUpdatedAt": "2026-04-09T03:29:24.817Z",
+    "lastUpdatedAt": "2026-04-09T03:58:42.486Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%"
@@ -4412,7 +4412,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T07:43:15.081Z",
-    "lastUpdatedAt": "2026-04-09T03:29:25.034Z",
+    "lastUpdatedAt": "2026-04-09T03:58:42.794Z",
     "milestonesHit": [],
     "dumpAlertsHit": [
       "-35%",
@@ -4458,7 +4458,7 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-01T08:01:41.236Z",
-    "lastUpdatedAt": "2026-04-09T03:29:25.184Z",
+    "lastUpdatedAt": "2026-04-09T03:58:42.943Z",
     "milestonesHit": [],
     "dumpAlertsHit": [],
     "lifecycleStatus": "archived",
@@ -4491,7 +4491,7 @@
     "ticker": "TOLY",
     "contractAddress": "4aRnCGD6bnTfHrg9iqvbh3KQvXW3PKWkjYk2EmBa2FUR",
     "firstCalledMarketCap": 20157,
-    "latestMarketCap": 21981,
+    "latestMarketCap": 96798,
     "entryScore": 98,
     "grade": "A",
     "alertType": "🔥 Strong Setup",
@@ -4501,12 +4501,17 @@
     "firstCallerDisplayName": "McGBot",
     "firstCallerPublicName": "McGBot",
     "firstCalledAt": "2026-04-09T03:27:09.642Z",
-    "lastUpdatedAt": "2026-04-09T03:29:25.296Z",
-    "milestonesHit": [],
-    "dumpAlertsHit": [],
+    "lastUpdatedAt": "2026-04-09T03:58:43.072Z",
+    "milestonesHit": [
+      "2x",
+      "4x"
+    ],
+    "dumpAlertsHit": [
+      "-35%"
+    ],
     "lifecycleStatus": "active",
     "isActive": true,
-    "athMc": 21981,
+    "athMc": 96798,
     "discordMessageId": "1491640587894521938",
     "callSourceType": "bot_call",
     "wasWatched": false,

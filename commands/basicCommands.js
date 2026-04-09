@@ -2,7 +2,8 @@ const {
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  PermissionFlagsBits
 } = require('discord.js');
 
 const { generateFakeScan, generateBatchScans } = require('../utils/scannerEngine');
@@ -20,6 +21,21 @@ const {
   getCallerLeaderboard,
   getBotStats
 } = require('../utils/callerStatsService');
+
+function memberCanManageGuild(member) {
+  if (!member?.permissions) return false;
+  try {
+    return member.permissions.has(PermissionFlagsBits.ManageGuild);
+  } catch {
+    return false;
+  }
+}
+
+function isBotOwner(user) {
+  const expected = String(process.env.BOT_OWNER_ID ?? '').trim();
+  if (!expected) return false;
+  return String(user?.id) === expected;
+}
 
 function formatUsd(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
@@ -397,46 +413,67 @@ async function refreshTrackedCallLive(contractAddress) {
   }
 }
 
-function createCommandsEmbed() {
+function createCommandsEmbed(message) {
+  const canSeeModHelp = memberCanManageGuild(message.member) || isBotOwner(message.author);
+  const canSeeOwnerHelp = isBotOwner(message.author);
+
+  const fields = [
+    {
+      name: '🔍 Scan & call',
+      value:
+        '`!ping` / `!status` — bot checks\n' +
+        '`!ca [CA]` — compact intel (no tracking)\n' +
+        '`!scan` — random simulated scan\n' +
+        '`!scan [CA]` — simulated deep scan (no tracking)\n' +
+        '`!call [CA]` — call + track\n' +
+        '`!watch [CA]` — track, no caller credit\n' +
+        '`!testreal [CA]` — live provider test (embed)\n' +
+        '`!autoscantest` [profile] — simulated auto alerts',
+      inline: false
+    },
+    {
+      name: '📚 Tracking & stats',
+      value:
+        '`!tracked` / `!tracked [CA]` — summary or detail\n' +
+        '`!caller [name]` or `!caller @user` — caller stats\n' +
+        '`!callerboard` / `!botstats` — leaderboards & McGBot stats\n' +
+        '`!profile` / `!myprofile` — profile + X verify (use **#verify-x** too)\n' +
+        '`!credit` anonymous|discord|xtag — public credit label',
+      inline: false
+    },
+    {
+      name: '📌 More (see `!help`)',
+      value:
+        'Highlights: `!bestcall24h` … `!addlaunch` … `!devleaderboard`\n' +
+        '**Full list:** `!help` / `!commands` (plain text, chunked if long; sections match your permissions)',
+      inline: false
+    }
+  ];
+
+  if (canSeeModHelp) {
+    fields.push({
+      name: '🛡️ Manage Server (summary)',
+      value:
+        '`!scanner` / `!scanner on|off`, approvals, `!pendingapprovals`, `!verifyx @user`, `!resetmonitor`, … — see `!help`',
+      inline: false
+    });
+  }
+
+  if (canSeeOwnerHelp) {
+    fields.push({
+      name: '⚙️ Bot owner (summary)',
+      value: 'Scanner thresholds & sanity filters — see `!help` / `!commands`',
+      inline: false
+    });
+  }
+
   return new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('📘 Crypto Scanner Bot — Command cheat sheet')
     .setDescription(
-      'Short reference. **Full list:** type `!help` or `!commands` in Discord (plain-text list, includes mod/owner commands if you have access).'
+      'Short reference. **Authoritative list:** `!help` / `!commands` in Discord (plain text; mod/owner sections only if you have access).'
     )
-    .addFields(
-      {
-        name: '🔍 Scan & call',
-        value:
-          '`!ping` / `!status` — bot checks\n' +
-          '`!ca [CA]` — compact intel (no tracking)\n' +
-          '`!scan` — random simulated scan\n' +
-          '`!scan [CA]` — simulated deep scan (no tracking)\n' +
-          '`!call [CA]` — call + track\n' +
-          '`!watch [CA]` — track, no caller credit\n' +
-          '`!testreal [CA]` — live provider test (embed)\n' +
-          '`!autoscantest` [profile] — simulated auto alerts',
-        inline: false
-      },
-      {
-        name: '📚 Tracking & stats',
-        value:
-          '`!tracked` / `!tracked [CA]` — summary or detail\n' +
-          '`!caller [name]` or `!caller @user` — caller stats\n' +
-          '`!callerboard` / `!botstats` — leaderboards & McGBot stats\n' +
-          '`!profile` / `!myprofile` — profile + X verify (use **#verify-x** too)\n' +
-          '`!credit` anonymous|discord|xtag — public credit label',
-        inline: false
-      },
-      {
-        name: '🛠 More (text `!help`)',
-        value:
-          'Highlights: `!bestcall24h` … `!addlaunch` … `!devleaderboard`\n' +
-          '**Manage Server:** `!scanner` / `!scanner on|off`, approvals, `!pendingapprovals`, `!verifyx @user`, `!resetmonitor`, …\n' +
-          '**Bot owner:** scanner thresholds & sanity filters — see `!help` (`!testx` / channel permissions)',
-        inline: false
-      }
-    )
+    .addFields(fields)
     .setFooter({ text: 'Crypto Scanner Bot • Use !help for the authoritative list' })
     .setTimestamp();
 }
@@ -1173,7 +1210,7 @@ async function handleBasicCommands(message, options = {}) {
   }
 
   if (lowerContent === '!help' || lowerContent === '!commands') {
-    const embed = createCommandsEmbed();
+    const embed = createCommandsEmbed(message);
     await message.reply({ embeds: [embed] });
     return true;
   }

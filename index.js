@@ -12,7 +12,8 @@ const {
   EmbedBuilder,
   ModalBuilder,
   TextInputBuilder,
-  TextInputStyle
+  TextInputStyle,
+  PermissionFlagsBits
 } = require('discord.js');
 
 const {
@@ -236,6 +237,112 @@ async function replyText(message, content) {
     content,
     allowedMentions: { repliedUser: false }
   });
+}
+
+function splitDiscordMessage(content, limit = 1900) {
+  const text = String(content ?? '');
+  if (!text) return [''];
+
+  const chunks = [];
+  const paragraphs = text.split('\n\n');
+
+  let current = '';
+  const pushCurrent = () => {
+    if (current) chunks.push(current);
+    current = '';
+  };
+
+  const appendPiece = piece => {
+    if (!current) {
+      current = piece;
+      return;
+    }
+
+    const candidate = `${current}\n\n${piece}`;
+    if (candidate.length <= limit) {
+      current = candidate;
+      return;
+    }
+
+    pushCurrent();
+    current = piece;
+  };
+
+  for (const para of paragraphs) {
+    if (para.length <= limit) {
+      appendPiece(para);
+      continue;
+    }
+
+    // paragraph too long; fall back to line-based split
+    const lines = para.split('\n');
+    let lineBlock = '';
+
+    const flushLineBlock = () => {
+      if (lineBlock) appendPiece(lineBlock);
+      lineBlock = '';
+    };
+
+    for (const line of lines) {
+      if (line.length > limit) {
+        flushLineBlock();
+        // final fallback: hard slice a single very-long line
+        for (let i = 0; i < line.length; i += limit) {
+          appendPiece(line.slice(i, i + limit));
+        }
+        continue;
+      }
+
+      if (!lineBlock) {
+        lineBlock = line;
+        continue;
+      }
+
+      const candidate = `${lineBlock}\n${line}`;
+      if (candidate.length <= limit) {
+        lineBlock = candidate;
+      } else {
+        flushLineBlock();
+        lineBlock = line;
+      }
+    }
+
+    flushLineBlock();
+  }
+
+  pushCurrent();
+  return chunks.length ? chunks : [''];
+}
+
+async function replyLongText(message, content, limit = 1900) {
+  const chunks = splitDiscordMessage(content, limit);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    if (i === 0) {
+      await replyText(message, chunk);
+    } else {
+      await message.channel.send({
+        content: chunk,
+        allowedMentions: { repliedUser: false }
+      });
+    }
+  }
+}
+
+function memberCanManageGuild(member) {
+  if (!member?.permissions) return false;
+  try {
+    return member.permissions.has(PermissionFlagsBits.ManageGuild);
+  } catch {
+    return false;
+  }
+}
+
+function isBotOwner(user) {
+  const expected = String(process.env.BOT_OWNER_ID ?? '').trim();
+  if (!expected) return false;
+  return String(user?.id) === expected;
 }
 
 function getBotCallsChannel(guild) {
@@ -2271,8 +2378,8 @@ if (lowerContent.startsWith('!setsanitymaxratio1h ')) {
 }
 
 if (lowerContent === '!commands' || lowerContent === '!help') {
-  const isModOrAdmin = message.member?.permissions?.has('ManageGuild');
-  const isOwner = message.author.id === process.env.BOT_OWNER_ID;
+  const canSeeModHelp = memberCanManageGuild(message.member) || isBotOwner(message.author);
+  const canSeeOwnerHelp = isBotOwner(message.author);
 
   let contentOut = `📘 **McGBot Command List**\n\n`;
 
@@ -2305,7 +2412,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n\n`;
 
   // MOD COMMANDS (Manage Server — bot owner always sees this block too)
-  if (isModOrAdmin || isOwner) {
+  if (canSeeModHelp) {
     contentOut +=
       `🛡️ **Mod / Manage Server**\n` +
       `• Approval buttons in **#coin-approval** / mod flows\n` +
@@ -2323,7 +2430,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
   }
 
   // BOT OWNER ONLY
-  if (isOwner) {
+  if (canSeeOwnerHelp) {
     contentOut +=
       `⚙️ **Bot owner only** (commands below enforce **BOT_OWNER_ID**)\n` +
 
@@ -2337,10 +2444,7 @@ if (lowerContent === '!commands' || lowerContent === '!help') {
       `• \`!setsanitymaxratio5m\` / \`!setsanitymaxratio1h\`\n`;
   }
 
-  await message.reply({
-    content: contentOut,
-    allowedMentions: { repliedUser: false }
-  });
+  await replyLongText(message, contentOut, 1900);
 
   return;
 }

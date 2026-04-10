@@ -253,6 +253,8 @@ const cfg = {
 
   const isEarlyCoin = age > 0 && age < 10;
 
+  if (isEarlyCoin && liq < 2000) return 'early_reject_low_liquidity';
+
   if (!isEarlyCoin && (!mc || !liq)) return 'sanity_missing_core';
 
   // EARLY POOL MODE: don't reject for being young; only reject invalid/zero age.

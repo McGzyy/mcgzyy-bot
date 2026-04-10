@@ -511,6 +511,11 @@ async function fetchRealTokenData(contractAddress) {
   try {
     const dex = await fetchDexScreenerTokenData(contractAddress);
 
+    // NEW: handle null (no pairs case)
+    if (!dex) {
+      return null;
+    }
+
     return normalizeDexData(dex, contractAddress);
   } catch (error) {
     console.error('[RealTokenProvider] Error:', error.message);

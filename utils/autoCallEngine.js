@@ -253,7 +253,8 @@ const cfg = {
 
   if (!mc || !liq) return 'sanity_missing_core';
 
-  if (cfg.minAgeMinutes > 0 && age > 0 && age < cfg.minAgeMinutes) return 'sanity_too_young';
+  const effectiveMinAgeMinutes = Math.max(1, Math.floor(cfg.minAgeMinutes * 0.4));
+  if (cfg.minAgeMinutes > 0 && age > 0 && age < effectiveMinAgeMinutes) return 'sanity_too_young';
   if (cfg.requireMigrated && scan.migrated !== true) return 'sanity_not_migrated';
 
   if (cfg.minVolume5m > 0 && vol5 < cfg.minVolume5m) return 'sanity_low_vol5';

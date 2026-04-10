@@ -729,7 +729,9 @@ if (lifecycleStatus === 'archived') {
       });
 
     } catch (err) {
-      console.error(`[Monitor] Failed on ${coin.contractAddress}:`, err.message);
+      console.error('[Monitor ERROR]');
+      console.error('Contract:', coin.contractAddress);
+      console.error('Stack:', err.stack);
     }
   }
 }

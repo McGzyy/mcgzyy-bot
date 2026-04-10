@@ -251,9 +251,9 @@ const cfg = {
   const buys24h = Number(scan.buys24h || 0);
   const holders = scan.holders === null || scan.holders === undefined ? null : Number(scan.holders);
 
-  if (!mc || !liq) return 'sanity_missing_core';
-
   const isEarlyCoin = age > 0 && age < 10;
+
+  if (!isEarlyCoin && (!mc || !liq)) return 'sanity_missing_core';
 
   // EARLY POOL MODE: don't reject for being young; only reject invalid/zero age.
   if (cfg.minAgeMinutes > 0 && (!Number.isFinite(age) || age <= 0)) return 'sanity_too_young';
@@ -299,8 +299,8 @@ const cfg = {
   if (ratio1 > cfg.maxBuySellRatio1h) return 'sanity_ratio1_absurd';
 
   const liqToMc = liq / mc;
-  if (liqToMc > cfg.maxLiquidityToMarketCapRatio) return 'sanity_liq_too_high';
-  if (liqToMc < cfg.minLiquidityToMarketCapRatio) return 'sanity_liq_too_low';
+  if (!isEarlyCoin && liqToMc > cfg.maxLiquidityToMarketCapRatio) return 'sanity_liq_too_high';
+  if (!isEarlyCoin && liqToMc < cfg.minLiquidityToMarketCapRatio) return 'sanity_liq_too_low';
 
   const vol5ToLiq = liq > 0 ? vol5 / liq : 0;
   const vol1ToLiq = liq > 0 ? vol1 / liq : 0;
@@ -310,8 +310,8 @@ const cfg = {
 
   if (vol5ToLiq < cfg.minUniqueVolumeToLiquidityRatio) return 'sanity_no_activity';
 
-  if (mc < cfg.minMeaningfulMarketCap) return 'sanity_low_mc';
-  if (liq < cfg.minMeaningfulLiquidity) return 'sanity_low_liq';
+  if (!isEarlyCoin && mc < cfg.minMeaningfulMarketCap) return 'sanity_low_mc';
+  if (!isEarlyCoin && liq < cfg.minMeaningfulLiquidity) return 'sanity_low_liq';
 
   return null;
 }

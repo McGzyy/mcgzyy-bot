@@ -535,93 +535,97 @@ async function generateSimulatedScan(contractAddress = null) {
  */
 
 async function generateRealScan(contractAddress, geckoCandidate = null) {
-  let realData = await fetchRealTokenData(contractAddress);
+  try {
+    let realData = await fetchRealTokenData(contractAddress);
 
-  if (geckoCandidate) {
-    realData = mergeRealDataWithCandidate(realData, geckoCandidate, contractAddress);
-  }
+    if (geckoCandidate) {
+      realData = mergeRealDataWithCandidate(realData, geckoCandidate, contractAddress);
+    }
 
-  if (!realData || !realData.market) {
+    if (!realData || !realData.market) {
+      return null;
+    }
+
+    const marketCap = toNumber(realData.market?.marketCap);
+    const liquidity = toNumber(realData.market?.liquidity);
+    const volume5m = toNumber(realData.market?.volume5m);
+    const volume1h = toNumber(realData.market?.volume1h);
+    const volume24h = toNumber(realData.market?.volume24h);
+    const ageMinutes = toNumber(realData.market?.ageMinutes);
+    const priceChange5m = toNumber(realData.market?.priceChange5m);
+
+    const trades5m = toNumber(realData.market?.trades5m);
+    const trades1h = toNumber(realData.market?.trades1h);
+    const trades24h = toNumber(realData.market?.trades24h);
+
+    let buySellRatio5m = toNumber(realData.tradeSignals?.buySellRatio5m);
+    let buySellRatio1h = toNumber(realData.tradeSignals?.buySellRatio1h);
+    let tradePressure = cleanString(realData.tradeSignals?.tradePressure);
+    let volumeTrend = cleanString(realData.tradeSignals?.volumeTrend);
+
+    const buys5m = toNumber(realData.tradeSignals?.buys5m);
+    const sells5m = toNumber(realData.tradeSignals?.sells5m);
+    const buys1h = toNumber(realData.tradeSignals?.buys1h);
+    const sells1h = toNumber(realData.tradeSignals?.sells1h);
+    const buys24h = toNumber(realData.tradeSignals?.buys24h);
+    const sells24h = toNumber(realData.tradeSignals?.sells24h);
+
+    if (!buySellRatio5m || buySellRatio5m <= 0) {
+      buySellRatio5m = deriveBuySellRatio(volume5m, volume1h, priceChange5m);
+    }
+
+    if (!buySellRatio1h || buySellRatio1h <= 0) {
+      buySellRatio1h = Number((buySellRatio5m * 1.08).toFixed(2));
+    }
+
+    if (!tradePressure || tradePressure === 'Unknown') {
+      tradePressure = deriveTradePressure(buySellRatio5m);
+    }
+
+    if (!volumeTrend || volumeTrend === 'Unknown') {
+      volumeTrend = deriveVolumeTrend(volume5m, volume1h);
+    }
+
+    return buildScanObject({
+      contractAddress: cleanString(realData.token?.contractAddress, contractAddress),
+      pairAddress: cleanString(realData.token?.pairAddress, geckoCandidate?.pairAddress || ''),
+      tokenName: cleanString(realData.token?.tokenName, 'Unknown Token'),
+      ticker: cleanString(realData.token?.ticker, 'UNKNOWN'),
+      website: realData.token?.website || null,
+      twitter: realData.token?.twitter || null,
+      telegram: realData.token?.telegram || null,
+
+      marketCap,
+      liquidity,
+      volume5m,
+      volume1h,
+      volume24h,
+      ageMinutes,
+      priceChange5m,
+
+      trades5m,
+      trades1h,
+      trades24h,
+
+      buys5m,
+      sells5m,
+      buys1h,
+      sells1h,
+      buys24h,
+      sells24h,
+
+      buySellRatio5m,
+      buySellRatio1h,
+      tradePressure,
+      volumeTrend,
+
+      dexPaid: !!realData.socials?.dexPaid,
+      migrated: !!realData.meta?.migrated,
+      holders: realData.holders?.holders ?? null
+    });
+  } catch (err) {
     return null;
   }
-
-  const marketCap = toNumber(realData.market?.marketCap);
-  const liquidity = toNumber(realData.market?.liquidity);
-  const volume5m = toNumber(realData.market?.volume5m);
-  const volume1h = toNumber(realData.market?.volume1h);
-  const volume24h = toNumber(realData.market?.volume24h);
-  const ageMinutes = toNumber(realData.market?.ageMinutes);
-  const priceChange5m = toNumber(realData.market?.priceChange5m);
-
-  const trades5m = toNumber(realData.market?.trades5m);
-  const trades1h = toNumber(realData.market?.trades1h);
-  const trades24h = toNumber(realData.market?.trades24h);
-
-  let buySellRatio5m = toNumber(realData.tradeSignals?.buySellRatio5m);
-  let buySellRatio1h = toNumber(realData.tradeSignals?.buySellRatio1h);
-  let tradePressure = cleanString(realData.tradeSignals?.tradePressure);
-  let volumeTrend = cleanString(realData.tradeSignals?.volumeTrend);
-
-  const buys5m = toNumber(realData.tradeSignals?.buys5m);
-  const sells5m = toNumber(realData.tradeSignals?.sells5m);
-  const buys1h = toNumber(realData.tradeSignals?.buys1h);
-  const sells1h = toNumber(realData.tradeSignals?.sells1h);
-  const buys24h = toNumber(realData.tradeSignals?.buys24h);
-  const sells24h = toNumber(realData.tradeSignals?.sells24h);
-
-  if (!buySellRatio5m || buySellRatio5m <= 0) {
-    buySellRatio5m = deriveBuySellRatio(volume5m, volume1h, priceChange5m);
-  }
-
-  if (!buySellRatio1h || buySellRatio1h <= 0) {
-    buySellRatio1h = Number((buySellRatio5m * 1.08).toFixed(2));
-  }
-
-  if (!tradePressure || tradePressure === 'Unknown') {
-    tradePressure = deriveTradePressure(buySellRatio5m);
-  }
-
-  if (!volumeTrend || volumeTrend === 'Unknown') {
-    volumeTrend = deriveVolumeTrend(volume5m, volume1h);
-  }
-
-  return buildScanObject({
-    contractAddress: cleanString(realData.token?.contractAddress, contractAddress),
-    pairAddress: cleanString(realData.token?.pairAddress, geckoCandidate?.pairAddress || ''),
-    tokenName: cleanString(realData.token?.tokenName, 'Unknown Token'),
-    ticker: cleanString(realData.token?.ticker, 'UNKNOWN'),
-    website: realData.token?.website || null,
-    twitter: realData.token?.twitter || null,
-    telegram: realData.token?.telegram || null,
-
-    marketCap,
-    liquidity,
-    volume5m,
-    volume1h,
-    volume24h,
-    ageMinutes,
-    priceChange5m,
-
-    trades5m,
-    trades1h,
-    trades24h,
-
-    buys5m,
-    sells5m,
-    buys1h,
-    sells1h,
-    buys24h,
-    sells24h,
-
-    buySellRatio5m,
-    buySellRatio1h,
-    tradePressure,
-    volumeTrend,
-
-    dexPaid: !!realData.socials?.dexPaid,
-    migrated: !!realData.meta?.migrated,
-    holders: realData.holders?.holders ?? null
-  });
 }
 
 /**

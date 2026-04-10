@@ -593,7 +593,11 @@ async function checkTrackedCoins(channel) {
     try {
       const scan = await generateRealScan(coin.contractAddress);
 
-      if (!scan || !scan.marketCap || scan.marketCap <= 0) {
+      if (!scan) {
+        continue;
+      }
+
+      if (!scan.marketCap || scan.marketCap <= 0) {
   const failedScans = Number(coin.failedScans || 0) + 1;
 
   updateTrackedCallData(coin.contractAddress, {

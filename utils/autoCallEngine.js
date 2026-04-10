@@ -248,12 +248,15 @@ const cfg = {
   const age = Number(scan.ageMinutes || 0);
   const vol24 = Number(scan.volume24h || 0);
   const trades24h = Number(scan.trades24h || 0);
+  const trades5m = Number(scan.trades5m || 0);
   const buys24h = Number(scan.buys24h || 0);
   const holders = scan.holders === null || scan.holders === undefined ? null : Number(scan.holders);
 
   const isEarlyCoin = age > 0 && age < 10;
 
-  if (isEarlyCoin && liq < 2000) return 'early_reject_low_liquidity';
+  if (isEarlyCoin && liq < 3000) return 'early_reject_low_liquidity';
+  if (isEarlyCoin && mc < 5000) return 'early_reject_low_mc';
+  if (isEarlyCoin && trades5m < 5) return 'early_reject_low_activity';
 
   if (!isEarlyCoin && (!mc || !liq)) return 'sanity_missing_core';
 

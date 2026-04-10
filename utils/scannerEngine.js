@@ -541,6 +541,10 @@ async function generateRealScan(contractAddress, geckoCandidate = null) {
     realData = mergeRealDataWithCandidate(realData, geckoCandidate, contractAddress);
   }
 
+  if (!realData || !realData.market) {
+    return null;
+  }
+
   const marketCap = toNumber(realData.market?.marketCap);
   const liquidity = toNumber(realData.market?.liquidity);
   const volume5m = toNumber(realData.market?.volume5m);

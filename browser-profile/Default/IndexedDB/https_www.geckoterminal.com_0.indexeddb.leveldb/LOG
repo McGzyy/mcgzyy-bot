@@ -1,0 +1,22 @@
+2026/04/11-12:13:45.208 6b44 Creating DB C:\Dev\Crypto Scanner\browser-profile\Default\IndexedDB\https_www.geckoterminal.com_0.indexeddb.leveldb since it was missing.
+2026/04/11-12:13:45.228 6b44 Reusing MANIFEST C:\Dev\Crypto Scanner\browser-profile\Default\IndexedDB\https_www.geckoterminal.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/04/11-12:13:46.754 6b44 Level-0 table #5: started
+2026/04/11-12:13:46.783 6b44 Level-0 table #5: 1235 bytes OK
+2026/04/11-12:13:46.788 6b44 Delete type=0 #3
+2026/04/11-12:13:46.789 6b44 Manual compaction at level-0 from '\x00\x02\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/04/11-12:13:47.697 880 Level-0 table #7: started
+2026/04/11-12:13:47.716 880 Level-0 table #7: 956 bytes OK
+2026/04/11-12:13:47.719 880 Delete type=0 #4
+2026/04/11-12:13:47.720 6b44 Manual compaction at level-0 from '\x00\x03\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x04\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/04/11-12:13:47.721 6b44 Manual compaction at level-1 from '\x00\x03\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x04\x00\x00\x00' @ 0 : 0; will stop at '\x00\x04\x00\x00\x05' @ 76 : 1
+2026/04/11-12:13:47.721 6b44 Compacting 1@1 + 1@2 files
+2026/04/11-12:13:47.740 6b44 Generated table #8@1: 26 keys, 813 bytes
+2026/04/11-12:13:47.740 6b44 Compacted 1@1 + 1@2 files => 813 bytes
+2026/04/11-12:13:47.742 6b44 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/04/11-12:13:47.743 6b44 Delete type=2 #7
+2026/04/11-12:13:47.744 6b44 Manual compaction at level-1 from '\x00\x04\x00\x00\x05' @ 76 : 1 .. '\x00\x04\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/04/11-12:13:51.608 56ec Level-0 table #10: started
+2026/04/11-12:13:51.617 56ec Level-0 table #10: 4202 bytes OK
+2026/04/11-12:13:51.619 56ec Delete type=2 #5
+2026/04/11-12:13:51.619 56ec Delete type=0 #6
+2026/04/11-12:13:51.622 56ec Manual compaction at level-0 from '\x00\x06\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x07\x00\x00\x00' @ 0 : 0; will stop at (end)

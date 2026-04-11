@@ -18,7 +18,7 @@ const {
 } = require('./alertEmbeds');
 const { enqueueAlert } = require('./alertQueue');
 const { createPost } = require('./xPoster');
-const { captureGeckoChart } = require('./chartCapture');
+const { fetchGeckoChart } = require('./chartCapture');
 const { resolvePublicCallerName } = require('./userProfileService');
 const {
   determineLifecycleStatus,
@@ -264,7 +264,7 @@ async function maybePublishApprovedMilestoneToX(trackedCall) {
     let chartBuf = null;
     if (!hasOriginal) {
       try {
-        chartBuf = await captureGeckoChart({
+        chartBuf = await fetchGeckoChart({
           contractAddress: trackedCall.contractAddress,
           pairAddress: trackedCall.pairAddress
         });

@@ -3,7 +3,7 @@ const { autoCallConfig } = require('../config/autoCallConfig');
 const { scanFilterConfig } = require('../config/scanFilterConfig');
 const { AttachmentBuilder } = require('discord.js');
 const { createAutoCallEmbed } = require('./alertEmbeds');
-const { captureGeckoChart } = require('./chartCapture');
+const { fetchGeckoChart } = require('./chartCapture');
 const { loadScannerSettings } = require('./scannerSettingsService');
 const {
   saveTrackedCall,
@@ -165,7 +165,7 @@ async function hydrateAutoCallChartMessage(message, scan, profileName) {
     return;
   }
   try {
-    const buf = await captureGeckoChart({
+    const buf = await fetchGeckoChart({
       contractAddress: scan.contractAddress,
       pairAddress: scan.pairAddress
     });

@@ -68,6 +68,30 @@ async function screenshotLargestMatch(page, selector) {
   return null;
 }
 
+/** Full-page HTML + PNG in cwd for headless GMGN inspection (always attempt both). */
+async function saveGmgnDebugPageSnapshot(page) {
+  const cwd = process.cwd();
+  const pngPath = path.join(cwd, 'debug_page.png');
+  const htmlPath = path.join(cwd, 'debug_page.html');
+  const tag = '[ChartCapture]';
+
+  try {
+    const pngBuf = await page.screenshot({ fullPage: true, type: 'png' });
+    await fs.writeFile(pngPath, pngBuf);
+    console.log(`${tag} wrote ${pngPath} (${pngBuf.length} bytes)`);
+  } catch (err) {
+    console.log(`${tag} failed debug_page.png:`, err?.message || err);
+  }
+
+  try {
+    const html = await page.content();
+    await fs.writeFile(htmlPath, html, 'utf8');
+    console.log(`${tag} wrote ${htmlPath} (${html.length} chars)`);
+  } catch (err) {
+    console.log(`${tag} failed debug_page.html:`, err?.message || err);
+  }
+}
+
 /**
  * @param {string} contractAddress
  * @returns {Promise<Buffer|null>}
@@ -93,21 +117,7 @@ async function captureGMGNChart(contractAddress) {
 
     await page.waitForTimeout(4000);
 
-    const cwd = process.cwd();
-    try {
-      await page.screenshot({
-        path: path.join(cwd, 'debug_page.png'),
-        fullPage: true
-      });
-    } catch (_) {
-      /* ignore */
-    }
-    try {
-      const html = await page.content();
-      await fs.writeFile(path.join(cwd, 'debug_page.html'), html, 'utf8');
-    } catch (_) {
-      /* ignore */
-    }
+    await saveGmgnDebugPageSnapshot(page);
 
     for (const sel of SELECTORS) {
       try {

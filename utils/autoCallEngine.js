@@ -17,6 +17,8 @@ let queueIntervalHandle = null;
 
 // memory state
 const recentlyCalled = new Map();
+const recentCalls = new Map();
+const RECENT_TICKER_COOLDOWN_MS = 10 * 60 * 1000;
 let callsThisHour = 0;
 let lastHourReset = Date.now();
 
@@ -68,6 +70,24 @@ function markCalled(contractAddress) {
   recentlyCalled.set(contractAddress, now());
 }
 
+function getRecentCallKey(scan) {
+  return String(scan?.ticker || scan?.contractAddress || '').toLowerCase();
+}
+
+function isRecentTickerDuplicate(scan) {
+  const key = getRecentCallKey(scan);
+  if (!key) return false;
+  const lastTime = recentCalls.get(key);
+  if (lastTime == null) return false;
+  return Date.now() - lastTime < RECENT_TICKER_COOLDOWN_MS;
+}
+
+function markRecentTickerCall(scan) {
+  const key = getRecentCallKey(scan);
+  if (!key) return;
+  recentCalls.set(key, Date.now());
+}
+
 function debugEnabled() {
   return !!autoCallConfig.debug?.enabled;
 }
@@ -91,7 +111,7 @@ function isAlreadyQueued(contractAddress) {
   return botCallQueue.some(x => x.contractAddress === contractAddress);
 }
 
-function enqueueBotCallCandidate({ contractAddress, profileName, rankScore }) {
+function enqueueBotCallCandidate({ contractAddress, profileName, rankScore, scan = null }) {
   if (!contractAddress) return false;
 
   cleanupStaleBotCallQueue();
@@ -107,6 +127,7 @@ function enqueueBotCallCandidate({ contractAddress, profileName, rankScore }) {
 
   // strongest first
   botCallQueue.sort((a, b) => Number(b.rankScore || 0) - Number(a.rankScore || 0));
+  if (scan) markRecentTickerCall(scan);
   return true;
 }
 
@@ -139,6 +160,8 @@ async function postBotCallScan(channel, scan, profileName) {
   enqueueAlert(async () => {
     const embed = createAutoCallEmbed(scan, profileName);
     const sentMessage = await channel.send({ embeds: [embed] });
+
+    markRecentTickerCall(scan);
 
     const tracked = trackAutoCall(scan);
     if (tracked && sentMessage?.id) {
@@ -583,6 +606,11 @@ if (globalReject) {
       continue;
     }
 
+    if (isRecentTickerDuplicate(scan)) {
+      rejectCounts.reject_recent_duplicate = (rejectCounts.reject_recent_duplicate || 0) + 1;
+      continue;
+    }
+
     passers.push({
       scan,
       rankScore: getPasserRankScore(scan)
@@ -595,12 +623,17 @@ if (globalReject) {
 
 if (selected.length === 0 && fallbackCandidates.length > 0) {
   fallbackCandidates.sort((a, b) => b.rankScore - a.rankScore);
-  selected = [fallbackCandidates[0]];
+  const pick = fallbackCandidates.find(c => !isRecentTickerDuplicate(c.scan));
+  if (pick) {
+    selected = [pick];
 
-  console.log(
-    `[AutoCall] Fallback selected ${selected[0].scan.tokenName || selected[0].scan.contractAddress} ` +
-    `(${selected[0].fallbackReason})`
-  );
+    console.log(
+      `[AutoCall] Fallback selected ${pick.scan.tokenName || pick.scan.contractAddress} ` +
+      `(${pick.fallbackReason})`
+    );
+  } else {
+    rejectCounts.reject_recent_duplicate = (rejectCounts.reject_recent_duplicate || 0) + 1;
+  }
 }
 
   if (debugEnabled()) {
@@ -622,7 +655,8 @@ if (selected.length === 0 && fallbackCandidates.length > 0) {
       enqueueBotCallCandidate({
         contractAddress: item.scan.contractAddress,
         profileName,
-        rankScore: item.rankScore
+        rankScore: item.rankScore,
+        scan: item.scan
       });
     }
 
@@ -632,7 +666,8 @@ if (selected.length === 0 && fallbackCandidates.length > 0) {
       enqueueBotCallCandidate({
         contractAddress: immediate.scan.contractAddress,
         profileName,
-        rankScore: immediate.rankScore
+        rankScore: immediate.rankScore,
+        scan: immediate.scan
       });
     }
   }

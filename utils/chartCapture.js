@@ -13,7 +13,7 @@ async function getBrowser() {
   if (!context) {
     const profileDir = path.join(process.cwd(), 'browser-profile');
     context = await chromium.launchPersistentContext(profileDir, {
-      headless: true,
+      headless: false,
       viewport: { width: 1400, height: 900 },
       colorScheme: 'dark',
       locale: 'en-US',

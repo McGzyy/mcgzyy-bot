@@ -72,6 +72,7 @@ function normalizeTrackedCall(call = {}) {
     xPostedMilestones: Array.isArray(call.xPostedMilestones)
       ? call.xPostedMilestones
       : [],
+    lastPostedX: Number(call.lastPostedX || 0),
     xOriginalPostId: call.xOriginalPostId || null,
     xLastReplyPostId: call.xLastReplyPostId || null,
     xLastPostedAt: call.xLastPostedAt || null
@@ -436,6 +437,7 @@ function saveTrackedCall(
       xPostedMilestones: Array.isArray(existing.xPostedMilestones)
         ? existing.xPostedMilestones
         : [],
+      lastPostedX: Number(existing.lastPostedX || 0),
       xOriginalPostId: existing.xOriginalPostId || null,
       xLastReplyPostId: existing.xLastReplyPostId || null,
       xLastPostedAt: existing.xLastPostedAt || null
@@ -495,6 +497,7 @@ function saveTrackedCall(
 
     xApproved: false,
     xPostedMilestones: [],
+    lastPostedX: 0,
     xOriginalPostId: null,
     xLastReplyPostId: null,
     xLastPostedAt: null

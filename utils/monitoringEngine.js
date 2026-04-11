@@ -89,6 +89,68 @@ function formatUsd(value) {
   return `$${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
+function formatDateTime(iso) {
+  if (!iso) return 'N/A';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'N/A';
+
+  return date.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+}
+
+function getResolutionLines(trackedCall) {
+  const status = trackedCall.approvalStatus || 'pending';
+
+  if (status === 'pending') return [];
+
+  const actionLabel =
+    status === 'approved' ? 'Approved' :
+    status === 'denied' ? 'Denied' :
+    status === 'excluded' ? 'Excluded' :
+    status === 'expired' ? 'Expired' :
+    'Resolved';
+
+  const moderator = trackedCall.moderatedByUsername || 'Unknown';
+  const moderatedAt = formatDateTime(trackedCall.moderatedAt);
+
+  const lines = [
+    '',
+    '**Resolution**',
+    `**${actionLabel} By:** ${moderator}`,
+    `**${actionLabel} At:** ${moderatedAt}`
+  ];
+
+  if (status === 'approved') {
+    const postedMilestones = Array.isArray(trackedCall.xPostedMilestones)
+      ? trackedCall.xPostedMilestones
+      : [];
+
+    const lastMilestone = postedMilestones.length
+      ? postedMilestones[postedMilestones.length - 1]
+      : null;
+
+    const postType = trackedCall.xOriginalPostId && !trackedCall.xLastReplyPostId
+      ? 'Original Thread'
+      : trackedCall.xLastReplyPostId
+        ? 'Reply Post'
+        : trackedCall.xOriginalPostId
+          ? 'Original Thread'
+          : 'Not Posted';
+
+    lines.push(`**Posted to X:** ${trackedCall.xOriginalPostId || trackedCall.xLastReplyPostId ? 'Yes' : 'No'}`);
+    lines.push(`**Post Type:** ${postType}`);
+    lines.push(`**Last X Milestone:** ${lastMilestone ? `${lastMilestone}x` : 'N/A'}`);
+    lines.push(`**X Post ID:** ${trackedCall.xLastReplyPostId || trackedCall.xOriginalPostId || 'N/A'}`);
+  }
+
+  return lines;
+}
+
 function getPublicCallerLabel(trackedCall, fallback = 'Unknown') {
   if (!trackedCall) return fallback;
 
@@ -124,11 +186,14 @@ function getPublicCallerLabel(trackedCall, fallback = 'Unknown') {
  * =========================
  */
 
-function buildXPostText(trackedCall, milestoneX, isReply = false) {
+function buildXPostText(trackedCall, displayXFromCall, isReply = false) {
   const tokenName = trackedCall.tokenName || 'Unknown Token';
   const ticker = trackedCall.ticker || 'UNKNOWN';
   const ca = trackedCall.contractAddress;
   const caller = getPublicCallerLabel(trackedCall, 'Unknown');
+  const xLabel = Number.isFinite(Number(displayXFromCall))
+    ? Number(displayXFromCall).toFixed(2)
+    : '0.00';
 
   const athMc = formatUsd(
     trackedCall.ath ||
@@ -141,7 +206,7 @@ function buildXPostText(trackedCall, milestoneX, isReply = false) {
 
   if (!isReply) {
     return [
-      `🚨 ${tokenName} ($${ticker}) just hit ${milestoneX}x from call`,
+      `🚨 ${tokenName} ($${ticker}) just hit ${xLabel}x from call`,
       ``,
       `👤 Called by: ${caller}`,
       `📈 ATH MC: ${athMc}`,
@@ -152,7 +217,7 @@ function buildXPostText(trackedCall, milestoneX, isReply = false) {
   }
 
   return [
-    `📈 UPDATE: ${tokenName} ($${ticker}) has now reached ${milestoneX}x`,
+    `📈 UPDATE: ${tokenName} ($${ticker}) has now reached ${xLabel}x from call`,
     ``,
     `👤 Original caller: ${caller}`,
     `📈 ATH MC: ${athMc}`,
@@ -196,7 +261,15 @@ async function maybePublishApprovedMilestoneToX(trackedCall) {
 
     const hasOriginal = !!trackedCall.xOriginalPostId;
 
-    const postText = buildXPostText(trackedCall, milestoneX, hasOriginal);
+    const latestMc = Number(
+      trackedCall.latestMarketCap ||
+      trackedCall.firstCalledMarketCap ||
+      0
+    );
+    const rawSpotX = firstCalledMc > 0 ? latestMc / firstCalledMc : 0;
+    const displayXFromCall = Number(rawSpotX.toFixed(2));
+
+    const postText = buildXPostText(trackedCall, displayXFromCall, hasOriginal);
     const result = await createPost(
       postText,
       hasOriginal ? trackedCall.xOriginalPostId : null
@@ -257,6 +330,15 @@ function getNewMilestones(currentX, milestonesHit = []) {
   return DISCORD_MILESTONE_LEVELS.filter(m =>
     x >= Number(m.x) && !milestonesHit.includes(m.key)
   );
+}
+
+function getMinSpacing(x) {
+  const num = Number(x);
+  if (!Number.isFinite(num)) return 10.0;
+  if (num < 10) return 2.0;
+  if (num < 20) return 4.0;
+  if (num < 50) return 6.0;
+  return 10.0;
 }
 
 /**
@@ -330,6 +412,48 @@ function buildApprovalButtons(contractAddress) {
 function buildApprovalStatusEmbed(trackedCall, scan = null) {
   const { EmbedBuilder } = require('discord.js');
 
+  const status = trackedCall.approvalStatus || 'pending';
+
+  if (status === 'approved' || status === 'denied') {
+    const ca = trackedCall.contractAddress || 'Unknown';
+    const tokenLine = `$${trackedCall.ticker || 'UNKNOWN'} — ${trackedCall.tokenName || 'Unknown Token'}`;
+    const triggerX = Number(trackedCall.lastApprovalTriggerX || 0);
+    const resultLine =
+      triggerX > 0 ? `📈 ${formatX(triggerX)} from call` : '📈 —';
+
+    const tagsCompact =
+      Array.isArray(trackedCall.moderationTags) && trackedCall.moderationTags.length
+        ? trackedCall.moderationTags.map(t => `\`${t}\``).join(' ')
+        : '—';
+    const notesCompact = trackedCall.moderationNotes || '—';
+
+    const lines = [
+      `**${tokenLine}**`,
+      `**CA:** \`${ca}\``,
+      resultLine,
+      '',
+      `**Tags:** ${tagsCompact}`,
+      `**Notes:** ${notesCompact}`
+    ];
+
+    lines.push(...getResolutionLines(trackedCall));
+
+    return new EmbedBuilder()
+      .setColor(status === 'approved' ? 0x22c55e : 0xef4444)
+      .setTitle(
+        status === 'approved'
+          ? '✅ Coin Approved'
+          : '❌ Coin Denied'
+      )
+      .setDescription(lines.join('\n'))
+      .setFooter({
+        text: trackedCall.moderatedByUsername
+          ? `Moderated by ${trackedCall.moderatedByUsername}`
+          : 'Resolved'
+      })
+      .setTimestamp();
+  }
+
   const ath = Number(
     trackedCall.ath ||
     trackedCall.athMc ||
@@ -342,10 +466,7 @@ function buildApprovalStatusEmbed(trackedCall, scan = null) {
   const firstCalledMc = Number(trackedCall.firstCalledMarketCap || 0);
   const x = firstCalledMc > 0 ? ath / firstCalledMc : 0;
 
-  const status = trackedCall.approvalStatus || 'pending';
   const statusLabel =
-    status === 'approved' ? '✅ APPROVED' :
-    status === 'denied' ? '❌ DENIED' :
     status === 'excluded' ? '🗑 EXCLUDED' :
     status === 'expired' ? '⌛ EXPIRED' :
     '⏳ PENDING REVIEW';
@@ -358,8 +479,6 @@ function buildApprovalStatusEmbed(trackedCall, scan = null) {
 
   const embed = new EmbedBuilder()
     .setColor(
-      status === 'approved' ? 0x22c55e :
-      status === 'denied' ? 0xef4444 :
       status === 'excluded' ? 0x64748b :
       status === 'expired' ? 0x94a3b8 :
       0xf59e0b
@@ -388,6 +507,17 @@ function buildApprovalStatusEmbed(trackedCall, scan = null) {
         : 'Awaiting mod review'
     })
     .setTimestamp();
+
+  const ca = trackedCall.contractAddress;
+  if (ca) {
+    const dexUrl = `https://dexscreener.com/solana/${ca}`;
+    const gmgnUrl = `https://gmgn.ai/sol/token/${ca}`;
+    embed.addFields({
+      name: '📈 Charts',
+      value: `[DexScreener](${dexUrl}) • [GMGN](${gmgnUrl})`,
+      inline: false
+    });
+  }
 
   if (scan?.contractAddress) {
     embed.addFields({
@@ -543,12 +673,12 @@ function buildReplyOptions(coin, channel) {
  * =========================
  */
 
-function queueMilestone(channel, coin, scan, key, perf) {
+function queueMilestone(channel, coin, scan, key, perf, realXFromCall) {
   enqueueAlert(async () => {
     const replyOptions = buildReplyOptions(coin, channel);
 
     await channel.send({
-      embeds: [createMilestoneEmbed(coin, scan, key, perf)],
+      embeds: [createMilestoneEmbed(coin, scan, key, perf, realXFromCall)],
       ...replyOptions
     });
   }, {
@@ -591,6 +721,10 @@ async function checkTrackedCoins(channel) {
 
   for (const coin of activeCoins) {
     try {
+      if (String(coin.approvalStatus || '').toLowerCase() === 'denied') {
+        continue;
+      }
+
       const scan = await generateRealScan(coin.contractAddress);
 
       if (!scan) {
@@ -631,7 +765,10 @@ async function checkTrackedCoins(channel) {
 
       const perf = calculatePerformancePercent(firstMc, currentMc);
 const drawdown = calculateDrawdownPercent(athMc, currentMc);
-const currentX = calculateCurrentX(firstMc, athMc);
+const athX = calculateCurrentX(firstMc, athMc);
+const initialMc = Number(firstMc) || 0;
+const rawSpotX = initialMc > 0 ? currentMc / initialMc : 0;
+const spotX = Number(rawSpotX.toFixed(2));
 
 let lifecycleStatus = determineLifecycleStatus(coin, scan);
 let forceArchiveReason = null;
@@ -662,7 +799,7 @@ if (lifecycleStatus === 'archived') {
 }
 
       console.log(
-        `[Monitor] ${coin.tokenName} → ${perf?.toFixed(1) ?? 'N/A'}% (${formatX(currentX)})`
+        `[Monitor] ${coin.tokenName} → ${perf?.toFixed(1) ?? 'N/A'}% (${formatX(athX)})`
       );
 
       // Hardening: use latest persisted milestone state to reduce accidental re-sends.
@@ -671,22 +808,35 @@ if (lifecycleStatus === 'archived') {
         ? [...persisted.milestonesHit]
         : (Array.isArray(coin.milestonesHit) ? [...coin.milestonesHit] : []);
       const dumpHits = Array.isArray(coin.dumpAlertsHit) ? [...coin.dumpAlertsHit] : [];
+      let lastPostedXOut = Number(persisted?.lastPostedX || 0);
 
       /**
        * MILESTONES
        */
-      const newMilestones = getNewMilestones(currentX, milestonesHit);
+      const newMilestones = getNewMilestones(spotX, milestonesHit);
 
       for (const m of newMilestones) {
-        queueMilestone(channel, coin, scan, m.key, perf);
-        milestonesHit.push(m.key);
+        if (!milestonesHit.includes(m.key)) {
+          milestonesHit.push(m.key);
+        }
+      }
+
+      if (milestonesHit.length > 0) {
+        const lastX = lastPostedXOut;
+        const spacing = getMinSpacing(spotX);
+        const delta = spotX - lastX;
+
+        if (delta >= spacing) {
+          queueMilestone(channel, coin, scan, 'progress', perf, spotX);
+          lastPostedXOut = spotX;
+        }
       }
 
       /**
        * APPROVAL QUEUE (LIVE)
        */
       const refreshedTrackedCall = getTrackedCall(coin.contractAddress) || coin;
-      const approvalCheck = shouldCreateApprovalRequest(refreshedTrackedCall, currentX);
+      const approvalCheck = shouldCreateApprovalRequest(refreshedTrackedCall, athX);
 
       if (approvalCheck.shouldSend) {
         queueApprovalReview(channel, refreshedTrackedCall, scan, approvalCheck.triggerX);
@@ -725,7 +875,8 @@ if (lifecycleStatus === 'archived') {
         latestMarketCap: currentMc,
         athMc,
         milestonesHit,
-        dumpAlertsHit: dumpHits
+        dumpAlertsHit: dumpHits,
+        lastPostedX: lastPostedXOut
       });
 
     } catch (err) {

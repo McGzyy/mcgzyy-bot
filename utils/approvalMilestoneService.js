@@ -67,6 +67,11 @@ function getHighestEligibleApprovalMilestone(currentX) {
 function shouldCreateApprovalRequest(trackedCall, currentX = null) {
   if (!trackedCall) return { shouldSend: false, triggerX: 0 };
 
+  const approvalStatus = String(trackedCall.approvalStatus || '').toLowerCase();
+  if (approvalStatus === 'approved' || approvalStatus === 'denied') {
+    return { shouldSend: false, triggerX: 0 };
+  }
+
   const x =
     currentX != null && Number.isFinite(Number(currentX))
       ? Number(currentX)

@@ -686,6 +686,48 @@ function getResolutionLines(trackedCall) {
 }
 
 function buildApprovalStatusEmbed(trackedCall, scan = null) {
+  const status = trackedCall.approvalStatus || 'pending';
+
+  if (status === 'approved' || status === 'denied') {
+    const ca = trackedCall.contractAddress || 'Unknown';
+    const tokenLine = `$${trackedCall.ticker || 'UNKNOWN'} — ${trackedCall.tokenName || 'Unknown Token'}`;
+    const triggerX = Number(trackedCall.lastApprovalTriggerX || 0);
+    const resultLine =
+      triggerX > 0 ? `📈 ${formatX(triggerX)} from call` : '📈 —';
+
+    const tagsCompact =
+      Array.isArray(trackedCall.moderationTags) && trackedCall.moderationTags.length
+        ? trackedCall.moderationTags.map(t => `\`${t}\``).join(' ')
+        : '—';
+    const notesCompact = trackedCall.moderationNotes || '—';
+
+    const lines = [
+      `**${tokenLine}**`,
+      `**CA:** \`${ca}\``,
+      resultLine,
+      '',
+      `**Tags:** ${tagsCompact}`,
+      `**Notes:** ${notesCompact}`
+    ];
+
+    lines.push(...getResolutionLines(trackedCall));
+
+    return new EmbedBuilder()
+      .setColor(status === 'approved' ? 0x22c55e : 0xef4444)
+      .setTitle(
+        status === 'approved'
+          ? '✅ Coin Approved'
+          : '❌ Coin Denied'
+      )
+      .setDescription(lines.join('\n'))
+      .setFooter({
+        text: trackedCall.moderatedByUsername
+          ? `Moderated by ${trackedCall.moderatedByUsername}`
+          : 'Resolved'
+      })
+      .setTimestamp();
+  }
+
   const ath = Number(
     trackedCall.ath ||
     trackedCall.athMc ||
@@ -701,10 +743,7 @@ function buildApprovalStatusEmbed(trackedCall, scan = null) {
   const currentX = firstCalledMc > 0 ? currentMc / firstCalledMc : 0;
   const drawdown = ath > 0 ? ((ath - currentMc) / ath) * 100 : 0;
 
-  const status = trackedCall.approvalStatus || 'pending';
   const statusLabel =
-    status === 'approved' ? '✅ APPROVED' :
-    status === 'denied' ? '❌ DENIED' :
     status === 'excluded' ? '🗑 EXCLUDED' :
     status === 'expired' ? '⌛ EXPIRED' :
     '⏳ PENDING REVIEW';
@@ -760,8 +799,6 @@ if (trackedCall.callSourceType === 'bot_call') {
 
   const embed = new EmbedBuilder()
     .setColor(
-      status === 'approved' ? 0x22c55e :
-      status === 'denied' ? 0xef4444 :
       status === 'excluded' ? 0x64748b :
       status === 'expired' ? 0x94a3b8 :
       0xf59e0b
@@ -787,10 +824,13 @@ if (trackedCall.callSourceType === 'bot_call') {
   return embed;
 }
 
-function buildXPostText(trackedCall, milestoneX, isReply = false) {
+function buildXPostText(trackedCall, displayXFromCall, isReply = false) {
   const ticker = trackedCall.ticker || 'UNKNOWN';
   const ca = trackedCall.contractAddress;
   const caller = getPreferredPublicName(getUserProfileByDiscordId(trackedCall.firstCallerDiscordId || trackedCall.firstCallerId || '')) || trackedCall.firstCallerPublicName || trackedCall.firstCallerDisplayName || trackedCall.firstCallerUsername || (trackedCall.callSourceType === 'bot_call' ? 'McGBot' : trackedCall.callSourceType === 'watch_only' ? 'No caller credit' : 'Unknown');
+  const xLabel = Number.isFinite(Number(displayXFromCall))
+    ? Number(displayXFromCall).toFixed(2)
+    : '0.00';
   const athMc = formatUsd(
     trackedCall.ath ||
     trackedCall.athMc ||
@@ -802,7 +842,7 @@ function buildXPostText(trackedCall, milestoneX, isReply = false) {
 
   if (!isReply) {
     return [
-      `📊 $${ticker} just reached ${milestoneX}x from call.`,
+      `📊 $${ticker} just reached ${xLabel}x from call.`,
       ``,
       `Called by: ${caller}`,
       `ATH Market Cap: ${athMc}`,
@@ -813,7 +853,7 @@ function buildXPostText(trackedCall, milestoneX, isReply = false) {
   }
 
   return [
-    `📈 $${ticker} has now reached ${milestoneX}x from call.`,
+    `📈 $${ticker} has now reached ${xLabel}x from call.`,
     ``,
     `ATH Market Cap: ${athMc}`,
     `CA: In OP`
@@ -841,7 +881,16 @@ async function publishApprovedCoinToX(contractAddress) {
 
   const hasOriginal = !!trackedCall.xOriginalPostId;
 
-  const postText = buildXPostText(trackedCall, milestoneX, hasOriginal);
+  const firstCalledMc = Number(trackedCall.firstCalledMarketCap || 0);
+  const latestMc = Number(
+    trackedCall.latestMarketCap ||
+    trackedCall.firstCalledMarketCap ||
+    0
+  );
+  const rawSpotX = firstCalledMc > 0 ? latestMc / firstCalledMc : 0;
+  const displayXFromCall = Number(rawSpotX.toFixed(2));
+
+  const postText = buildXPostText(trackedCall, displayXFromCall, hasOriginal);
   const result = await createPost(postText, hasOriginal ? trackedCall.xOriginalPostId : null);
 
   if (!result.success || !result.id) {
@@ -1548,28 +1597,19 @@ if (
 let updated = null;
 
       if (action === 'approve_call') {
+        await interaction.deferUpdate();
+
         updated = setApprovalStatus(contractAddress, 'approved', {
-  moderatedById: interaction.user.id,
-  moderatedByUsername: interaction.user.username
-});
+          moderatedById: interaction.user.id,
+          moderatedByUsername: interaction.user.username
+        });
 
-        const xResult = await publishApprovedCoinToX(contractAddress);
+        await publishApprovedCoinToX(contractAddress);
 
-        await refreshApprovalMessage(interaction.guild, contractAddress);
-
-        let publishLine = '';
-        if (xResult.success) {
-          publishLine = xResult.reply
-            ? `\n📤 Posted update reply to X at **${xResult.milestoneX}x**`
-            : `\n📤 Posted original X thread at **${xResult.milestoneX}x**`;
-        } else {
-          publishLine = `\n⚠️ X post not sent: \`${xResult.reason}\``;
-        }
-
-        await interaction.reply({
-          content: `✅ Approved **${updated.tokenName || 'Unknown Token'}**${publishLine}\n\nWould you like to add tags or notes?`,
-          components: buildModerationFollowupButtons(contractAddress),
-          ephemeral: true
+        const approvedCall = getTrackedCall(contractAddress);
+        await interaction.message.edit({
+          embeds: [buildApprovalStatusEmbed(approvedCall)],
+          components: []
         });
 
         return;
@@ -1577,16 +1617,13 @@ let updated = null;
 
       if (action === 'deny_call') {
         updated = setApprovalStatus(contractAddress, 'denied', {
-  moderatedById: interaction.user.id,
-  moderatedByUsername: interaction.user.username
-});
+          moderatedById: interaction.user.id,
+          moderatedByUsername: interaction.user.username
+        });
 
-        await refreshApprovalMessage(interaction.guild, contractAddress);
-
-        await interaction.reply({
-          content: `❌ Denied **${updated.tokenName || 'Unknown Token'}**\n\nWould you like to add tags or notes?`,
-          components: buildModerationFollowupButtons(contractAddress),
-          ephemeral: true
+        await interaction.update({
+          embeds: [buildApprovalStatusEmbed(getTrackedCall(contractAddress))],
+          components: []
         });
 
         return;
@@ -1594,16 +1631,13 @@ let updated = null;
 
       if (action === 'exclude_call') {
         updated = setApprovalStatus(contractAddress, 'excluded', {
-  moderatedById: interaction.user.id,
-  moderatedByUsername: interaction.user.username
-});
+          moderatedById: interaction.user.id,
+          moderatedByUsername: interaction.user.username
+        });
 
-        await refreshApprovalMessage(interaction.guild, contractAddress);
-
-        await interaction.reply({
-          content: `🗑 Excluded **${updated.tokenName || 'Unknown Token'}** from stats.\n\nWould you like to add tags or notes?`,
-          components: buildModerationFollowupButtons(contractAddress),
-          ephemeral: true
+        await interaction.update({
+          embeds: [buildApprovalStatusEmbed(getTrackedCall(contractAddress))],
+          components: buildModerationFollowupButtons(contractAddress)
         });
 
         return;
@@ -1623,16 +1657,18 @@ let updated = null;
         const latestTrackedCall = getTrackedCall(contractAddress);
 
         if (latestTrackedCall?.approvalStatus && latestTrackedCall.approvalStatus !== 'pending') {
-          await deleteApprovalMessage(interaction.guild, latestTrackedCall);
           clearApprovalRequest(contractAddress);
+          const finalized = getTrackedCall(contractAddress) || latestTrackedCall;
 
           await interaction.update({
-            content: '✅ Moderation complete. Removed from active review queue.',
+            content: '✅ Moderation complete.',
+            embeds: [buildApprovalStatusEmbed(finalized)],
             components: []
           });
         } else {
           await interaction.update({
-            content: '⚠️ Please approve, deny, or exclude this coin before finishing.',
+            content: '⚠️ Approve, deny, or exclude this coin before finishing.',
+            embeds: [buildApprovalStatusEmbed(getTrackedCall(contractAddress) || latestTrackedCall)],
             components: buildModerationFollowupButtons(contractAddress)
           });
         }
@@ -1747,12 +1783,10 @@ let updated = null;
           username: interaction.user.username
         });
 
-        await refreshApprovalMessage(interaction.guild, contractAddress);
-
-        await interaction.reply({
-          content: `🏷 Added tag: \`${tag}\``,
-          components: buildModerationFollowupButtons(contractAddress),
-          ephemeral: true
+        const afterTag = getTrackedCall(contractAddress);
+        await interaction.update({
+          embeds: [buildApprovalStatusEmbed(afterTag)],
+          components: buildModerationFollowupButtons(contractAddress)
         });
 
         return;
@@ -1774,12 +1808,10 @@ let updated = null;
           username: interaction.user.username
         });
 
-        await refreshApprovalMessage(interaction.guild, contractAddress);
-
-        await interaction.reply({
-          content: `📝 Note saved.`,
-          components: buildModerationFollowupButtons(contractAddress),
-          ephemeral: true
+        const afterNote = getTrackedCall(contractAddress);
+        await interaction.update({
+          embeds: [buildApprovalStatusEmbed(afterNote)],
+          components: buildModerationFollowupButtons(contractAddress)
         });
 
         return;

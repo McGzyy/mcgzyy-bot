@@ -207,7 +207,7 @@ function createAutoCallEmbed(scan, profileName = 'balanced') {
     .setDescription(descriptionParts.join('\n'))
     .addFields(
       {
-        name: '🧾 Contract Address',
+        name: 'CA',
         value: `\`${formatValue(scan.contractAddress, 'Unknown')}\``,
         inline: false
       },
@@ -252,7 +252,7 @@ function createAutoCallEmbed(scan, profileName = 'balanced') {
   return embed;
 }
 
-function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent) {
+function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent, realXFromCall = null) {
   const tokenName = getSafeCoinName(coin, scan);
   const ticker = getSafeTicker(coin, scan);
   const contractAddress = getSafeContractAddress(coin, scan);
@@ -274,7 +274,10 @@ function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent) {
     `# 🔥 ${milestoneText} 🔥`,
     '',
     `## ${formatUsd(currentMc)} MC`,
-    `🚀 **Milestone**`
+    `🚀 **Milestone**`,
+    ...(realXFromCall != null && Number.isFinite(Number(realXFromCall))
+      ? [`📈 ${Number(realXFromCall).toFixed(2)}x from call`]
+      : [])
   ];
 
   if (quickTradeLinks) descriptionParts.push('', quickTradeLinks);
@@ -292,7 +295,7 @@ function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent) {
     .setDescription(descriptionParts.join('\n'))
     .addFields(
       {
-        name: '🧾 Contract Address',
+        name: 'CA',
         value: `\`${formatValue(contractAddress, 'Unknown')}\``,
         inline: false
       },
@@ -301,7 +304,10 @@ function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent) {
         value:
           `**First Called MC:** ${formatUsd(firstCalledMc)}\n` +
           `**Current MC:** ${formatUsd(currentMc)}\n` +
-          `**Milestone:** ${formatValue(milestoneKey, 'N/A')}`,
+          `**Milestone:** ${formatValue(milestoneKey, 'N/A')}` +
+          (realXFromCall != null && Number.isFinite(Number(realXFromCall))
+            ? `\n**From call:** ${Number(realXFromCall).toFixed(2)}x`
+            : ''),
         inline: true
       },
       {
@@ -366,7 +372,7 @@ function createDumpEmbed(coin, scan, dumpKey, drawdownPercent) {
     .setDescription(descriptionParts.join('\n'))
     .addFields(
       {
-        name: '🧾 Contract Address',
+        name: 'CA',
         value: `\`${formatValue(contractAddress, 'Unknown')}\``,
         inline: false
       },

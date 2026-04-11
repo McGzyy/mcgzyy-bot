@@ -3,7 +3,7 @@ const { autoCallConfig } = require('../config/autoCallConfig');
 const { scanFilterConfig } = require('../config/scanFilterConfig');
 const { AttachmentBuilder } = require('discord.js');
 const { createAutoCallEmbed } = require('./alertEmbeds');
-const { captureDexScreenerChartPng } = require('./chartScreenshot');
+const { captureTradingViewChart } = require('./chartCapture');
 const { loadScannerSettings } = require('./scannerSettingsService');
 const {
   saveTrackedCall,
@@ -160,7 +160,10 @@ async function revalidateQueuedCandidate(contractAddress, profileName) {
 
 async function hydrateAutoCallChartMessage(message, scan, profileName) {
   try {
-    const buf = await captureDexScreenerChartPng(scan.contractAddress);
+    const buf = await captureTradingViewChart(scan.contractAddress, {
+      pairAddress: scan.pairAddress,
+      ticker: scan.ticker
+    });
     const embed = createAutoCallEmbed(scan, profileName, {
       chartPending: false,
       chartImageUrl: buf ? 'attachment://chart.png' : undefined

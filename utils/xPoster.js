@@ -57,7 +57,31 @@ function buildOAuthHeader(method, url, extraParams = {}) {
   return authHeader;
 }
 
-async function createPost(text, replyToId = null) {
+async function uploadMediaPng(buffer) {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 100) return null;
+
+  const uploadUrl = 'https://upload.twitter.com/1.1/media/upload.json';
+  const authHeader = buildOAuthHeader('POST', uploadUrl);
+
+  const params = new URLSearchParams();
+  params.set('media_data', buffer.toString('base64'));
+
+  try {
+    const response = await axios.post(uploadUrl, params.toString(), {
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+
+    return response?.data?.media_id_string || null;
+  } catch (error) {
+    console.error('[XPoster] Media upload failed:', error?.response?.data || error.message);
+    return null;
+  }
+}
+
+async function createPost(text, replyToId = null, mediaPngBuffer = null) {
   const url = `${X_API_BASE}/tweets`;
 
   const body = {
@@ -68,6 +92,18 @@ async function createPost(text, replyToId = null) {
     body.reply = {
       in_reply_to_tweet_id: replyToId
     };
+  }
+
+  let mediaId = null;
+  if (mediaPngBuffer && !replyToId) {
+    try {
+      mediaId = await uploadMediaPng(mediaPngBuffer);
+    } catch (_) {
+      mediaId = null;
+    }
+    if (mediaId) {
+      body.media = { media_ids: [mediaId] };
+    }
   }
 
   const authHeader = buildOAuthHeader('POST', url);
@@ -100,5 +136,6 @@ async function createPost(text, replyToId = null) {
 }
 
 module.exports = {
-  createPost
+  createPost,
+  uploadMediaPng
 };

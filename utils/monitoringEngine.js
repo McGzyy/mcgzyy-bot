@@ -18,6 +18,7 @@ const {
 } = require('./alertEmbeds');
 const { enqueueAlert } = require('./alertQueue');
 const { createPost } = require('./xPoster');
+const { captureTradingViewChart } = require('./chartCapture');
 const { resolvePublicCallerName } = require('./userProfileService');
 const {
   determineLifecycleStatus,
@@ -259,9 +260,23 @@ async function maybePublishApprovedMilestoneToX(trackedCall) {
     const hasOriginal = !!trackedCall.xOriginalPostId;
 
     const postText = buildXPostText(trackedCall);
+
+    let chartBuf = null;
+    if (!hasOriginal) {
+      try {
+        chartBuf = await captureTradingViewChart(trackedCall.contractAddress, {
+          pairAddress: trackedCall.pairAddress || null,
+          ticker: trackedCall.ticker
+        });
+      } catch (_) {
+        chartBuf = null;
+      }
+    }
+
     const result = await createPost(
       postText,
-      hasOriginal ? trackedCall.xOriginalPostId : null
+      hasOriginal ? trackedCall.xOriginalPostId : null,
+      chartBuf || undefined
     );
 
     if (!result.success || !result.id) {

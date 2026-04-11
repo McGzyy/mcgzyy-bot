@@ -206,7 +206,7 @@ function createAutoCallEmbed(scan, profileName = 'balanced', options = {}) {
   if (options.chartPending) {
     mainFields.push({
       name: '📊 Chart',
-      value: 'Chart Loading...',
+      value: 'Loading…',
       inline: false
     });
   }
@@ -244,6 +244,15 @@ function createAutoCallEmbed(scan, profileName = 'balanced', options = {}) {
     .addFields(mainFields)
     .setFooter({ text: isManual ? 'Crypto Scanner Bot • Manual Call' : 'Crypto Scanner Bot • Auto Call' })
     .setTimestamp();
+
+  const tokenThumb = scan.token?.imageUrl;
+  if (typeof tokenThumb === 'string' && tokenThumb.trim()) {
+    try {
+      embed.setThumbnail(tokenThumb.trim());
+    } catch (_) {
+      /* ignore invalid thumbnail URL */
+    }
+  }
 
   if (options.chartImageUrl) {
     embed.setImage(options.chartImageUrl);

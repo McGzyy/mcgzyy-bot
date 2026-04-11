@@ -26,6 +26,7 @@ const {
 const { startMonitoring, stopMonitoring } = require('./utils/monitoringEngine');
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
 const { createPost } = require('./utils/xPoster');
+const { captureTradingViewChart } = require('./utils/chartCapture');
 
 const {
   createAutoCallEmbed,
@@ -884,7 +885,24 @@ async function publishApprovedCoinToX(contractAddress) {
   const hasOriginal = !!trackedCall.xOriginalPostId;
 
   const postText = buildXPostText(trackedCall);
-  const result = await createPost(postText, hasOriginal ? trackedCall.xOriginalPostId : null);
+
+  let chartBuf = null;
+  if (!hasOriginal) {
+    try {
+      chartBuf = await captureTradingViewChart(trackedCall.contractAddress, {
+        pairAddress: trackedCall.pairAddress || null,
+        ticker: trackedCall.ticker
+      });
+    } catch (_) {
+      chartBuf = null;
+    }
+  }
+
+  const result = await createPost(
+    postText,
+    hasOriginal ? trackedCall.xOriginalPostId : null,
+    chartBuf || undefined
+  );
 
   if (!result.success || !result.id) {
     return {

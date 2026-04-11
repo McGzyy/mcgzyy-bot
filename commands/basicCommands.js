@@ -22,7 +22,7 @@ const {
   getCallerLeaderboard,
   getBotStats
 } = require('../utils/callerStatsService');
-const { captureDexScreenerChartPng } = require('../utils/chartScreenshot');
+const { captureTradingViewChart } = require('../utils/chartCapture');
 
 function memberCanManageGuild(member) {
   if (!member?.permissions) return false;
@@ -346,11 +346,14 @@ function buildScanFlags(data) {
 
 function normalizeRealDataToScan(realData) {
   const score = calculateQuickRealScore(realData);
+  const tokenImageUrl =
+    realData.token?.imageUrl || realData.token?.logoURI || null;
 
   return {
     tokenName: realData.token?.tokenName || 'Unknown Token',
     ticker: realData.token?.ticker || 'UNKNOWN',
     contractAddress: realData.token?.contractAddress || 'Unknown',
+    pairAddress: realData.token?.pairAddress || null,
     website: realData.token?.website || null,
     twitter: realData.token?.twitter || null,
     telegram: realData.token?.telegram || null,
@@ -382,7 +385,11 @@ function normalizeRealDataToScan(realData) {
     alertType: getQuickAlertType(score),
     status: score >= 70 ? 'Strong' : score >= 55 ? 'Watch' : 'Risky',
     conviction: score >= 80 ? 'High' : score >= 60 ? 'Moderate' : 'Low',
-    riskLevel: getRiskLabel(realData)
+    riskLevel: getRiskLabel(realData),
+
+    ...(tokenImageUrl && String(tokenImageUrl).trim()
+      ? { token: { imageUrl: String(tokenImageUrl).trim() } }
+      : {})
   };
 }
 
@@ -738,7 +745,7 @@ function createTraderScanEmbed(scan, options = {}) {
   if (options.chartPending) {
     fields.push({
       name: '📊 Chart',
-      value: 'Chart Loading...',
+      value: 'Loading…',
       inline: false
     });
   }
@@ -828,6 +835,15 @@ function createTraderScanEmbed(scan, options = {}) {
     .setFooter({ text: 'Crypto Scanner Bot • Trader Scan' })
     .setTimestamp();
 
+  const tokenThumb = scan.token?.imageUrl;
+  if (typeof tokenThumb === 'string' && tokenThumb.trim()) {
+    try {
+      embed.setThumbnail(tokenThumb.trim());
+    } catch (_) {
+      /* ignore invalid thumbnail URL */
+    }
+  }
+
   if (options.chartImageUrl) {
     embed.setImage(options.chartImageUrl);
   }
@@ -837,7 +853,10 @@ function createTraderScanEmbed(scan, options = {}) {
 
 async function hydrateTraderCallChartMessage(message, scan, embedOptions = {}) {
   try {
-    const buf = await captureDexScreenerChartPng(scan.contractAddress);
+    const buf = await captureTradingViewChart(scan.contractAddress, {
+      pairAddress: scan.pairAddress,
+      ticker: scan.ticker
+    });
     const embed = createTraderScanEmbed(scan, {
       ...embedOptions,
       chartPending: false,

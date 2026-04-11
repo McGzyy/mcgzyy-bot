@@ -427,7 +427,11 @@ function buildScanObject(base) {
     holders: base.holders ?? null,
 
     greenFlags,
-    redFlags
+    redFlags,
+
+    ...(base.tokenImageUrl
+      ? { token: { imageUrl: base.tokenImageUrl } }
+      : {})
   };
 }
 
@@ -594,6 +598,10 @@ async function generateRealScan(contractAddress, geckoCandidate = null) {
       website: realData.token?.website || null,
       twitter: realData.token?.twitter || null,
       telegram: realData.token?.telegram || null,
+      tokenImageUrl: cleanString(
+        realData.token?.imageUrl || realData.token?.logoURI,
+        ''
+      ),
 
       marketCap,
       liquidity,

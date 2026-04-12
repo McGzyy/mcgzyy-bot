@@ -46,6 +46,13 @@ const {
 
 const { recordModAction } = require('./utils/modActionsService');
 const { startAdminReports } = require('./utils/adminReportsService');
+const {
+  createPendingDevSubmission,
+  takePendingDevSubmission,
+  returnPendingDevSubmission,
+  updatePendingDevSubmission,
+  parseCommaSeparatedAddresses
+} = require('./utils/devSubmissionService');
 
 const {
   createAutoCallEmbed,
@@ -153,6 +160,33 @@ function findXVerifyTextChannel(guild) {
     ) || null
   );
 }
+
+const DEV_INTEL_PROMPT_TITLE = '📋 Submit a Dev';
+const DEV_INTEL_CHANNEL_SLUGS = new Set(['dev-intel']);
+
+function findDevIntelTextChannel(guild) {
+  if (!guild?.channels?.cache) return null;
+  return (
+    guild.channels.cache.find(
+      ch => ch.isTextBased() && DEV_INTEL_CHANNEL_SLUGS.has(ch.name)
+    ) || null
+  );
+}
+
+function getModApprovalsChannel(guild) {
+  if (!guild?.channels?.cache) return null;
+  return (
+    guild.channels.cache.find(
+      ch =>
+        ch &&
+        ch.isTextBased &&
+        typeof ch.isTextBased === 'function' &&
+        ch.isTextBased() &&
+        ch.name === 'mod-approvals'
+    ) || null
+  );
+}
+
 const X_VERIFIED_ROLE_NAME = 'X Verified';
 const MOD_CHANNEL_NAME = 'mod-chat';
 
@@ -713,6 +747,239 @@ function buildXVerifyButtons(userId, handle) {
         .setStyle(ButtonStyle.Danger)
     )
   ];
+}
+
+function buildDevIntelChannelEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x10b981)
+    .setTitle(DEV_INTEL_PROMPT_TITLE)
+    .setDescription([
+      'Submit a developer for the **tracked devs** registry.',
+      '',
+      'Mods review submissions in **#mod-approvals**. **Nothing is added to the registry until a mod approves.**',
+      '',
+      '• **Dev name** is required.',
+      '• **At least one Solana dev wallet** is required (comma-separated if several).',
+      '• **Coins (CAs)** are optional — known tokens can be linked from tracked calls after approval.',
+      '• **Tags** and **notes** are optional.'
+    ].join('\n'))
+    .setTimestamp();
+}
+
+function buildDevIntelChannelButtons() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('dev_submit_start')
+        .setLabel('Submit Dev')
+        .setStyle(ButtonStyle.Primary)
+    )
+  ];
+}
+
+function buildDevSubmitModal() {
+  return new ModalBuilder()
+    .setCustomId('dev_submit_modal')
+    .setTitle('Submit dev for mod review')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dev_sm_nick')
+          .setLabel('Dev name / nickname')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMinLength(1)
+          .setMaxLength(100)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dev_sm_coins')
+          .setLabel('Coins (CAs), comma-separated — optional')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setPlaceholder('Token mint addresses')
+          .setMaxLength(1000)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dev_sm_wallets')
+          .setLabel('Wallets — comma-separated (≥1 required)')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setPlaceholder('Solana dev wallet(s)')
+          .setMaxLength(1000)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dev_sm_tags')
+          .setLabel('Tags — optional, comma-separated')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(200)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dev_sm_notes')
+          .setLabel('Notes — optional')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setMaxLength(1000)
+      )
+    );
+}
+
+function buildDevSubmissionReviewEmbed(submission) {
+  const fmtList = (arr, max = 15) => {
+    if (!Array.isArray(arr) || !arr.length) return '—';
+    const slice = arr.slice(0, max);
+    const lines = slice.map(a => `\`${a}\``).join('\n');
+    return arr.length > max ? `${lines}\n*+${arr.length - max} more*` : lines;
+  };
+
+  const tags =
+    Array.isArray(submission.tags) && submission.tags.length
+      ? submission.tags.join(', ')
+      : '—';
+
+  return new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setTitle('🧪 Dev submission — pending review')
+    .setDescription(
+      `**Submitted by:** <@${submission.submitterId}> (${submission.submitterUsername})\n**ID:** \`${submission.id}\``
+    )
+    .addFields(
+      { name: 'Nickname', value: (submission.nickname || '—').slice(0, 1024), inline: false },
+      { name: 'Wallets', value: fmtList(submission.walletAddresses).slice(0, 1024), inline: false },
+      { name: 'Coins (CAs)', value: fmtList(submission.coinAddresses).slice(0, 1024), inline: false },
+      { name: 'Tags', value: tags.slice(0, 1024), inline: false },
+      { name: 'Notes', value: (submission.notes || '—').slice(0, 1024), inline: false }
+    )
+    .setTimestamp(new Date(submission.createdAt));
+}
+
+function buildDevSubmissionReviewButtons(submissionId) {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`dev_sub_approve:${submissionId}`)
+        .setLabel('Approve dev')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId(`dev_sub_deny:${submissionId}`)
+        .setLabel('Deny')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`dev_sub_edit:${submissionId}`)
+        .setLabel('Edit')
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
+function buildDevSubmissionEditModal(submissionId, submission) {
+  const walletsStr = (submission.walletAddresses || []).join(', ');
+  const coinsStr = (submission.coinAddresses || []).join(', ');
+  const tagsStr = (submission.tags || []).join(', ');
+  const notesStr = String(submission.notes || '');
+
+  const clip = (s, max) => String(s || '').slice(0, max);
+
+  return new ModalBuilder()
+    .setCustomId(`dev_sub_edit_modal:${submissionId}`)
+    .setTitle('Edit submission (mods)')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dev_ed_wallets')
+          .setLabel('Wallets — comma-separated (≥1)')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setValue(clip(walletsStr, 950))
+          .setMaxLength(1000)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dev_ed_coins')
+          .setLabel('Coins (CAs) — comma-separated')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setValue(clip(coinsStr, 950))
+          .setMaxLength(1000)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dev_ed_tags')
+          .setLabel('Tags — comma-separated')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setValue(clip(tagsStr, 95))
+          .setMaxLength(100)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('dev_ed_notes')
+          .setLabel('Notes')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(false)
+          .setValue(clip(notesStr, 950))
+          .setMaxLength(1000)
+      )
+    );
+}
+
+function parseDevSubmitTags(text) {
+  return String(text || '')
+    .split(/[,;\n]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .slice(0, 25);
+}
+
+function appendMergedDevNote(existingNote, sectionLabel, body) {
+  const b = String(body || '').trim();
+  if (!b) return String(existingNote || '').trim();
+  const prev = String(existingNote || '').trim();
+  const block = `**${sectionLabel}**\n${b}`;
+  if (!prev) return block.slice(0, 3500);
+  return `${prev}\n\n---\n${block}`.slice(0, 3500);
+}
+
+async function refreshDevSubmissionApprovalMessage(client, submission) {
+  try {
+    const gid = submission.approvalGuildId;
+    const cid = submission.approvalChannelId;
+    const mid = submission.approvalMessageId;
+    if (!gid || !cid || !mid) return false;
+
+    const guild =
+      client.guilds.cache.get(gid) || (await client.guilds.fetch(gid).catch(() => null));
+    if (!guild) return false;
+
+    const channel =
+      guild.channels.cache.get(cid) || (await guild.channels.fetch(cid).catch(() => null));
+    if (
+      !channel ||
+      typeof channel.isTextBased !== 'function' ||
+      !channel.isTextBased()
+    ) {
+      return false;
+    }
+
+    const msg = await channel.messages.fetch(mid).catch(() => null);
+    if (!msg) return false;
+
+    const fresh = await peekPendingDevSubmission(submission.id);
+    if (!fresh) return false;
+
+    await msg.edit({
+      embeds: [buildDevSubmissionReviewEmbed(fresh)],
+      components: buildDevSubmissionReviewButtons(submission.id)
+    });
+    return true;
+  } catch (e) {
+    console.error('[DevSubmission] Refresh approval message failed:', e.message || e);
+    return false;
+  }
 }
 
 function buildApprovalButtons(contractAddress) {
@@ -1441,6 +1708,281 @@ async function handleXVerificationReply(message) {
   return false;
 }
 
+async function ensureDevIntelPrompt(guild) {
+  try {
+    if (!guild) return;
+
+    const intelChannel = findDevIntelTextChannel(guild);
+    if (!intelChannel) return;
+
+    const recentMessages = await intelChannel.messages.fetch({ limit: 10 }).catch(() => null);
+    if (!recentMessages) return;
+
+    const existingBotPrompt = recentMessages.find(
+      msg =>
+        msg.author?.id === client.user.id && msg.embeds?.[0]?.title === DEV_INTEL_PROMPT_TITLE
+    );
+
+    if (existingBotPrompt) return;
+
+    await intelChannel.send({
+      embeds: [buildDevIntelChannelEmbed()],
+      components: buildDevIntelChannelButtons()
+    });
+  } catch (error) {
+    console.error('[DevIntel] Failed to ensure dev-intel prompt:', error.message);
+  }
+}
+
+async function handleDevSubmissionApprove(interaction, submissionId) {
+  if (!interaction.guild) {
+    await interaction.reply({ content: '❌ Use this in a server.', ephemeral: true });
+    return;
+  }
+
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply({
+      content: '❌ You do not have permission to use this.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (interaction.channel?.name !== 'mod-approvals') {
+    await interaction.reply({
+      content: '❌ This action can only be used in #mod-approvals.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  const submission = await takePendingDevSubmission(submissionId);
+  if (!submission) {
+    await interaction.reply({
+      content: 'This submission was already handled.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  const wallets = submission.walletAddresses || [];
+  if (!wallets.length) {
+    await returnPendingDevSubmission(submission);
+    await interaction.reply({
+      content: '❌ Submission has no wallet — cannot approve. Restored to queue.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  let mergeTarget = null;
+  for (const w of wallets) {
+    if (getTrackedDev(w)) {
+      mergeTarget = w;
+      break;
+    }
+  }
+
+  const targetWallet = mergeTarget || wallets[0];
+  const isMerge = mergeTarget !== null;
+  const tagList = Array.isArray(submission.tags) ? submission.tags : [];
+  const notInTracker = (submission.coinAddresses || []).filter(ca => !getTrackedCall(ca));
+  const otherWallets = wallets.filter(w => w !== targetWallet);
+
+  try {
+    let launchesLinked = 0;
+
+    if (isMerge) {
+      const existing = getTrackedDev(targetWallet);
+      if (!existing) {
+        throw new Error('Merge target dev missing');
+      }
+
+      let mergedTags = [...new Set([...(existing.tags || []), ...tagList])].slice(0, 25);
+
+      let note = existing.note || '';
+      if (submission.notes) {
+        note = appendMergedDevNote(note, 'Mod-reviewed notes', submission.notes);
+      }
+      if (otherWallets.length) {
+        note = appendMergedDevNote(note, 'Wallets merged from submission', otherWallets.join(', '));
+      }
+      if (notInTracker.length) {
+        note = appendMergedDevNote(
+          note,
+          'CAs not in tracked calls',
+          `${notInTracker.join(', ')} (add manually if needed)`
+        );
+      }
+
+      const updates = { tags: mergedTags, note };
+      const nick = String(submission.nickname || '').trim();
+      if (nick && !String(existing.nickname || '').trim()) {
+        updates.nickname = nick;
+      }
+      updateTrackedDev(targetWallet, updates);
+
+      for (const ca of submission.coinAddresses || []) {
+        const trackedCall = getTrackedCall(ca);
+        if (!trackedCall) continue;
+        const athMarketCap = Number(
+          trackedCall.ath ||
+            trackedCall.athMc ||
+            trackedCall.athMarketCap ||
+            trackedCall.latestMarketCap ||
+            trackedCall.firstCalledMarketCap ||
+            0
+        );
+        const firstCalledMarketCap = Number(trackedCall.firstCalledMarketCap || 0);
+        let xFromCall = 0;
+        if (firstCalledMarketCap > 0 && athMarketCap > 0) {
+          xFromCall = Number((athMarketCap / firstCalledMarketCap).toFixed(2));
+        }
+        const launchEntry = {
+          tokenName: trackedCall.tokenName || 'Unknown Token',
+          ticker: trackedCall.ticker || 'UNKNOWN',
+          contractAddress: trackedCall.contractAddress,
+          athMarketCap,
+          firstCalledMarketCap,
+          xFromCall,
+          discordMessageId: trackedCall.discordMessageId || null,
+          addedAt: new Date().toISOString()
+        };
+        if (addLaunchToTrackedDev(targetWallet, launchEntry)) {
+          launchesLinked += 1;
+        }
+      }
+    } else {
+      const noteParts = [submission.notes].filter(Boolean);
+      if (otherWallets.length) {
+        noteParts.push(`Additional wallets: ${otherWallets.join(', ')}`);
+      }
+      if (notInTracker.length) {
+        noteParts.push(`CAs not in tracked calls (add manually if needed): ${notInTracker.join(', ')}`);
+      }
+      const combinedNote = noteParts.join('\n\n').slice(0, 3500);
+
+      const createdDev = addTrackedDev({
+        walletAddress: targetWallet,
+        addedById: submission.submitterId,
+        addedByUsername: submission.submitterUsername || 'Unknown',
+        nickname: submission.nickname,
+        note: combinedNote
+      });
+
+      if (tagList.length && createdDev) {
+        const merged = [...new Set([...(createdDev.tags || []), ...tagList])].slice(0, 25);
+        updateTrackedDev(targetWallet, { tags: merged });
+      }
+
+      for (const ca of submission.coinAddresses || []) {
+        const trackedCall = getTrackedCall(ca);
+        if (!trackedCall) continue;
+        const athMarketCap = Number(
+          trackedCall.ath ||
+            trackedCall.athMc ||
+            trackedCall.athMarketCap ||
+            trackedCall.latestMarketCap ||
+            trackedCall.firstCalledMarketCap ||
+            0
+        );
+        const firstCalledMarketCap = Number(trackedCall.firstCalledMarketCap || 0);
+        let xFromCall = 0;
+        if (firstCalledMarketCap > 0 && athMarketCap > 0) {
+          xFromCall = Number((athMarketCap / firstCalledMarketCap).toFixed(2));
+        }
+        const launchEntry = {
+          tokenName: trackedCall.tokenName || 'Unknown Token',
+          ticker: trackedCall.ticker || 'UNKNOWN',
+          contractAddress: trackedCall.contractAddress,
+          athMarketCap,
+          firstCalledMarketCap,
+          xFromCall,
+          discordMessageId: trackedCall.discordMessageId || null,
+          addedAt: new Date().toISOString()
+        };
+        if (addLaunchToTrackedDev(targetWallet, launchEntry)) {
+          launchesLinked += 1;
+        }
+      }
+    }
+
+    recordModAction({
+      moderatorId: interaction.user.id,
+      actionType: 'dev',
+      dedupeKey: `interaction:${interaction.id}:dev_sub_approve:${submissionId}`
+    });
+
+    await interaction.deferUpdate();
+    const mergeLine = isMerge ? '\n**Mode:** merged into existing dev' : '';
+    const doneEmbed = new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setTitle('✅ Dev submission approved')
+      .setDescription(
+        [
+          `**Registry wallet:** \`${targetWallet}\` — **${submission.nickname || '—'}**`,
+          `**Launches linked from tracked calls:** ${launchesLinked}`,
+          `**Approved by:** <@${interaction.user.id}>${mergeLine}`
+        ].join('\n')
+      )
+      .setTimestamp();
+
+    await interaction.message.edit({ embeds: [doneEmbed], components: [] });
+  } catch (e) {
+    console.error('[DevSubmission] Approve failed:', e.message || e);
+    await returnPendingDevSubmission(submission);
+    try {
+      await interaction.reply({
+        content: `❌ Failed to apply submission: ${e.message || 'error'}`,
+        ephemeral: true
+      });
+    } catch (_) {}
+  }
+}
+
+async function handleDevSubmissionDeny(interaction, submissionId) {
+  if (!interaction.guild) {
+    await interaction.reply({ content: '❌ Use this in a server.', ephemeral: true });
+    return;
+  }
+
+  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+    await interaction.reply({
+      content: '❌ You do not have permission to use this.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (interaction.channel?.name !== 'mod-approvals') {
+    await interaction.reply({
+      content: '❌ This action can only be used in #mod-approvals.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  const submission = await takePendingDevSubmission(submissionId);
+  if (!submission) {
+    await interaction.reply({
+      content: 'This submission was already handled.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  await interaction.deferUpdate();
+  const deniedEmbed = new EmbedBuilder()
+    .setColor(0xef4444)
+    .setTitle('❌ Dev submission denied')
+    .setDescription(
+      `**Nickname:** ${submission.nickname}\n**Denied by:** <@${interaction.user.id}>`
+    )
+    .setTimestamp();
+
+  await interaction.message.edit({ embeds: [deniedEmbed], components: [] });
+}
+
 async function ensureVerifyXPrompt(guild) {
   try {
     if (!guild) return;
@@ -1511,6 +2053,7 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
 }
 
   await ensureVerifyXPrompt(firstGuild);
+  await ensureDevIntelPrompt(firstGuild);
 
   setInterval(() => {
     cleanupExpiredApprovals().catch(err => {
@@ -1546,6 +2089,11 @@ client.on('interactionCreate', async (interaction) => {
 
       if (interaction.customId === 'xverify_start') {
         await interaction.showModal(buildVerifyXHandleModal({ fromChannel: true }));
+        return;
+      }
+
+      if (interaction.customId === 'dev_submit_start') {
+        await interaction.showModal(buildDevSubmitModal());
         return;
       }
 
@@ -1698,6 +2246,47 @@ if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) 
   await interaction.showModal(buildXVerifyDenyModal(userId, handle));
   return;
 }
+
+      if (parts[0] === 'dev_sub_edit' && parts[1]) {
+        if (!interaction.guild) {
+          await interaction.reply({ content: '❌ Use this in a server.', ephemeral: true });
+          return;
+        }
+        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+          await interaction.reply({
+            content: '❌ You do not have permission to use this.',
+            ephemeral: true
+          });
+          return;
+        }
+        if (interaction.channel?.name !== 'mod-approvals') {
+          await interaction.reply({
+            content: '❌ This action can only be used in #mod-approvals.',
+            ephemeral: true
+          });
+          return;
+        }
+        const pending = await peekPendingDevSubmission(parts[1]);
+        if (!pending) {
+          await interaction.reply({
+            content: 'This submission is no longer pending.',
+            ephemeral: true
+          });
+          return;
+        }
+        await interaction.showModal(buildDevSubmissionEditModal(parts[1], pending));
+        return;
+      }
+
+      if (parts[0] === 'dev_sub_approve' && parts[1]) {
+        await handleDevSubmissionApprove(interaction, parts[1]);
+        return;
+      }
+
+      if (parts[0] === 'dev_sub_deny' && parts[1]) {
+        await handleDevSubmissionDeny(interaction, parts[1]);
+        return;
+      }
 
       const [action, contractAddress] = interaction.customId.split(':');
       if (!action || !contractAddress) return;
@@ -2000,6 +2589,163 @@ let updated = null;
             ephemeral: true
           });
         }
+
+        return;
+      }
+
+      if (interaction.customId === 'dev_submit_modal') {
+        if (!interaction.guild) {
+          await interaction.reply({
+            content: '❌ Submit from inside a server.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const nickname = interaction.fields.getTextInputValue('dev_sm_nick').trim();
+        const coinsRaw = interaction.fields.getTextInputValue('dev_sm_coins');
+        const walletsRaw = interaction.fields.getTextInputValue('dev_sm_wallets');
+        const tagsRaw = interaction.fields.getTextInputValue('dev_sm_tags');
+        const notes = interaction.fields.getTextInputValue('dev_sm_notes').trim();
+
+        if (!nickname) {
+          await interaction.reply({
+            content: '❌ Dev name / nickname is required.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const walletAddresses = parseCommaSeparatedAddresses(walletsRaw, isLikelySolWallet);
+        const coinAddresses = parseCommaSeparatedAddresses(coinsRaw, isLikelySolWallet);
+
+        if (!walletAddresses.length) {
+          await interaction.reply({
+            content:
+              '❌ Add **at least one** valid Solana **wallet** (dev wallet). Put token mints under Coins (CAs), not Wallets.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const tags = parseDevSubmitTags(tagsRaw);
+
+        const submission = await createPendingDevSubmission({
+          submitterId: interaction.user.id,
+          submitterUsername: interaction.user.username,
+          nickname,
+          walletAddresses,
+          coinAddresses,
+          tags,
+          notes
+        });
+
+        const approvalsCh = getModApprovalsChannel(interaction.guild);
+        if (!approvalsCh) {
+          await takePendingDevSubmission(submission.id);
+          await interaction.reply({
+            content: '❌ **#mod-approvals** was not found. Ask an admin to create it.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        try {
+          const modMsg = await approvalsCh.send({
+            embeds: [buildDevSubmissionReviewEmbed(submission)],
+            components: buildDevSubmissionReviewButtons(submission.id)
+          });
+          await updatePendingDevSubmission(submission.id, {
+            approvalMessageId: modMsg.id,
+            approvalChannelId: modMsg.channelId,
+            approvalGuildId: interaction.guild.id
+          });
+        } catch (err) {
+          console.error('[DevSubmission] Failed to post to mod-approvals:', err.message || err);
+          await takePendingDevSubmission(submission.id);
+          await interaction.reply({
+            content: '❌ Could not post to **#mod-approvals**. Try again or contact an admin.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        await interaction.reply({
+          content:
+            '✅ Sent to **#mod-approvals** for review. Your dev is **not** added until a moderator approves.',
+          ephemeral: true
+        });
+
+        return;
+      }
+
+      if (parts[0] === 'dev_sub_edit_modal' && parts[1]) {
+        const submissionId = parts[1];
+
+        if (!interaction.guild) {
+          await interaction.reply({ content: '❌ Use this in a server.', ephemeral: true });
+          return;
+        }
+        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+          await interaction.reply({
+            content: '❌ You do not have permission to use this.',
+            ephemeral: true
+          });
+          return;
+        }
+        if (interaction.channel?.name !== 'mod-approvals') {
+          await interaction.reply({
+            content: '❌ Open this from **#mod-approvals**.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const existing = await peekPendingDevSubmission(submissionId);
+        if (!existing) {
+          await interaction.reply({
+            content: 'This submission is no longer pending.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const walletsRaw = interaction.fields.getTextInputValue('dev_ed_wallets');
+        const coinsRaw = interaction.fields.getTextInputValue('dev_ed_coins');
+        const tagsRaw = interaction.fields.getTextInputValue('dev_ed_tags');
+        const notes = interaction.fields.getTextInputValue('dev_ed_notes').trim();
+
+        const walletAddresses = parseCommaSeparatedAddresses(walletsRaw, isLikelySolWallet);
+        const coinAddresses = parseCommaSeparatedAddresses(coinsRaw, isLikelySolWallet);
+        const tags = parseDevSubmitTags(tagsRaw);
+
+        if (!walletAddresses.length) {
+          await interaction.reply({
+            content:
+              '❌ Need **at least one** valid Solana wallet. Token mints belong in Coins (CAs).',
+            ephemeral: true
+          });
+          return;
+        }
+
+        const updatedRow = await updatePendingDevSubmission(submissionId, {
+          walletAddresses,
+          coinAddresses,
+          tags,
+          notes
+        });
+
+        const refreshed = await refreshDevSubmissionApprovalMessage(
+          interaction.client,
+          updatedRow || existing
+        );
+
+        await interaction.reply({
+          content: refreshed
+            ? '✅ Submission updated. **Approve** uses these values.'
+            : '✅ Saved. Approve uses these values (embed could not be refreshed).',
+          ephemeral: true
+        });
 
         return;
       }

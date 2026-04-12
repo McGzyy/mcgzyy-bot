@@ -18,7 +18,15 @@ const {
 } = require('./alertEmbeds');
 const { enqueueAlert } = require('./alertQueue');
 const { createPost } = require('./xPoster');
-const { fetchGeckoChart } = require('./chartCapture');
+const { AttachmentBuilder } = require('discord.js');
+const {
+  buildOhlcvCandlestickBuffer,
+  buildOhlcvCandlestickBufferForTrackedCall,
+  resolveOhlcvPairAddress
+} = require('./ohlcvCandlestickBuffer');
+const { getCandlestickOverlayProps } = require('./candlestickOverlayFromTracked');
+const { persistChartMarkerEvents } = require('./chartEventPersistence');
+const { buildOhlcvTimeframeRows } = require('./ohlcvChartControls');
 const { resolvePublicCallerName } = require('./userProfileService');
 const {
   determineLifecycleStatus,
@@ -225,7 +233,7 @@ function buildXPostText(trackedCall) {
   ].join('\n');
 }
 
-async function maybePublishApprovedMilestoneToX(trackedCall) {
+async function maybePublishApprovedMilestoneToX(trackedCall, latestScan = null) {
   try {
     if (!trackedCall || !trackedCall.xApproved) {
       return { success: false, reason: 'not_approved' };
@@ -263,14 +271,10 @@ async function maybePublishApprovedMilestoneToX(trackedCall) {
 
     let chartBuf = null;
     if (!hasOriginal) {
-      try {
-        chartBuf = await fetchGeckoChart({
-          contractAddress: trackedCall.contractAddress,
-          pairAddress: trackedCall.pairAddress
-        });
-      } catch (_) {
-        chartBuf = null;
-      }
+      chartBuf = await buildOhlcvCandlestickBufferForTrackedCall(
+        trackedCall,
+        latestScan
+      );
     }
 
     const result = await createPost(
@@ -681,10 +685,27 @@ function queueMilestone(channel, coin, scan, key, perf, realXFromCall) {
   enqueueAlert(async () => {
     const replyOptions = buildReplyOptions(coin, channel);
 
-    await channel.send({
-      embeds: [createMilestoneEmbed(coin, scan, key, perf, realXFromCall)],
-      ...replyOptions
+    const pair = resolveOhlcvPairAddress(coin, scan);
+    const overlay = getCandlestickOverlayProps(coin, scan);
+    const chartBuf = await buildOhlcvCandlestickBuffer({
+      pairAddress: pair,
+      title: scan?.ticker || coin?.ticker || 'OHLC',
+      ...overlay
     });
+
+    const embed = createMilestoneEmbed(coin, scan, key, perf, realXFromCall);
+    const payload = {
+      embeds: [embed],
+      ...replyOptions
+    };
+
+    if (chartBuf) {
+      embed.setImage('attachment://chart.png');
+      payload.files = [new AttachmentBuilder(chartBuf, { name: 'chart.png' })];
+      payload.components = buildOhlcvTimeframeRows(coin.contractAddress, '5m');
+    }
+
+    await channel.send(payload);
   }, {
     type: 'milestone',
     contractAddress: coin.contractAddress,
@@ -858,11 +879,14 @@ if (lifecycleStatus === 'archived') {
        * X AUTO THREADING (APPROVED ONLY)
        */
       const latestTrackedCall = getTrackedCall(coin.contractAddress) || refreshedTrackedCall;
-      await maybePublishApprovedMilestoneToX({
-        ...latestTrackedCall,
-        athMc,
-        latestMarketCap: currentMc
-      });
+      await maybePublishApprovedMilestoneToX(
+        {
+          ...latestTrackedCall,
+          athMc,
+          latestMarketCap: currentMc
+        },
+        scan
+      );
 
       /**
        * DUMPS (SMART)
@@ -878,6 +902,16 @@ if (lifecycleStatus === 'archived') {
         if (dump.key === '-55%' && !dumpHits.includes('-35%')) {
           dumpHits.push('-35%');
         }
+      }
+
+      try {
+        await persistChartMarkerEvents(coin.contractAddress, scan);
+      } catch (markerErr) {
+        console.error(
+          '[Monitor] chart markers',
+          coin.contractAddress,
+          markerErr?.message || markerErr
+        );
       }
 
       /**

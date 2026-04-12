@@ -3,6 +3,8 @@
   "topics": [
     {
       "title": "Making a call",
+      "faq": true,
+      "faqSummary": "Use **`!call`** with a Solana **contract address (CA)** for an official tracked call with caller credit. Wrong CAs add noise; use **`!watch`** if you only want to monitor.",
       "category": "Calls & tracking",
       "keywords": [
         "call",
@@ -13,11 +15,19 @@
         "track a coin",
         "caller credit"
       ],
+      "synonyms": [
+        "signal a token",
+        "how do i call",
+        "official signal",
+        "post my call"
+      ],
       "content": "An **official call** is how you put a coin on the server’s radar with **caller credit** tied to you.\n\nUse **`!call`** followed by the token’s **Solana contract address (CA)**. The bot will fetch live data, post the call, and start tracking performance from that moment.\n\nTips:\n• Double-check the CA before you send — wrong addresses create noise.\n• Calls are meant to be intentional; use **`!watch`** if you only want to monitor without taking credit.",
       "relatedCommands": ["!call", "!watch", "!tracked"]
     },
     {
       "title": "Watching a coin",
+      "faq": true,
+      "faqSummary": "**`!watch <CA>`** tracks a token **without** caller credit—good for monitoring only. Use **`!tracked`** to see what’s on your watchlist.",
       "category": "Calls & tracking",
       "keywords": [
         "watch",
@@ -28,11 +38,19 @@
         "monitor",
         "follow a token"
       ],
+      "synonyms": [
+        "watch only",
+        "add to watchlist",
+        "track without credit",
+        "monitor token"
+      ],
       "content": "**`!watch`** adds a token to **tracking** **without** giving you **caller credit**. It’s useful when you want charts, milestones, or context in the feed but aren’t making an official call.\n\nUse the same **contract address (CA)** you would use for **`!call`**. To see everything that’s being tracked, use **`!tracked`**.",
       "relatedCommands": ["!watch", "!call", "!tracked"]
     },
     {
       "title": "Checking a coin",
+      "faq": true,
+      "faqSummary": "**`!ca <CA>`** is quick intel without tracking. **`!scan`** / **`!scan <CA>`** are scan-style previews—still no tracking until you **`!call`** or **`!watch`**.",
       "category": "Scanning",
       "keywords": [
         "check",
@@ -44,6 +62,12 @@
         "scan",
         "preview",
         "quick look"
+      ],
+      "synonyms": [
+        "lookup token",
+        "preview coin",
+        "check contract",
+        "intel without track"
       ],
       "content": "You can **peek at a token** without committing to a call or watch.\n\n• **`!ca <address>`** — compact **intel** (market context, links, etc.) **without** adding tracking.\n• **`!scan`** — try a **random-style** scan for practice.\n• **`!scan <address>`** — a **deeper scan-style** view for one contract **without** tracking.\n\nUse these when you’re researching before you decide to **`!call`** or **`!watch`**.",
       "relatedCommands": ["!ca", "!scan", "!call", "!watch"]
@@ -61,6 +85,12 @@
         "bot calls",
         "scanner feed"
       ],
+      "synonyms": [
+        "scanner feed",
+        "auto alerts",
+        "bot calls channel",
+        "early gems"
+      ],
       "content": "Many servers use McGBot’s **scanner** and **#bot-calls** (or similar channels) to surface **low-cap** and early ideas automatically.\n\nWhen the scanner is **on**, the bot can run **monitoring** and **auto-call** flows according to your server’s settings. **Mods** control whether the scanner is running (**`!scanner on`** / **`!scanner off`**).\n\nYour **personal watchlist** in the bot is still driven by **`!call`**, **`!watch`**, and **`!tracked`** — the scanner is the server-wide layer on top.",
       "relatedCommands": ["!scanner", "!tracked", "!call", "!watch"]
     },
@@ -77,11 +107,19 @@
         "!addlaunch",
         "launch"
       ],
+      "synonyms": [
+        "dev wallet",
+        "developer stats",
+        "tracked developer",
+        "launch log"
+      ],
       "content": "McGBot can tie **tokens** back to **developers** when your server tracks dev wallets and launches.\n\n• Use **`!devleaderboard`** to see how tracked devs rank.\n• **`!addlaunch`** (where your server enables it) can **log a launch** against a dev you already track.\n\nExact channels and workflows depend on how **your server** set up **dev feed** and **tracked dev** areas — ask a mod if you’re unsure where to post a wallet or note.",
       "relatedCommands": ["!devleaderboard", "!addlaunch", "!tracked"]
     },
     {
       "title": "Profiles & identity",
+      "faq": true,
+      "faqSummary": "**`!profile`** / **`!myprofile`** opens your profile. **`!credit`** sets how your name shows on calls (anonymous, Discord name, or verified X tag).",
       "category": "Account",
       "keywords": [
         "profile",
@@ -93,11 +131,19 @@
         "!credit",
         "how i show up"
       ],
+      "synonyms": [
+        "my profile",
+        "public name on calls",
+        "credit mode",
+        "display name on calls"
+      ],
       "content": "Your **profile** is how McGBot knows **you** across calls and stats.\n\n• **`!profile`** or **`!myprofile`** opens your profile (with extra options when it’s **your** account).\n• **`!credit`** lets you choose how your name appears on calls — for example **anonymous**, **Discord name**, or a **verified X tag** (once X is linked).\n\nKeeping your profile accurate makes **caller stats** and leaderboards more meaningful.",
       "relatedCommands": ["!profile", "!myprofile", "!credit"]
     },
     {
       "title": "X verification",
+      "faq": true,
+      "faqSummary": "Link X via **`#verify-x`** and/or **Verify X** on your profile. Mods approve with **`!verifyx`**—that command isn’t for regular members.",
       "category": "Account",
       "keywords": [
         "x",
@@ -107,6 +153,12 @@
         "verify-x",
         "handle",
         "link x"
+      ],
+      "synonyms": [
+        "link twitter",
+        "verify twitter",
+        "x handle verify",
+        "blue check x"
       ],
       "content": "Linking **X (Twitter)** proves which handle is yours so the bot can show a **consistent public identity** on calls (when you choose that credit mode).\n\nMost servers use a **#verify-x** channel and/or the **Verify X** action on **`!profile`**. Follow the **on-screen steps** your server provides.\n\n**Moderators** approve pending verifications with **`!verifyx`** — regular users don’t run that command themselves.",
       "relatedCommands": ["!profile", "!myprofile", "!credit"]
@@ -123,6 +175,12 @@
         "paid",
         "perks"
       ],
+      "synonyms": [
+        "vip role",
+        "paid features",
+        "subscriber perks",
+        "server membership"
+      ],
       "content": "**McGBot’s core commands** (calls, watch, tracked, scans, profiles) are used inside **your Discord server** under whatever rules **that community** sets.\n\nSome servers add **extra roles**, **private channels**, or **paid memberships** on their own. Those perks are **not** defined by the bot itself — they’re up to **your server’s admins**.\n\nIf you’re unsure what you unlock with a role, ask **@Mods** or read your server’s **announcements**."
     },
     {
@@ -138,11 +196,19 @@
         "mods",
         "safety"
       ],
+      "synonyms": [
+        "rug check",
+        "mod queue",
+        "community safety",
+        "call reputation"
+      ],
       "content": "McGBot helps your community **remember calls and context** — it does **not** replace **judgment** or **moderation**.\n\n**Trust** builds from **track records** (who called what, how it performed) and from **mods** who curate **bot approvals**, **X verification**, and server rules.\n\nIf something looks off, use your server’s **reporting** or **mod** channels. Never treat any bot output as **financial advice**.",
       "relatedCommands": ["!approvalstats", "!pendingapprovals"]
     },
     {
       "title": "Caller stats",
+      "faq": true,
+      "faqSummary": "**`!caller`**, **`!callerboard`**, and **`!botstats`** show performance. Use **`!commands`** for time-window stats your role can access.",
       "category": "Stats",
       "keywords": [
         "stats",
@@ -153,6 +219,12 @@
         "leaderboard",
         "performance",
         "my stats"
+      ],
+      "synonyms": [
+        "leaderboard callers",
+        "my caller stats",
+        "bot performance stats",
+        "top callers"
       ],
       "content": "**Caller stats** summarize how calls have performed for a person or for the **auto bot**.\n\n• **`!caller <name>`** or **`!caller @user`** — stats for one caller.\n• **`!callerboard`** — top callers by the bot’s metrics.\n• **`!botstats`** — aggregate stats for **McGBot’s** auto calls.\n\nThere are also **time-window** commands (for example **24h / week / month**) depending on what your server enabled — type **`!commands`** for the full list your account can see.",
       "relatedCommands": ["!caller", "!callerboard", "!botstats", "!commands"]

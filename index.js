@@ -26,10 +26,14 @@ const {
 const { handleGuideCommand } = require('./utils/guideCommand');
 const { handleInteractiveHelp } = require('./utils/interactiveHelp');
 const { handleHelpUiInteraction } = require('./utils/helpUi');
+const { handleFaqCommand } = require('./utils/faqCommand');
 const { startMonitoring, stopMonitoring } = require('./utils/monitoringEngine');
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
 const { createPost } = require('./utils/xPoster');
-const { fetchGeckoChart } = require('./utils/chartCapture');
+const {
+  buildOhlcvCandlestickBufferForTrackedCall
+} = require('./utils/ohlcvCandlestickBuffer');
+const { handleOhlcvTimeframeButton } = require('./utils/ohlcvChartControls');
 
 const {
   createAutoCallEmbed,
@@ -966,14 +970,7 @@ async function publishApprovedCoinToX(contractAddress) {
 
   let chartBuf = null;
   if (!hasOriginal) {
-    try {
-      chartBuf = await fetchGeckoChart({
-        contractAddress: trackedCall.contractAddress,
-        pairAddress: trackedCall.pairAddress
-      });
-    } catch (_) {
-      chartBuf = null;
-    }
+    chartBuf = await buildOhlcvCandlestickBufferForTrackedCall(trackedCall, null);
   }
 
   const result = await createPost(
@@ -1461,6 +1458,10 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.isButton()) {
+      if (await handleOhlcvTimeframeButton(interaction)) {
+        return;
+      }
+
       const parts = interaction.customId.split(':');
 
       if (interaction.customId === 'profile_open_verify_modal') {
@@ -2568,6 +2569,11 @@ if (lowerContent === '!commands') {
     });
   }
 
+  return;
+}
+
+if (lowerContent === '!faq') {
+  await handleFaqCommand(message, splitDiscordMessage);
   return;
 }
 

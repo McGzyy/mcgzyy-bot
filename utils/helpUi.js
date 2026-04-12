@@ -10,6 +10,8 @@ const {
 } = require('discord.js');
 
 const { getHelpTopics } = require('./helpMatcher');
+const { getHelpTopicImageFiles } = require('./helpMedia');
+const { recordHelpTopicClicked } = require('./helpAnalytics');
 
 const SELECT_CATEGORY = 'help_ui_category';
 const SELECT_TOPIC = 'help_ui_topic';
@@ -63,7 +65,7 @@ function buildHelpCategoryUi(topics) {
     embed.setDescription(
       'No help categories are configured. Use **`!help <question>`** in the server instead.'
     );
-    return { embeds: [embed], components: [] };
+    return { embeds: [embed], components: [], files: [] };
   }
 
   const menu = new StringSelectMenuBuilder()
@@ -81,7 +83,8 @@ function buildHelpCategoryUi(topics) {
 
   return {
     embeds: [embed],
-    components: [new ActionRowBuilder().addComponents(menu)]
+    components: [new ActionRowBuilder().addComponents(menu)],
+    files: []
   };
 }
 
@@ -136,7 +139,8 @@ function buildHelpTopicPickerUi(topics, categoryIndex) {
     components: [
       new ActionRowBuilder().addComponents(menu),
       new ActionRowBuilder().addComponents(back)
-    ]
+    ],
+    files: []
   };
 }
 
@@ -185,9 +189,12 @@ function buildHelpTopicAnswerUi(topics, globalTopicIndex) {
     .setLabel('All categories')
     .setStyle(ButtonStyle.Primary);
 
+  const imageFiles = getHelpTopicImageFiles(topic);
+
   return {
     embeds: [embed],
-    components: [new ActionRowBuilder().addComponents(btnTopics, btnCats)]
+    components: [new ActionRowBuilder().addComponents(btnTopics, btnCats)],
+    files: imageFiles.length ? imageFiles : []
   };
 }
 
@@ -232,6 +239,8 @@ async function handleHelpUiInteraction(interaction) {
         return true;
       }
       await interaction.update(buildHelpTopicAnswerUi(topics, gIdx));
+      const clicked = topics[gIdx];
+      if (clicked) recordHelpTopicClicked(clicked);
       return true;
     }
 

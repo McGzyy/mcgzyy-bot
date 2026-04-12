@@ -6,6 +6,11 @@ const {
   getClosestHelpTopics
 } = require('./helpMatcher');
 const { buildHelpCategoryUi } = require('./helpUi');
+const { getHelpTopicImageFiles } = require('./helpMedia');
+const {
+  recordHelpTopicRequested,
+  recordHelpQuestionNoMatch
+} = require('./helpAnalytics');
 
 const LOW_CONFIDENCE_REPLY =
   "I'm not sure what you need help with. Try rephrasing, or ask @Mods.";
@@ -57,24 +62,35 @@ function formatMatchedTopicMessage(topic) {
 
 /**
  * Send all chunks via DM only. Returns false if any send fails (no channel fallback).
+ * Optional `firstMessageFiles`: attachments on the first chunk only (e.g. topic image).
  *
  * @param {import('discord.js').Message} message
  * @param {string} text
  * @param {(content: string, limit?: number) => string[]} splitDiscordMessage
+ * @param {import('discord.js').AttachmentBuilder[]} [firstMessageFiles]
  * @returns {Promise<boolean>}
  */
-async function deliverHelpDmOnly(message, text, splitDiscordMessage) {
+async function deliverHelpDmOnly(message, text, splitDiscordMessage, firstMessageFiles) {
   const chunks = splitDiscordMessage(text, DM_CHUNK_LIMIT).filter((c) =>
     String(c || '').trim().length
   );
   if (!chunks.length) return true;
 
+  const firstFiles =
+    Array.isArray(firstMessageFiles) && firstMessageFiles.length
+      ? firstMessageFiles
+      : undefined;
+
   for (let i = 0; i < chunks.length; i++) {
     try {
-      await message.author.send({
+      const payload = {
         content: chunks[i],
         allowedMentions: { parse: [] }
-      });
+      };
+      if (i === 0 && firstFiles) {
+        payload.files = firstFiles;
+      }
+      await message.author.send(payload);
     } catch (_err) {
       return false;
     }
@@ -130,6 +146,7 @@ async function handleInteractiveHelp(message, content, deps) {
 
   const topic = matchHelpTopic(query);
   if (!topic) {
+    recordHelpQuestionNoMatch();
     const body = buildNoMatchReply(query);
     const ok = await deliverHelpDmOnly(message, body, splitDiscordMessage);
     if (!ok) {
@@ -142,12 +159,20 @@ async function handleInteractiveHelp(message, content, deps) {
   }
 
   const response = formatMatchedTopicMessage(topic);
-  const matchedOk = await deliverHelpDmOnly(message, response, splitDiscordMessage);
+  const imageFiles = getHelpTopicImageFiles(topic);
+  const matchedOk = await deliverHelpDmOnly(
+    message,
+    response,
+    splitDiscordMessage,
+    imageFiles
+  );
   if (!matchedOk) {
     await message.reply({
       content: DM_BLOCKED_REPLY,
       allowedMentions: { repliedUser: false }
     });
+  } else {
+    recordHelpTopicRequested(topic);
   }
 }
 

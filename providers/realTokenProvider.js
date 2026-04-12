@@ -285,6 +285,13 @@ function normalizeDexData(dex, contractAddress) {
       priceChange8h: 0,
       priceChange24h: toNumber(dex.market?.priceChange24h),
 
+      pairCreatedAt:
+        dex.market?.pairCreatedAt != null &&
+        Number.isFinite(Number(dex.market.pairCreatedAt)) &&
+        Number(dex.market.pairCreatedAt) > 0
+          ? Math.round(Number(dex.market.pairCreatedAt))
+          : null,
+
       trades5m,
       trades15m: 0,
       trades30m: 0,

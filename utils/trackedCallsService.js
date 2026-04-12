@@ -7,6 +7,25 @@ const {
 
 const trackedCallsFilePath = path.join(__dirname, '../data/trackedCalls.json');
 
+/**
+ * @param {unknown} arr
+ * @returns {Array<{ time: number, price: number }>}
+ */
+function normalizeChartEventRows(arr) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (const e of arr) {
+    if (!e || typeof e !== 'object') continue;
+    const time = Math.round(Number(/** @type {{ time?: unknown }} */ (e).time));
+    const price = Number(/** @type {{ price?: unknown }} */ (e).price);
+    if (!Number.isFinite(time) || time <= 0 || !Number.isFinite(price) || price <= 0) {
+      continue;
+    }
+    out.push({ time, price });
+  }
+  return out;
+}
+
 function loadTrackedCalls() {
   try {
     if (!fs.existsSync(trackedCallsFilePath)) {
@@ -45,6 +64,8 @@ function normalizeTrackedCall(call = {}) {
     milestonesHit: Array.isArray(call.milestonesHit) ? call.milestonesHit : [],
     dumpAlertsHit: Array.isArray(call.dumpAlertsHit) ? call.dumpAlertsHit : [],
     priceHistory: Array.isArray(call.priceHistory) ? call.priceHistory : [],
+    dexPaidEvents: normalizeChartEventRows(call.dexPaidEvents),
+    devSoldEvents: normalizeChartEventRows(call.devSoldEvents),
     lifecycleStatus: call.lifecycleStatus || 'active',
     isActive: call.isActive !== false,
 

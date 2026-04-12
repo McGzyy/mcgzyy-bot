@@ -424,10 +424,16 @@ function buildScanObject(base) {
     dexPaid: !!base.dexPaid,
     migrated: !!base.migrated,
 
+    ...(Number(base.pairCreatedAt) > 0
+      ? { pairCreatedAt: Math.round(Number(base.pairCreatedAt)) }
+      : {}),
+
     holders: base.holders ?? null,
 
     greenFlags,
     redFlags,
+
+    ...(toNumber(base.priceUsd) > 0 ? { priceUsd: toNumber(base.priceUsd) } : {}),
 
     ...(base.tokenImageUrl
       ? { token: { imageUrl: base.tokenImageUrl } }
@@ -504,6 +510,7 @@ async function generateSimulatedScan(contractAddress = null) {
   const token = generateMockToken(contractAddress);
   const market = generateMarketData();
   const trade = generateTradeSignals(market);
+  const priceUsd = Math.max(1e-12, market.marketCap / rand(1e8, 1e10));
 
   return buildScanObject({
     contractAddress: token.contractAddress,
@@ -528,7 +535,9 @@ async function generateSimulatedScan(contractAddress = null) {
 
     dexPaid: chance(0.5),
     migrated: chance(0.2),
-    holders: chance(0.5) ? Math.floor(rand(50, 500)) : null
+    holders: chance(0.5) ? Math.floor(rand(50, 500)) : null,
+
+    priceUsd
   });
 }
 
@@ -629,7 +638,10 @@ async function generateRealScan(contractAddress, geckoCandidate = null) {
 
       dexPaid: !!realData.socials?.dexPaid,
       migrated: !!realData.meta?.migrated,
-      holders: realData.holders?.holders ?? null
+      pairCreatedAt: toNumber(realData.market?.pairCreatedAt),
+      holders: realData.holders?.holders ?? null,
+
+      priceUsd: toNumber(realData.market?.price)
     });
   } catch (err) {
     return null;

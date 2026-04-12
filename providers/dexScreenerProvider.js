@@ -216,6 +216,12 @@ async function fetchDexScreenerTokenData(contractAddress) {
       fdv: toNumber(bestPair?.fdv),
       liquidity: toNumber(bestPair?.liquidity?.usd),
 
+      /** Unix ms when this pair was created (DexScreener). Used for chart migration marker when pool is Raydium-class. */
+      pairCreatedAt: (() => {
+        const t = Number(bestPair?.pairCreatedAt);
+        return Number.isFinite(t) && t > 0 ? t : null;
+      })(),
+
       priceUsd: toNumber(bestPair?.priceUsd),
       priceNative: toNumber(bestPair?.priceNative),
 

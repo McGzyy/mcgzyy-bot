@@ -6,6 +6,10 @@ const path = require('path');
 const HELP_TOPICS_PATH = path.join(__dirname, '..', 'data', 'helpTopics.json');
 const MIN_SCORE = 1;
 
+const SCORE_KEYWORD_FULL = 2;
+const SCORE_SYNONYM_FULL = 1;
+const SCORE_PARTIAL_TOKEN = 0.5;
+
 let topicsCache = null;
 let cacheReady = false;
 
@@ -43,6 +47,16 @@ function questionWords(question) {
 }
 
 /**
+ * @param {string} phrase
+ * @returns {string[]}
+ */
+function extractTokens(phrase) {
+  return String(phrase || '')
+    .toLowerCase()
+    .match(/[a-z0-9]+/g) || [];
+}
+
+/**
  * @param {string} keyword
  * @param {Set<string>} wordSet
  * @returns {boolean}
@@ -64,17 +78,70 @@ function keywordMatchesTokens(keyword, wordSet) {
 }
 
 /**
+ * Partial overlap for a single token (length ≥ 3).
+ * Caller skips tokens already covered by a full keyword/synonym phrase match.
+ *
+ * @param {string} t
  * @param {string[]} words
- * @param {{ keywords?: string[] }} topic
+ * @param {Set<string>} wordSet
+ * @param {string} qLower
+ * @returns {boolean}
+ */
+function partialWordMatch(t, words, wordSet, qLower) {
+  if (t.length < 3) return false;
+
+  if (wordSet.has(t)) return true;
+  if (qLower.includes(t)) return true;
+
+  for (const w of words) {
+    if (w.length < 3 || w === t) continue;
+    if (w.includes(t) || t.includes(w)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * @param {string} question
+ * @param {{ keywords?: string[], synonyms?: string[] }} topic
  * @returns {number}
  */
-function scoreTopic(words, topic) {
+function scoreTopic(question, topic) {
+  const words = questionWords(question);
   const wordSet = new Set(words);
+  const qLower = String(question || '').toLowerCase().trim();
+
   const keywords = Array.isArray(topic.keywords) ? topic.keywords : [];
+  const synonyms = Array.isArray(topic.synonyms) ? topic.synonyms : [];
+
   let score = 0;
+  const tokensFromFullMatch = new Set();
 
   for (const kw of keywords) {
-    if (keywordMatchesTokens(kw, wordSet)) score += 1;
+    if (keywordMatchesTokens(kw, wordSet)) {
+      score += SCORE_KEYWORD_FULL;
+      for (const t of extractTokens(kw)) tokensFromFullMatch.add(t);
+    }
+  }
+
+  for (const syn of synonyms) {
+    if (keywordMatchesTokens(syn, wordSet)) {
+      score += SCORE_SYNONYM_FULL;
+      for (const t of extractTokens(syn)) tokensFromFullMatch.add(t);
+    }
+  }
+
+  const partialSeen = new Set();
+  for (const phrase of [...keywords, ...synonyms]) {
+    for (const t of extractTokens(phrase)) {
+      if (t.length < 3) continue;
+      if (tokensFromFullMatch.has(t)) continue;
+      if (partialSeen.has(t)) continue;
+      if (partialWordMatch(t, words, wordSet, qLower)) {
+        score += SCORE_PARTIAL_TOKEN;
+        partialSeen.add(t);
+      }
+    }
   }
 
   return score;
@@ -99,7 +166,7 @@ function matchHelpTopic(question) {
 
   for (const topic of topics) {
     if (!topic || typeof topic !== 'object') continue;
-    const s = scoreTopic(words, topic);
+    const s = scoreTopic(question, topic);
     if (s > bestScore) {
       bestScore = s;
       best = topic;
@@ -112,10 +179,10 @@ function matchHelpTopic(question) {
 
 /**
  * Softer overlap for “did you mean” hints when `matchHelpTopic` returns null.
- * Scores shared tokens (length ≥ 3) from keywords/title against question text/tokens.
+ * Scores shared tokens (length ≥ 3) from keywords, synonyms, and title.
  *
  * @param {string} question
- * @param {{ keywords?: string[], title?: string }} topic
+ * @param {{ keywords?: string[], synonyms?: string[], title?: string }} topic
  * @returns {number}
  */
 function partialOverlapScore(question, topic) {
@@ -137,15 +204,18 @@ function partialOverlapScore(question, topic) {
     }
   };
 
-  for (const kw of topic.keywords || []) {
-    const ks = String(kw || '').toLowerCase();
+  const scanPhrase = (phrase) => {
+    const ks = String(phrase || '').toLowerCase();
     for (const t of ks.match(/[a-z0-9]+/g) || []) bumpToken(t);
 
-    const phrase = ks.replace(/^!/, '').trim();
-    if (phrase.length >= 4 && qLower.includes(phrase)) {
+    const cleaned = ks.replace(/^!/, '').trim();
+    if (cleaned.length >= 4 && qLower.includes(cleaned)) {
       score += 2;
     }
-  }
+  };
+
+  for (const kw of topic.keywords || []) scanPhrase(kw);
+  for (const syn of topic.synonyms || []) scanPhrase(syn);
 
   for (const t of String(topic.title || '')
     .toLowerCase()

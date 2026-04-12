@@ -23,6 +23,9 @@ const {
   getBotStats
 } = require('../utils/callerStatsService');
 const { renderPriceChart, seriesFromTrackedPriceHistory } = require('../utils/renderChart');
+const { buildOhlcvCandlestickBuffer } = require('../utils/ohlcvCandlestickBuffer');
+const { getCandlestickOverlayProps } = require('../utils/candlestickOverlayFromTracked');
+const { buildOhlcvTimeframeRows } = require('../utils/ohlcvChartControls');
 
 function memberCanManageGuild(member) {
   if (!member?.permissions) return false;
@@ -379,6 +382,11 @@ function normalizeRealDataToScan(realData) {
 
     dexPaid: !!realData.socials?.dexPaid,
     migrated: !!realData.meta?.migrated,
+
+    ...(Number.isFinite(Number(realData.market?.price)) &&
+    Number(realData.market?.price) > 0
+      ? { priceUsd: Number(realData.market.price) }
+      : {}),
 
     entryScore: score,
     grade: getQuickGrade(score),
@@ -851,27 +859,55 @@ function createTraderScanEmbed(scan, options = {}) {
   return embed;
 }
 
-async function hydrateTraderCallChartMessage(message, scan, embedOptions = {}) {
+/**
+ * After !call / !watch: prefer OHLCV candlesticks (GeckoTerminal); fall back to line chart from tracked priceHistory.
+ * Never uses priceHistory for candlesticks. Runs best-effort; failures only log.
+ * @param {import('discord.js').Message} message
+ * @param {object} scan
+ * @param {object} [embedOptions]
+ */
+async function hydrateCallWatchChartMessage(message, scan, embedOptions = {}) {
   if (!message || typeof message.edit !== 'function') return;
   if (!scan) {
-    console.error('[CallChart]', '(no scan)', 'hydrate skipped');
+    console.error('[CallWatchChart]', '(no scan)', 'hydrate skipped');
     return;
   }
   try {
     let buf = null;
-    const tracked = getTrackedCall(scan.contractAddress);
-    const series = tracked ? seriesFromTrackedPriceHistory(tracked) : null;
+    let usedOhlcvCandlestick = false;
 
-    if (series) {
-      try {
-        buf = await renderPriceChart({
-          prices: series.prices,
-          timestamps: series.timestamps,
-          label: scan.ticker || scan.tokenName || 'MC'
-        });
-      } catch (renderErr) {
-        console.error('[CallChart]', scan.contractAddress, renderErr.message);
-        buf = null;
+    try {
+      const trackedForChart = getTrackedCall(scan.contractAddress);
+      const overlay = getCandlestickOverlayProps(trackedForChart, scan);
+      buf = await buildOhlcvCandlestickBuffer({
+        pairAddress: scan.pairAddress,
+        chain: 'solana',
+        interval: '5m',
+        limit: 96,
+        title: scan.ticker || scan.tokenName || 'OHLC',
+        ...overlay
+      });
+      if (buf) usedOhlcvCandlestick = true;
+    } catch (ohlcvErr) {
+      console.error('[CallWatchChart]', scan.contractAddress, 'ohlcv', ohlcvErr?.message || ohlcvErr);
+      buf = null;
+    }
+
+    if (!buf) {
+      const tracked = getTrackedCall(scan.contractAddress);
+      const series = tracked ? seriesFromTrackedPriceHistory(tracked) : null;
+
+      if (series) {
+        try {
+          buf = await renderPriceChart({
+            prices: series.prices,
+            timestamps: series.timestamps,
+            label: scan.ticker || scan.tokenName || 'MC'
+          });
+        } catch (renderErr) {
+          console.error('[CallWatchChart]', scan.contractAddress, renderErr.message);
+          buf = null;
+        }
       }
     }
 
@@ -887,9 +923,16 @@ async function hydrateTraderCallChartMessage(message, scan, embedOptions = {}) {
     }
 
     const file = new AttachmentBuilder(buf, { name: 'chart.png' });
-    await message.edit({ embeds: [embed], files: [file] });
+    const editPayload = {
+      embeds: [embed],
+      files: [file]
+    };
+    if (usedOhlcvCandlestick) {
+      editPayload.components = buildOhlcvTimeframeRows(scan.contractAddress, '5m');
+    }
+    await message.edit(editPayload);
   } catch (err) {
-    console.error('[CallChart]', scan.contractAddress, err.message);
+    console.error('[CallWatchChart]', scan?.contractAddress, err.message);
   }
 }
 
@@ -1225,11 +1268,9 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     embeds: [embed]
   });
 
-  if (callChartPending) {
-    hydrateTraderCallChartMessage(reply, embedScan, { showTrackedMeta: true }).catch(err => {
-      console.error('[CallChart]', embedScan?.contractAddress, err.message);
-    });
-  }
+  hydrateCallWatchChartMessage(reply, embedScan, { showTrackedMeta: true }).catch(err => {
+    console.error('[CallWatchChart]', embedScan?.contractAddress, err.message);
+  });
 
   return reply;
 }
@@ -1256,7 +1297,7 @@ async function handleWatchCommand(message, contractAddress, source = 'command') 
 
   const { greenFlags, redFlags } = buildScanFlags(realData);
 
-  const embed = createTraderScanEmbed({
+  const embedScan = {
     ...scan,
     greenFlags,
     redFlags,
@@ -1272,14 +1313,22 @@ async function handleWatchCommand(message, contractAddress, source = 'command') 
     performancePercent,
     milestoneHit,
     isNewMilestone: false
-  }, {
+  };
+
+  const embed = createTraderScanEmbed(embedScan, {
     showTrackedMeta: true
   });
 
-  return message.reply({
+  const reply = await message.reply({
     content: '👀 Added to watchlist tracking (no caller credit).',
     embeds: [embed]
   });
+
+  hydrateCallWatchChartMessage(reply, embedScan, { showTrackedMeta: true }).catch(err => {
+    console.error('[CallWatchChart]', embedScan?.contractAddress, err.message);
+  });
+
+  return reply;
 }
 
 async function handleBasicCommands(message, options = {}) {

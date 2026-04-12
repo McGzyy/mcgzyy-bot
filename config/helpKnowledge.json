@@ -1,0 +1,151 @@
+{
+  "meta": {
+    "minMatchScore": 1
+  },
+  "categories": [
+    {
+      "id": "basics",
+      "label": "Basics",
+      "blurb": "Ping, status, quick checks"
+    },
+    {
+      "id": "calls",
+      "label": "Calls & tracking",
+      "blurb": "Official calls, watchlist, tracked coins"
+    },
+    {
+      "id": "stats",
+      "label": "Stats & leaderboards",
+      "blurb": "Caller stats, bot stats, time windows"
+    },
+    {
+      "id": "profile",
+      "label": "Profile & X",
+      "blurb": "Your profile, verification, public credit"
+    },
+    {
+      "id": "scanner",
+      "label": "Scanner & monitor",
+      "blurb": "Auto scans, bot calls, approvals"
+    },
+    {
+      "id": "docs",
+      "label": "Guides & command list",
+      "blurb": "Long-form guides and full command index"
+    }
+  ],
+  "entries": [
+    {
+      "id": "ping_status",
+      "category": "basics",
+      "keywords": ["ping", "pong", "alive", "online", "status", "up", "bot status"],
+      "helpText": "Use **`!ping`** for a quick alive check.\n\nUse **`!status`** to confirm the bot reports online and ready.",
+      "relatedCommands": ["!ping", "!status"]
+    },
+    {
+      "id": "call",
+      "category": "calls",
+      "keywords": ["call", "!call", "official call", "track", "calling", "signal"],
+      "helpText": "**`!call <contract>`** creates an **official call**: the coin is tracked, you get caller credit, and the usual call embed/chart flow runs.\n\nUse a valid Solana contract address (CA).",
+      "relatedCommands": ["!call", "!watch", "!tracked"]
+    },
+    {
+      "id": "watch",
+      "category": "calls",
+      "keywords": ["watch", "!watch", "watchlist", "track without credit", "no credit"],
+      "helpText": "**`!watch <contract>`** adds the token to tracking **without** caller credit — useful for monitoring only.",
+      "relatedCommands": ["!watch", "!call", "!tracked"]
+    },
+    {
+      "id": "tracked",
+      "category": "calls",
+      "keywords": ["tracked", "!tracked", "list", "summary", "detail", "positions"],
+      "helpText": "**`!tracked`** shows a summary of tracked coins.\n\n**`!tracked <ca>`** refreshes and shows detail for one contract.",
+      "relatedCommands": ["!tracked", "!call", "!watch"]
+    },
+    {
+      "id": "ca_scan",
+      "category": "calls",
+      "keywords": ["!ca", "ca", "contract", "compact", "intel", "!scan", "scan", "deep scan", "test scan"],
+      "helpText": "**`!ca <ca>`** shows compact token intel **without** adding tracking.\n\n**`!scan`** runs a random-style scanner test; **`!scan <ca>`** deep-scans one token (no tracking).",
+      "relatedCommands": ["!ca", "!scan", "!call"]
+    },
+    {
+      "id": "caller_stats",
+      "category": "stats",
+      "keywords": ["caller", "!caller", "stats", "leaderboard", "!callerboard", "botstats", "!botstats", "performance"],
+      "helpText": "**`!caller <name>`** or **`!caller @user`** shows caller stats.\n\n**`!callerboard`** ranks callers; **`!botstats`** shows aggregate McGBot auto-call stats.",
+      "relatedCommands": ["!caller", "!callerboard", "!botstats"]
+    },
+    {
+      "id": "best_top",
+      "category": "stats",
+      "keywords": ["best call", "top caller", "24h", "week", "month", "!bestcall", "!topcaller", "!bestbot", "window"],
+      "helpText": "Time-window commands include **`!bestcall24h` / `week` / `month`**, **`!topcaller24h` / `week` / `month`**, and **`!bestbot24h` / `week` / `month`** for bot calls.",
+      "relatedCommands": ["!bestcall24h", "!topcaller24h", "!bestbot24h"]
+    },
+    {
+      "id": "reset_stats",
+      "category": "stats",
+      "keywords": ["resetstats", "!resetstats", "reset stats", "exclude"],
+      "helpText": "**`!resetstats`** resets your tracked-stat flags. Moderators can use **`!resetstats @user`** for someone else.",
+      "relatedCommands": ["!resetstats"]
+    },
+    {
+      "id": "profile_x",
+      "category": "profile",
+      "keywords": ["profile", "!profile", "!myprofile", "verify", "x", "twitter", "credit", "!credit", "xtag", "anonymous"],
+      "helpText": "**`!profile`** / **`!myprofile`** opens your caller profile (with **Verify X** when it is your own profile).\n\nUse **`!credit anonymous`**, **`!credit discord`**, or **`!credit xtag`** to choose how your name shows on calls.\n\nX verification is also done in the **#verify-x** channel or via profile buttons — not the mod **`!verifyx @user`** command.",
+      "relatedCommands": ["!profile", "!myprofile", "!credit"]
+    },
+    {
+      "id": "scanner_toggle",
+      "category": "scanner",
+      "keywords": ["scanner", "!scanner", "monitor", "auto", "auto call", "on", "off", "enable", "disable"],
+      "helpText": "**`!scanner`** shows ON/OFF.\n\n**`!scanner on`** starts monitoring + auto-call (requires **Manage Server**).\n\n**`!scanner off`** stops loops.\n\nState is saved in **`data/botSettings.json`**.",
+      "relatedCommands": ["!scanner", "!monitorstatus"]
+    },
+    {
+      "id": "approvals_mod",
+      "category": "scanner",
+      "keywords": ["approval", "pending", "!pendingapprovals", "!approvalstats", "mod approvals", "verifyx", "!verifyx", "moderator"],
+      "helpText": "Mods use **`!approvalstats`**, **`!pendingapprovals`**, and **`!verifyx @user`** (Manage Server) for queues and X verification.\n\nBot-call approvals also flow through **#mod-approvals** (buttons).",
+      "relatedCommands": ["!approvalstats", "!pendingapprovals", "!verifyx"]
+    },
+    {
+      "id": "monitor_reset",
+      "category": "scanner",
+      "keywords": ["resetmonitor", "!resetmonitor", "clear tracked", "destructive", "!monitorstatus", "!recentcalls"],
+      "helpText": "**`!monitorstatus`** summarizes monitor state.\n\n**`!recentcalls`** lists recent bot-tracked calls.\n\n**`!resetmonitor`** is **destructive** (clears tracked coins, stops scanner) — mod/owner tooling.",
+      "relatedCommands": ["!monitorstatus", "!recentcalls", "!resetmonitor"]
+    },
+    {
+      "id": "dev_leaderboard",
+      "category": "stats",
+      "keywords": ["dev", "!devleaderboard", "leaderboard dev", "!addlaunch", "launch", "tracked dev"],
+      "helpText": "**`!devleaderboard`** shows the dev leaderboard.\n\n**`!addlaunch <dev_wallet> <token_ca>`** logs a launch on a tracked dev (when used in the right context).",
+      "relatedCommands": ["!devleaderboard", "!addlaunch"]
+    },
+    {
+      "id": "test_autoscan",
+      "category": "scanner",
+      "keywords": ["!testreal", "testreal", "!autoscantest", "autoscantest", "simulated", "!testx", "testx"],
+      "helpText": "**`!testreal <ca>`** runs a live provider test (embed).\n\n**`!autoscantest`** simulates auto alerts (optional profile).\n\n**`!testx`** posts a test tweet (owner/restricted — see command list).",
+      "relatedCommands": ["!testreal", "!autoscantest", "!testx"]
+    },
+    {
+      "id": "guide_commands",
+      "category": "docs",
+      "keywords": ["guide", "!guide", "commands", "!commands", "full list", "cheat sheet", "documentation", "markdown"],
+      "helpText": "**`!guide`** DMs long-form guides based on your role (beginner/user/mod/admin).\n\n**`!commands`** DMs the **full command list** (with mod/owner sections if you have access).\n\nThis **`!help`** command answers **topic questions** from the knowledge base.",
+      "relatedCommands": ["!guide", "!commands", "!help"]
+    },
+    {
+      "id": "owner_thresholds",
+      "category": "scanner",
+      "keywords": ["setminmc", "!setminmc", "threshold", "sanity", "!setsanity", "owner", "bot owner", "ladder", "!setapprovalladder"],
+      "helpText": "Scanner thresholds and sanity filters (e.g. **`!setminmc`**, **`!setminliq`**, **`!setsanityminmc`**, **`!setapprovalladder`**) are **bot-owner only** and require **`BOT_OWNER_ID`**.\n\nSee **`!commands`** for the full owner command list.",
+      "relatedCommands": ["!commands"]
+    }
+  ]
+}

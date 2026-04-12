@@ -1,260 +1,305 @@
-# McGBot Explained
+# McGBot — What It Is and Why It Matters
 
-McGBot is a Discord + X bot built to help crypto communities track calls, preserve context, and surface better signal over time.
+McGBot is a Discord + X intelligence layer built for crypto communities that want **real signal**, not noise.
 
-At a surface level, it tracks coin calls and shows how they perform.
+On the surface, it tracks calls.
+Under the hood, it does much more.
 
-But what actually makes it useful is everything around that:
-- who made the call
-- what the reasoning was
-- what happened after
-- whether the caller has a track record
-- and what context existed at the time
+McGBot helps communities:
 
-Instead of letting everything disappear into chat, McGBot turns it into something structured and trackable.
+* Track calls properly
+* Preserve context
+* Identify who actually performs
+* Reduce noise
+* Surface stronger signal over time
 
----
-
-# What McGBot actually does
-
-McGBot is made up of several connected systems. Some are user-facing, some are moderation or curation layers, but together they create a much stronger signal system than a typical call bot.
+Instead of everything disappearing into chat, McGBot turns activity into structured, trackable information.
 
 ---
 
-## Coin calls (Discord + X)
+## From Chat Noise → Structured Signal
 
-Calls can originate from:
-- Discord (`!call`)
-- X (by tagging the bot or through ingestion)
+Most crypto servers lose signal fast:
 
-Both flows feed into the same tracking system.
+* Calls get buried
+* Good info gets lost
+* Reputation is guesswork
+* “I called that” becomes impossible to verify
+
+McGBot fixes that.
+
+It turns:
+
+> Random messages
+> Forgotten calls
+> Scattered alpha
+
+into:
+
+> Structured data
+> Trackable performance
+> Searchable context
+
+---
+
+## Calls That Actually Matter
+
+Calls can come from:
+
+* Discord (`!call`)
+* X (via tagging or ingestion)
+
+Both feed into the same tracking system.
 
 That means:
-- calls aren’t split across platforms
-- early X signal doesn’t get lost
-- everything ends up in one place where it can actually be tracked
+
+* No split history
+* No lost early signal
+* One unified record of activity
+
+Whether it starts on Discord or X, it ends up tracked.
 
 ---
 
-## Tracking, milestones, and performance
+## Tracking, Milestones, and Performance
 
-Once a call is made, McGBot can track what happens next.
+When a call is made, McGBot doesn’t just log it — it follows it.
 
-This includes:
-- milestone progression
-- performance over time
-- caller history
-- leaderboard-style rankings
-- best call / top caller windows
+McGBot tracks:
 
-Over time, this builds a real record of:
-- who is consistently early
-- who has strong reads
-- what actually performs vs what gets hyped
+* Performance over time
+* Milestone progression
+* Caller history
+* Leaderboards
+* Best calls and top callers
 
----
+Over time, this builds a real picture of:
 
-## Attribution and identity (Discord + X)
+* Who is consistently early
+* Who has strong reads
+* What actually performs vs. what’s just hype
 
-McGBot connects identity across Discord and X.
-
-If you verify your X account:
-- your calls can be tied to your X identity
-- milestone posts can credit you properly
-- your track record becomes clearer across platforms
-
-This is important because a lot of crypto signal is tied to identity, not just messages.
+This creates accountability and credibility.
 
 ---
 
-## Trust and caller reputation
+## Reputation, Trust, and Identity
 
 Not every call should carry the same weight.
 
 McGBot includes a trust system with levels like:
-- approved
-- top caller
-- trusted pro
-- restricted
 
-This helps:
-- surface stronger contributors
-- reduce noise from low-quality calls
-- build a more useful signal layer over time
+* Approved
+* Top Caller
+* Trusted Pro
+* Restricted
 
----
+This allows the community to:
 
-## Trusted Pro calls (structured conviction)
+* Highlight strong contributors
+* Filter noise
+* Reward consistent quality
 
-Trusted Pro calls are higher-conviction calls with structure.
-
-Instead of just posting a CA, they include:
-- a title
-- a thesis (why it matters)
-- optional risk framing
-
-This turns calls into something people can actually evaluate — not just react to.
+Reputation becomes visible and meaningful — not assumed.
 
 ---
 
-## Dev Intelligence
+## Cross-Platform Identity (Discord + X)
+
+McGBot connects identity across platforms.
+
+If you verify your X account:
+
+* Your calls can be tied to your X identity
+* Milestones can credit you properly
+* Your track record becomes visible across platforms
+
+This matters because real signal often spans multiple platforms.
+
+---
+
+## Trusted Pro Calls — Higher Conviction, Higher Context
+
+Trusted Pro calls aren’t just “CA dumps.”
+
+They include:
+
+* A title
+* A thesis
+* Optional risk framing
+
+This creates structured conviction instead of raw hype.
+
+It helps others understand:
+
+> Why this matters — not just what it is.
+
+---
+
+## Dev Intelligence — Know Who You’re Dealing With
 
 McGBot includes a curated Dev Intelligence system.
 
-This tracks:
-- wallets
-- X handles
-- nicknames
-- notes and tags
-- launch history
+It tracks:
+
+* Wallets
+* X handles
+* Nicknames
+* Launch history
+* Notes and tags
 
 Users can:
-- look up devs (`!dev`, `!devcard`)
-- submit intel
-- access curated context
 
-This helps turn:
-> “I think this dev is the same as that other one”
+* Look up devs (`!dev`, `!devcard`)
+* Submit intel
+* Access curated context
 
-into something actually trackable.
+This helps turn vague claims like:
 
----
+> “I think this dev is the same one…”
 
-## Dev attribution (done carefully)
+into trackable, verifiable data.
 
-McGBot can attach known dev context to calls — but only when the data is strong.
+And importantly:
 
-It does not guess or force weak matches.
+> Bad attribution is worse than no attribution.
 
-That’s intentional.
-
-Bad attribution is worse than no attribution.
+McGBot only attaches dev context when it’s strong.
 
 ---
 
-## Low-Cap Watchlist (curated system)
+## Curated Low-Cap Watchlist
 
-McGBot includes a curated Low-Cap system for tracking:
-- sleeper coins
-- revival plays
-- narrative setups with context
+McGBot includes a curated Low-Cap system focused on:
 
-Users can submit entries (`!lowcapadd`), but:
-- submissions are reviewed
-- only approved entries are added
-- each entry includes a thesis (“why it matters”)
+* Sleeper coins
+* Revival plays
+* Narrative setups with a thesis
 
-This keeps it useful instead of turning into spam.
+Submissions go through review, and approved entries include reasoning — not just a contract address.
+
+This keeps the watchlist useful instead of spammy.
 
 ---
 
-## Moderation and review systems
+## Moderation-Backed Quality Control
 
-A lot of McGBot’s systems are intentionally reviewable.
+Not everything goes live automatically.
 
-Instead of everything going live instantly, things like:
-- low-cap submissions
-- dev intel
-- membership claims
-- verification
+Systems like:
 
-can go through structured review flows.
+* Low-cap submissions
+* Dev intel
+* Verification
+* Membership claims
+
+go through review flows.
 
 This keeps:
-- quality higher
-- systems cleaner
-- decisions auditable
+
+* Quality high
+* Systems clean
+* Decisions auditable
 
 ---
 
-## Memberships and referrals
+## Memberships, Rewards, and Referrals
 
-McGBot includes built-in membership and referral systems.
+McGBot includes built-in infrastructure for:
 
-This supports:
-- SOL-based claims
-- manual grants and extensions
-- referral tracking and rewards
-- role syncing
+* Memberships
+* Referrals
+* Rewards
+* Role syncing
 
-It’s infrastructure-first — not a gimmick layer.
-
----
-
-## Background intelligence and automation
-
-McGBot also runs background behaviors like:
-- auto-scanning pasted contract addresses
-- X mention ingestion
-- monitoring loops and alerts
-
-These are designed to assist, not overwhelm.
+This supports real community structure instead of temporary gimmicks.
 
 ---
 
-# What makes McGBot different
+## Background Intelligence and Automation
+
+McGBot also works in the background.
+
+It can:
+
+* Auto-scan pasted contracts
+* Ingest X mentions
+* Track milestones
+* Monitor activity
+
+This adds intelligence without requiring constant manual commands.
+
+---
+
+## What Makes McGBot Different
 
 Most crypto bots either:
-- don’t do enough
-- spam everything
-- or automate badly
 
-McGBot is built around a different set of priorities:
+* Spam too much
+* Track too little
+* Or automate blindly
 
-## Signal over noise  
-Not everything should be surfaced equally.
+McGBot is built around different principles:
 
-## Context over raw data  
+### Signal Over Noise
+
+Not everything deserves equal weight.
+
+### Context Over Raw Data
+
 If something matters, there should be a reason.
 
-## Curation over blind automation  
-The best systems are reviewed and shaped.
+### Curation Over Chaos
 
-## Cross-platform continuity  
-Calls, identity, and performance should connect — not stay fragmented.
+Reviewed systems beat noisy automation.
 
-## Trust over randomness  
-Better contributors should stand out over time.
+### Cross-Platform Continuity
+
+Signal shouldn’t be fragmented.
+
+### Trust Over Randomness
+
+Reputation should be visible.
 
 ---
 
-# What McGBot is becoming
+## What McGBot Is Becoming
 
 McGBot started as a call tracker.
 
-It’s becoming something closer to a:
+It’s evolving into a:
 
-## crypto intel + curation layer
+> **Crypto intelligence and curation layer**
 
-That includes:
-- structured call tracking
-- identity-linked attribution
-- dev intelligence
-- curated low-cap systems
-- moderation-backed workflows
+Combining:
 
-The goal isn’t to replace people.
+* Structured call tracking
+* Identity-linked attribution
+* Dev intelligence
+* Curated low-cap systems
+* Moderation-backed workflows
 
-It’s to make the right information easier to:
-- find
-- understand
-- verify
-- and trust
+It doesn’t replace people — it amplifies the good ones.
 
 ---
 
-# Bottom line
+## Bottom Line
 
-McGBot exists to make a crypto server sharper.
+McGBot exists to make a crypto community sharper.
 
 It turns:
-- scattered calls
-- lost context
-- weak memory
-- and noisy chatter
 
-into something structured, trackable, and actually useful over time.
+* Scattered calls
+* Lost context
+* Noisy chat
+* Forgotten alpha
+
+into:
+
+* Structured signal
+* Trackable performance
+* Better decisions
 
 Not more noise.
 
-Better signal.
+**Better signal.**

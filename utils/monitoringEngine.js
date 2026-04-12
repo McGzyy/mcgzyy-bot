@@ -883,12 +883,22 @@ if (lifecycleStatus === 'archived') {
       /**
        * SAVE STATE
        */
+      const MAX_CHART_HISTORY = 500;
+      let priceHistory = Array.isArray(persisted?.priceHistory)
+        ? [...persisted.priceHistory]
+        : [];
+      priceHistory.push({ t: Date.now(), price: Number(currentMc) });
+      if (priceHistory.length > MAX_CHART_HISTORY) {
+        priceHistory = priceHistory.slice(-MAX_CHART_HISTORY);
+      }
+
       updateTrackedCallData(coin.contractAddress, {
         latestMarketCap: currentMc,
         athMc,
         milestonesHit,
         dumpAlertsHit: dumpHits,
-        lastPostedX: lastPostedXOut
+        lastPostedX: lastPostedXOut,
+        priceHistory
       });
 
     } catch (err) {

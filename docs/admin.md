@@ -1,681 +1,422 @@
 # McGBot Admin Guide
 
-This guide is for the people responsible for actually operating, maintaining, and shaping McGBot.
+This guide is for the people responsible for **operating, maintaining, and shaping McGBot**.
 
-If the User Guide explains how to **use** the bot, and the Moderator Guide explains how to **curate** it, this guide explains how to **run** it.
+If the User Guide explains how to *use* the bot and the Moderator Guide explains how to *curate* it, this guide explains how to *run and steward* it.
 
-That includes:
+As an admin, you are responsible for:
 
-- configuration
-- permissions
-- command surfaces
-- system behavior
-- maintenance
-- operational caution
-- future-proofing
+* System stability
+* Trust and reputation systems
+* Channel architecture
+* Permissions and access control
+* Configuration and tuning
+* Moderation flow integrity
+* Data quality and product direction
 
-McGBot is no longer “just a call bot.”  
-It is now a multi-system crypto tracking, curation, moderation, and intelligence platform.
-
-That means admin decisions matter a lot.
+McGBot is not just a call bot — it is a multi-system crypto tracking, curation, and moderation platform. Admin decisions directly shape its quality and longevity.
 
 ---
 
-# What Admins Are Actually Responsible For
+## 1) What You’re Operating
 
-At an admin / operator level, you are responsible for protecting:
+McGBot consists of several interconnected systems:
 
-- system stability
-- trust integrity
-- channel cleanliness
-- permissions
-- configuration correctness
-- moderation architecture
-- data quality
-- product direction
+### Public / User-Facing Systems
 
-If those drift, the bot gets messy fast.
+* Coin call tracking
+* Scanning & quick lookups
+* Caller stats & leaderboards
+* Low-cap watchlist
+* Dev intelligence lookups
+* Profiles & identity (Discord + X)
+* Membership visibility & status
 
----
+### Moderation / Review Systems
 
-# 1) Core System Areas You’re Operating
+* Moderation approval queue
+* X verification review
+* Low-cap submissions
+* Dev intel submissions
+* Membership claim review
+* Tracked call review
+* Top caller review
 
-McGBot currently has several major live systems:
+### Admin / Internal Systems
 
-## Public / User-Facing Systems
-- coin call tracking
-- scanning / lookup
-- caller stats and leaderboards
-- low-cap watchlist
-- dev lookup
-- profiles / identity
-- X-linked attribution
-- membership info
+* Trust system
+* Membership & role control
+* Referral tracking
+* Scanner tuning & monitoring
+* X ingestion & posting
+* Data maintenance & backfill tools
 
-## Moderation / Review Systems
-- mod approval queue
-- X verification review
-- low-cap review
-- dev intel review
-- tracked call review
-- membership claim review
-- top caller review
-
-## Admin / Internal Systems
-- trust management
-- membership state control
-- referral state control
-- scanner tuning
-- monitoring control
-- X ingestion / X posting behavior
-- data backfill / repair utilities
-
-You are effectively operating a small product platform, not just a Discord utility.
+You are effectively operating a small product platform — not just a Discord bot.
 
 ---
 
-# 2) Channel Architecture (Very Important)
+## 2) Channel Architecture
 
-Channel discipline matters.
+McGBot works best when channels remain **purpose-built and consistent**.
 
-McGBot works best when its systems are routed cleanly and consistently.
+### Primary Moderation Channel
 
----
-
-## Core Intended Channels
-
-### `#mod-approvals`
-Primary moderation / review hub.
+#### `#mod-approvals`
 
 Used for:
-- X verification approvals
-- low-cap submissions
-- dev intel submissions
-- membership claim review
-- tracked review flows
-- top caller review
-- future approval systems
 
-This should be treated as the **main review queue**.
+* X verification approvals
+* Low-cap submissions
+* Dev intel submissions
+* Membership claims
+* Call review flows
+* Future approval workflows
 
-### `#low-cap-tracker`
-Public-facing low-cap watchlist output.
+Treat this as the **main moderation queue**.
 
-Used for:
-- approved low-cap watchlist entries
+### Key Public Channels
 
-### `#dev-intel`
-Public-facing dev lookup / context area.
+#### `#low-cap-tracker`
 
-Used for:
-- `!dev`
-- `!devcard`
-- public dev context interaction
+Public output for approved low-cap watchlist entries.
 
-### `#tracked-devs`
-Staff-only dev curation area.
+#### `#dev-intel`
 
-Used for:
-- editing tracked devs
-- adjusting dev notes / tags / launches / identity fields
+Public space for dev lookup & context (`!dev`, `!devcard`).
 
----
+#### `#tracked-devs`
 
-## Important Admin Principle
+Staff-only channel for:
 
-Do **not** create unnecessary extra channels unless they solve a real problem.
+* Editing tracked devs
+* Adjusting notes, tags, launches, identity fields
 
-McGBot works better when systems stay centralized and understandable.
+### Admin Principle
 
-That is especially true for moderation queues.
+> Do not create new channels unless there is a real operational need.
+
+Centralized systems stay easier to manage and trust.
 
 ---
 
-# 3) Permissions and Access Control
+## 3) Permissions & Access Control
 
-Permissions matter a lot in McGBot.
+Because McGBot touches identity, trust, moderation, and reputation, permissions matter.
 
-Because the bot now includes:
+### Recommended Roles
 
-- trust systems
-- identity systems
-- membership systems
-- curation systems
-- review systems
+#### Regular Users
 
-…permission mistakes can create real damage.
+Access to:
 
----
+* Public scans & lookups
+* Making calls & watchlist entries
+* Profile and identity tools
+* Approved submission flows
 
-## Recommended permission model
+#### Moderators
 
-### Regular users
-Should only have access to:
-- public lookup
-- public scan / call tools
-- approved submission flows
-- profile / identity tools
+Access to:
 
-### Moderators
-Should have access to:
-- review queue actions
-- trust management
-- submission resolution
-- membership review
-- dev curation actions
-- moderation utility commands
+* Review queue actions
+* Trust management
+* Submission resolution
+* Dev curation
+* Membership review
+* Moderation commands
 
-### Admin / owner
-Should have access to:
-- scanner tuning
-- X posting controls
-- owner-only debug / test utilities
-- destructive / reset commands
-- environment-sensitive features
+#### Admin / Owner
+
+Access to:
+
+* Scanner tuning
+* X posting controls
+* System repair tools
+* Destructive commands
+* Environment-sensitive features
+
+> Do **not** assume moderators should have full access. Some actions are intentionally restricted.
 
 ---
 
-## Important
-Do not assume “mods should have everything.”
+## 4) Environment & Configuration
 
-Some commands are closer to:
-- ops tools
-- tuning tools
-- repair tools
-- owner utilities
+Key environment variables drive core behavior.
 
-Those should stay limited.
+### Core
 
----
-
-# 4) Important Environment / Config Controls
-
-McGBot depends on environment configuration for a lot of important behavior.
-
-These values should be treated carefully.
-
----
-
-## Important known environment values
-
-### General / Ownership
-- `BOT_OWNER_ID`
-- `DISCORD_GUILD_ID`
+* `BOT_OWNER_ID`
+* `DISCORD_GUILD_ID`
 
 ### X / Social
-- `X_MENTION_INGESTION_ENABLED`
-- `X_MENTION_POST_REPLIES`
-- `X_POST_DRY_RUN`
+
+* `X_MENTION_INGESTION_ENABLED`
+* `X_MENTION_POST_REPLIES`
+* `X_POST_DRY_RUN`
 
 ### Charts / Milestones
-- `X_MILESTONE_CHART_ENABLED`
-- chart provider settings
-- chart tuning settings
+
+* `X_MILESTONE_CHART_ENABLED`
+* Chart provider & rendering configuration
 
 ### Membership
-- `PREMIUM_MEMBER_ROLE_NAME`
-- `SOL_MEMBERSHIP_WALLET`
-- `SOL_MEMBERSHIP_AMOUNT_SOL`
-- `SOL_MEMBERSHIP_TIER`
-- `SOL_MEMBERSHIP_MONTHS`
 
-### Optional / infra
-- `SOLANA_RPC_URL`
+* `PREMIUM_MEMBER_ROLE_NAME`
+* `SOL_MEMBERSHIP_WALLET`
+* `SOL_MEMBERSHIP_AMOUNT_SOL`
+* `SOL_MEMBERSHIP_TIER`
+* `SOL_MEMBERSHIP_MONTHS`
 
----
+### Optional
 
-## Admin guidance
-Before changing env behavior, ask:
+* `SOLANA_RPC_URL`
 
-- does this affect live moderation flow?
-- does this affect public posting?
-- does this affect trust / attribution?
-- does this affect role sync / membership?
-- does this affect X posting or reply behavior?
+Before changing environment behavior, ask:
 
-If yes, change it carefully.
+* Will this affect moderation flow?
+* Will this change public output?
+* Will this affect trust or attribution?
+* Will this affect membership or role sync?
+* Will this affect X posting behavior?
 
----
-
-# 5) Trust System Administration
-
-The trust system is one of the most important admin-controlled systems in the bot.
-
-It affects:
-- how calls are treated
-- how users are surfaced
-- what reputation they carry
-- what special flows they can access
+If yes, proceed carefully.
 
 ---
 
-## Current trust levels
+## 5) Trust System Administration
 
-- `none`
-- `approved`
-- `top_caller`
-- `trusted_pro`
-- `restricted`
+Trust directly impacts:
 
----
+* How calls are treated
+* How users are surfaced
+* Reputation and attribution
+* Access to higher-signal flows
 
-## Important trust rules
+### Trust Levels
 
-### `trusted_pro`
-Should stay **highly curated**.
+* `none`
+* `approved`
+* `top_caller`
+* `trusted_pro`
+* `restricted`
 
-Do not hand this out casually.
+### Guidance
 
-This is meant to represent:
-- stronger conviction
-- stronger context
-- higher-value call behavior
+* **trusted_pro** must remain highly curated
+* **top_caller** should remain meaningful
+* **restricted** should be used intentionally
 
-### `top_caller`
-Should be more flexible than `trusted_pro`, but still meaningful.
+Trust decisions should be:
 
-### `restricted`
-Should be used intentionally when someone should not benefit from normal trust flows.
+* Explainable
+* Consistent
+* Defensible later
 
----
+### Trust Commands
 
-## Key trust commands
-
-- `!getcallertrust @user`
-- `!setcallertrust @user <level>`
-- `!topcallercheck @user`
-- `!approvetopcaller @user`
-- `!removetopcaller @user`
-
-### Admin guidance
-Trust should stay:
-- explainable
-- consistent
-- defensible later
-
-If you can’t explain why a user has a trust level, that’s usually a sign the system is drifting.
+* `!getcallertrust @user`
+* `!setcallertrust @user <level>`
+* `!topcallercheck @user`
+* `!approvetopcaller @user`
+* `!removetopcaller @user`
 
 ---
 
-# 6) Membership / Premium Administration
+## 6) Membership Administration
 
 McGBot includes a real internal membership system.
 
-This is no longer just a concept.
+Admins are responsible for:
 
-That means admins are responsible for:
+* Membership state accuracy
+* Premium role sync
+* Manual corrections
+* Preventing entitlement drift
 
-- membership state integrity
-- Premium role sync correctness
-- manual correction flows
-- avoiding entitlement drift
+### Membership States
 
----
+* `active`
+* `trial`
+* `comped`
 
-## Membership states of note
+### Membership Commands
 
-Qualifying states currently include:
-- `active`
-- `trial`
-- `comped`
-
----
-
-## Important membership commands
-
-- `!memberstatus @user`
-- `!syncmemberrole @user`
-- `!grantmembership @user <tier> <months>`
-- `!extendmembership @user <months>`
-- `!compmembership @user <tier> <months?>`
-- `!cancelmembership @user`
-- `!removemembership @user`
+* `!memberstatus @user`
+* `!syncmemberrole @user`
+* `!grantmembership @user <tier> <months>`
+* `!extendmembership @user <months>`
+* `!compmembership @user <tier> <months?>`
+* `!cancelmembership @user`
+* `!removemembership @user`
 
 ---
 
-## Admin guidance
-Use manual membership actions carefully.
+## 7) Referral System Administration
 
-This system should stay:
-- intentional
-- clean
-- non-abusive
-- understandable later
+The referral system tracks:
 
-If you need to audit membership later, the logic should still make sense.
+* Referrer attribution
+* Conversion state
+* Rewards and credits
 
----
+### Commands
 
-# 7) Referral Administration
+* `!referralstatus @user`
+* `!setreferrer @user @referrer`
+* `!clearreferrer @user`
+* `!markreferralconverted @user <none|joined|paid|refunded>`
+* `!referralrewardstatus @user`
+* `!grantreferralreward @user <months>`
+* `!applyreferralreward @user <months?>`
+* `!rewardreferrer @referredUser`
 
-The referral system is currently a real internal attribution + reward system.
-
-It supports:
-
-- referrer assignment
-- conversion state
-- reward credits
-- membership reward application
-
-This is still partly manual, so admin discipline matters.
-
----
-
-## Important referral commands
-
-- `!referralstatus @user`
-- `!setreferrer @user @referrer`
-- `!clearreferrer @user`
-- `!markreferralconverted @user <none|joined|paid|refunded>`
-- `!referralrewardstatus @user`
-- `!grantreferralreward @user <months>`
-- `!applyreferralreward @user <months?>`
-- `!rewardreferrer @referredUser`
-
----
-
-## Admin guidance
 Keep this system:
-- auditable
-- conservative
-- non-abusable
 
-Avoid “free-form referral chaos.”
-
----
-
-# 8) Low-Cap System Administration
-
-The Low-Cap system is one of the most important new product systems.
-
-Its value depends entirely on **quality control**.
+* Auditable
+* Conservative
+* Abuse-resistant
 
 ---
 
-## What admins should protect
+## 8) Low-Cap System Administration
 
-The Low-Cap system should remain:
+The low-cap system’s value depends on curation quality.
 
-- curated
-- thesis-driven
-- useful
-- relatively selective
-- not spammy
+Admins should ensure:
 
-If it turns into a giant junk list, it loses almost all value.
+* Submissions have a thesis
+* Low-effort or duplicate spam is denied
+* Noise does not overwhelm signal
 
----
-
-## What admins should watch for
-
-- duplicate low-quality submissions
-- weak approval habits
-- poor moderation standards
-- too much noise in `#low-cap-tracker`
-- staff over-approving junk
-
-### Important
-Low-cap quality matters more than low-cap volume.
+> Low-cap quality matters more than quantity.
 
 ---
 
-# 9) Dev Intelligence Administration
+## 9) Dev Intelligence Administration
 
-Dev Intelligence is one of the strongest foundations in McGBot.
+Dev intelligence must remain:
 
-It is also one of the easiest systems to damage if it becomes sloppy.
+* Conservative
+* Specific
+* Useful
+* Resistant to rumor
 
----
-
-## What admins should protect
-
-The Dev Intelligence system should remain:
-
-- conservative
-- specific
-- useful
-- curation-first
-- resistant to rumor pollution
+> Bad attribution is worse than no attribution.
 
 ---
 
-## Important principle
+## 10) Scanner & Monitoring Controls
 
-Bad dev attribution is worse than no dev attribution.
+These systems influence:
 
-That should remain a core operating principle.
+* Auto-call behavior
+* Tracking flow
+* Noise levels
+* Review load
 
-Never push the system toward weak guessing just because “more data feels better.”
+### Commands
 
-It usually doesn’t.
+* `!scanner`
+* `!scanner on`
+* `!scanner off`
+* `!monitorstatus`
+* `!approvalstats`
+* `!pendingapprovals`
+* `!recentcalls`
+* `!resetmonitor`
 
----
-
-# 10) Scanner / Monitoring Administration
-
-McGBot includes scanner / monitoring systems that can affect:
-
-- auto-call behavior
-- tracking flow
-- review load
-- signal quality
-- system noise
-
-These controls should be treated carefully.
+> `!resetmonitor` is destructive — use carefully.
 
 ---
 
-## Scanner / monitoring commands
+## 11) Tuning & Threshold Controls
 
-- `!scanner`
-- `!scanner on`
-- `!scanner off`
-- `!monitorstatus`
-- `!approvalstats`
-- `!pendingapprovals`
-- `!recentcalls`
-- `!resetmonitor`
+These settings directly affect signal quality.
 
-### Warning
-`!resetmonitor` is destructive and should not be used casually.
+### Thresholds
 
----
+* `!setminmc <value>`
+* `!setminliq <value>`
+* `!setminvol5m <value>`
+* `!setminvol1h <value>`
+* `!setmintxns5m <value>`
+* `!setmintxns1h <value>`
+* `!setapprovalx <value>`
+* `!setapprovalladder <values>`
 
-## Admin guidance
-If the scanner is too loose, you get junk.
+### Sanity Filters
 
-If it is too strict, you miss useful signal.
+* `!setsanityminmc <value>`
+* `!setsanityminliq <value>`
+* `!setsanityminliqratio <value>`
+* `!setsanitymaxliqratio <value>`
+* `!setsanitymaxratio5m <value>`
+* `!setsanitymaxratio1h <value>`
 
-Tuning should be done carefully, not emotionally.
-
----
-
-# 11) Threshold / Tuning Controls
-
-Some commands exist specifically to tune scanning / approval behavior.
-
-These are not casual commands.
-
-They directly affect how much junk or signal the bot lets through.
+> Never tune blindly. Understand the downstream effects.
 
 ---
 
-## Examples of tuning commands
+## 12) X Integration & Posting
 
-### Threshold setters
-- `!setminmc <number>`
-- `!setminliq <number>`
-- `!setminvol5m <number>`
-- `!setminvol1h <number>`
-- `!setmintxns5m <number>`
-- `!setmintxns1h <number>`
-- `!setapprovalx <number>`
-- `!setapprovalladder <comma-separated values>`
+X integrations affect:
 
-### Sanity filter setters
-- `!setsanityminmc <number>`
-- `!setsanityminliq <number>`
-- `!setsanityminliqratio <number>`
-- `!setsanitymaxliqratio <number>`
-- `!setsanitymaxratio5m <number>`
-- `!setsanitymaxratio1h <number>`
+* Public posting
+* Reputation
+* Attribution
+
+### Tools
+
+* `!testx`
+* `!xpostpreview <CA> [milestoneX]`
+
+Treat X posting changes carefully — mistakes are public.
 
 ---
 
-## Admin guidance
-These should only be changed if you understand:
+## 13) Repair & Maintenance Tools
 
-- why they exist
-- what system behavior they influence
-- what failure mode you are trying to fix
-
-Do not tune blindly.
-
----
-
-# 12) X Integration / Posting Controls
-
-McGBot includes X-linked systems that may affect:
-
-- mention ingestion
-- outbound replies
-- milestone post formatting
-- test posting
-- preview behavior
-
-These are high-visibility systems.
-
-They should be treated carefully.
-
----
-
-## Relevant commands / tools
-
-- `!testx`
-- `!xpostpreview <CA> [milestoneX]`
-- owner-side X mention test / intake tools
-- env-based X posting controls
-
----
-
-## Admin guidance
-Before changing X behavior, ask:
-
-- does this affect public-facing output?
-- does this affect attribution?
-- does this affect posting safety?
-- does this affect spam risk?
-- does this affect trust or perception?
-
-Because it probably does.
-
----
-
-# 13) Repair / Utility / Backfill Tools
-
-Some admin / ops tools exist for maintenance and repair.
-
-These are useful, but should not be spammed or used blindly.
-
----
-
-## Utility commands
-
-- `!backfillprofiles`
-- `!backfillprofiles run`
-- `!truestats @user`
-- `!truebotstats`
-- `!resetbotstats`
-- `!addlaunch <dev_wallet> <token_ca>`
-
----
-
-## Admin guidance
 Use these when needed, not casually.
 
-These are support / maintenance tools — not everyday commands.
+* `!backfillprofiles`
+* `!truestats @user`
+* `!truebotstats`
+* `!resetbotstats`
+* `!addlaunch <dev_wallet> <token_ca>`
 
 ---
 
-# 14) Known Operational Risks / Cautions
+## 14) Known Risks & Technical Notes
 
-These are important.
+* `index.js` is currently heavy and high-impact
+* Some duplicate logic exists
+* Legacy moderation data may reference old channels
+* Guild handling assumes a single-server model
 
----
-
-## index.js is still heavy
-A lot of systems are currently concentrated there.
-
-That means:
-- changes can have wider impact than expected
-- careless edits can break multiple systems
-
-Do not do giant casual refactors.
+Be cautious with large refactors.
 
 ---
 
-## Some duplication still exists
-Examples include:
-- formatting helpers
-- caller label resolution
-- help / command surfaces
+## 15) Admin Philosophy
 
-These are real cleanup items, but not emergency refactor targets.
+McGBot works best when guided by these principles:
 
----
-
-## Old review metadata may still reference legacy channels
-Because moderation was centralized later, some old stored references may still point at deleted / old channels.
-
-This is expected technical debt.
-
-Do not panic if some old fetch / cleanup behavior fails on legacy refs.
+* **Curated > Automated**
+* **Signal > Feature bloat**
+* **Avoid data pollution**
+* **Strengthen foundations first**
+* **Keep the server readable**
 
 ---
 
-## Guild selection can still be fragile
-Some logic may still assume a single-guild model in ways that should eventually be hardened.
+## Bottom Line
 
-If McGBot expands to more than one guild, this needs attention.
+Your job as an admin is to keep McGBot:
 
----
+* Stable
+* High-signal
+* Trustworthy
+* Well-routed
+* Worth using
 
-# 15) Product Direction Responsibility
-
-Admins are also responsible for keeping McGBot pointed in the right direction.
-
-That matters more than people think.
-
-McGBot works best when built around these principles:
-
-## 1) Curated > Automated
-More automation is not always better.
-
-## 2) Better signal > More features
-Feature bloat kills clarity fast.
-
-## 3) Avoid data pollution
-Weak data is expensive once it gets into the system.
-
-## 4) Build foundations before flashy layers
-Storage, review, moderation, and identity matter more than gimmicks.
-
-## 5) Keep the server readable
-Too many noisy systems will eventually make people ignore the bot entirely.
-
----
-
-# Bottom Line
-
-As an admin, your job is not just to keep McGBot online.
-
-Your job is to keep it:
-
-- stable
-- intentional
-- high-signal
-- trustworthy
-- well-routed
-- worth using
-
-That is what turns it from “a bot” into an actual useful product.
+That is what turns McGBot into a real product, not just a bot.

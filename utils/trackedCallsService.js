@@ -44,6 +44,7 @@ function normalizeTrackedCall(call = {}) {
 
     milestonesHit: Array.isArray(call.milestonesHit) ? call.milestonesHit : [],
     dumpAlertsHit: Array.isArray(call.dumpAlertsHit) ? call.dumpAlertsHit : [],
+    priceHistory: Array.isArray(call.priceHistory) ? call.priceHistory : [],
     lifecycleStatus: call.lifecycleStatus || 'active',
     isActive: call.isActive !== false,
 
@@ -358,6 +359,15 @@ function saveTrackedCall(
       lifecycleStatus: existing.lifecycleStatus || 'active',
       isActive: existing.isActive !== false,
 
+      priceHistory: (() => {
+        const prev = Array.isArray(existing.priceHistory) ? [...existing.priceHistory] : [];
+        const mc = Number(scan.marketCap || 0);
+        if (mc <= 0) return prev;
+        if (prev.length === 0) return [{ t: Date.now(), price: mc }];
+        prev.push({ t: Date.now(), price: mc });
+        return prev.slice(-500);
+      })(),
+
       discordMessageId: existing.discordMessageId || null,
 
       firstCallerId:
@@ -477,6 +487,11 @@ function saveTrackedCall(
     athMc: Number(scan.marketCap || 0),
     discordMessageId: null,
 
+    priceHistory:
+      scan.marketCap != null && Number(scan.marketCap) > 0
+        ? [{ t: Date.now(), price: Number(scan.marketCap) }]
+        : [],
+
     callSourceType,
     wasWatched,
 
@@ -540,7 +555,14 @@ function reactivateTrackedCall(
     athMc: Math.max(
       Number(existing.athMc || existing.latestMarketCap || existing.firstCalledMarketCap || 0),
       Number(scan.marketCap || 0)
-    )
+    ),
+    priceHistory: (() => {
+      const prev = Array.isArray(existing.priceHistory) ? [...existing.priceHistory] : [];
+      const mc = Number(scan.marketCap ?? existing.latestMarketCap ?? 0);
+      if (mc <= 0) return prev;
+      prev.push({ t: Date.now(), price: mc });
+      return prev.slice(-500);
+    })()
   });
 
   calls[existingIndex] = refreshPublicCallerName(updated);

@@ -100,4 +100,39 @@ async function renderPriceChart({ prices, timestamps, label }) {
   return chartCanvas.renderToBuffer(configuration, 'image/png');
 }
 
-module.exports = { renderPriceChart };
+/**
+ * Build aligned series from tracked call `priceHistory` entries.
+ * @param {{ priceHistory?: Array<{ t?: number|string, price?: number, mc?: number, marketCap?: number, ts?: number|string, timestamp?: number|string }> }} trackedCall
+ * @returns {{ prices: number[], timestamps: number[] } | null}
+ */
+function seriesFromTrackedPriceHistory(trackedCall) {
+  const h = trackedCall?.priceHistory;
+  if (!Array.isArray(h) || h.length === 0) return null;
+
+  const prices = [];
+  const timestamps = [];
+
+  for (const p of h) {
+    const price = Number(p?.price ?? p?.mc ?? p?.marketCap);
+    if (!Number.isFinite(price)) continue;
+
+    const rawT = p?.t ?? p?.ts ?? p?.timestamp;
+    let ts;
+    if (typeof rawT === 'number' && Number.isFinite(rawT)) {
+      ts = rawT;
+    } else if (rawT instanceof Date) {
+      ts = rawT.getTime();
+    } else {
+      ts = Date.parse(String(rawT || ''));
+    }
+    if (Number.isNaN(ts)) continue;
+
+    prices.push(price);
+    timestamps.push(ts);
+  }
+
+  if (prices.length < 1) return null;
+  return { prices, timestamps };
+}
+
+module.exports = { renderPriceChart, seriesFromTrackedPriceHistory };

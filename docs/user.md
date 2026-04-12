@@ -1,457 +1,338 @@
 # McGBot User Guide
 
-McGBot is built to help you track calls, preserve context, and use the server more intelligently across **Discord and X**.
+McGBot helps you track calls, preserve context, and use the server more intelligently across **Discord and X**.
 
 This guide is for regular users — not staff or admins.
-
 If you want to know what you can actually do with the bot, start here.
 
 ---
 
-# Quick Start
+## Quick Start
 
-Most users will mainly use McGBot for these things:
+Most people use McGBot for:
 
-- Make and track coin calls
-- Look up coins and devs
-- Check caller performance and leaderboards
-- Submit low-cap coins or dev intel
-- Connect Discord and X identity
-- Use the bot as a signal and context layer
+* Making and tracking coin calls
+* Looking up coins and devs
+* Checking caller performance and leaderboards
+* Submitting low-cap ideas or dev intel
+* Connecting Discord and X identity
+* Using the bot as a signal and context layer
 
 If you only learn a few commands, start with:
 
-- `!call <ca>`
-- `!watch <ca>`
-- `!ca <ca>`
-- `!lowcap <ca>`
-- `!lowcaps`
-- `!lowcapadd`
-- `!dev <wallet | @x | nickname>`
-- `!devcard <wallet | @x | nickname>`
-- `!profile`
-- `!credit <mode>`
+* `!call <ca>`
+* `!watch <ca>`
+* `!ca <ca>`
+* `!lowcap <ca>`
+* `!lowcaps`
+* `!lowcapadd`
+* `!dev <wallet | @x | nickname>`
+* `!devcard <wallet | @x | nickname>`
+* `!profile`
+* `!credit <mode>`
 
 ---
 
-# 1) Making and Tracking Calls
+## 1) Making and Tracking Calls
 
-One of McGBot’s main jobs is turning calls into something that can actually be tracked.
+McGBot turns calls into something that can actually be tracked over time.
 
-Instead of a call disappearing into chat, the bot can preserve:
+Instead of a call disappearing into chat, the bot preserves:
 
-- the contract address
-- who posted it
-- when it was called
-- how it performed after
-- milestone progress over time
+* The contract address
+* Who posted it
+* When it was called
+* How it performed
+* Milestone progress over time
 
-That gives the server a real memory instead of relying on screenshots and hindsight.
+That gives the server real memory instead of relying on screenshots and hindsight.
 
-## `!call <ca>`
+---
 
-Use this when you want to make an official tracked call.
+### `!call <ca>`
 
-**Example**  
+Creates an official tracked call.
+
+**Example:**
 `!call 9abc123...`
 
 **What it does**
-- Creates a tracked call
-- Ties the call to you
-- Lets the bot follow it over time
 
-If you want your call to actually count, this is the cleanest way to do it.
+* Creates a tracked call
+* Ties the call to you
+* Tracks performance over time
 
-## `!watch <ca>`
+If you want your call to actually count, this is the right command.
 
-Use this when you want to track a coin **without claiming it as your call**.
+---
 
-**Example**  
+### `!watch <ca>`
+
+Tracks a coin without claiming it as your call.
+
+**Example:**
 `!watch 9abc123...`
 
 **What it does**
-- Starts tracking the coin
-- Does **not** treat it as your personal call
 
-This is useful if you’re watching a setup but don’t want to take credit for it.
+* Starts tracking the coin
+* Does **not** treat it as your personal call
 
-## `!tracked`
-
-Shows a general view of tracked calls.
-
-**Example**  
-`!tracked`
-
-## `!tracked <ca>`
-
-Looks up a specific tracked coin.
-
-**Example**  
-`!tracked 9abc123...`
-
-Use this if you want to check whether a coin is already being tracked and what its status looks like.
+Use this when you’re interested, but don’t want to claim credit.
 
 ---
 
-# 2) Quick Coin Lookup / Scanning
+### `!tracked`
 
-Sometimes you want context without fully tracking the coin.
+Shows a summary of tracked calls.
 
-McGBot supports that too.
+### `!tracked <ca>`
 
-## `!ca <ca>`
+Shows detailed tracking info for a specific coin.
 
-Runs a quick intel scan on a coin.
+---
 
-**Example**  
+## 2) Quick Coin Lookup / Scanning
+
+Sometimes you want context without committing to tracking.
+
+---
+
+### `!ca <ca>`
+
+Quick intel scan.
+
+**Example:**
 `!ca 9abc123...`
 
-**Use this when**
-- you want a quick read
-- you don’t want to start tracking yet
-- you just want context first
+Use this when:
 
-## `!scan`
-
-Shows a generic scan-style output.
-
-**Example**  
-`!scan`
-
-## `!scan <ca>`
-
-Runs a deeper scan-style lookup on a specific coin.
-
-**Example**  
-`!scan 9abc123...`
+* You want a quick read
+* You’re not ready to track yet
+* You just want context
 
 ---
 
-# 3) Caller Stats and Performance
+### `!scan`
 
-McGBot is also useful for checking who’s actually been cooking.
+Generic scan output.
 
-That includes:
-- caller stats
-- top callers
-- best calls
-- overall bot stats
+### `!scan <ca>`
 
-## `!caller <name>` or `!caller @user`
+Deeper scan-style lookup.
+
+---
+
+## 3) Caller Stats & Performance
+
+McGBot makes it easy to see who’s actually been performing.
+
+---
+
+### `!caller <name>` or `!caller @user`
 
 Shows stats for a specific caller.
 
-**Examples**
-- `!caller Austin`
-- `!caller @Austin`
+### `!callerboard`
 
-Use this if you want to check how someone’s tracked calls have performed.
+Top caller leaderboard.
 
-## `!callerboard`
+### `!botstats`
 
-Shows the top caller leaderboard.
-
-**Example**  
-`!callerboard`
-
-## `!botstats`
-
-Shows general McGBot stats.
-
-**Example**  
-`!botstats`
-
-## Time-Based Performance Commands
-
-These commands show best calls and top callers by timeframe.
-
-### Best Calls
-- `!bestcall24h`
-- `!bestcallweek`
-- `!bestcallmonth`
-
-### Top Callers
-- `!topcaller24h`
-- `!topcallerweek`
-- `!topcallermonth`
-
-### Best Bot Calls
-- `!bestbot24h`
-- `!bestbotweek`
-- `!bestbotmonth`
-
-Use these when you want quick “who / what has been hitting lately?” context.
+Overall bot stats.
 
 ---
 
-# 4) Low-Cap Watchlist
+### Time-Based Performance
+
+**Best Calls**
+
+* `!bestcall24h`
+* `!bestcallweek`
+* `!bestcallmonth`
+
+**Top Callers**
+
+* `!topcaller24h`
+* `!topcallerweek`
+* `!topcallermonth`
+
+**Best Bot Calls**
+
+* `!bestbot24h`
+* `!bestbotweek`
+* `!bestbotmonth`
+
+---
+
+## 4) Low-Cap Watchlist
 
 McGBot includes a curated low-cap system for tracking:
 
-- sleeper coins
-- revival plays
-- forgotten runners
-- low-cap setups with an actual thesis
+* Sleeper coins
+* Revival plays
+* Interesting setups with a thesis
 
-This is **not** meant to be a random junk feed.
-
-The point is to surface interesting low-cap ideas that are actually worth watching.
-
-## `!lowcap <ca>`
-
-Looks up a tracked low-cap entry.
-
-**Example**  
-`!lowcap 9abc123...`
-
-Use this when you want to see:
-- whether a coin is on the watchlist
-- why it was added
-- what the stored thesis is
-
-## `!lowcaps`
-
-Shows the current low-cap watchlist.
-
-**Example**  
-`!lowcaps`
-
-This is useful for browsing what’s already being watched.
-
-## `!lowcapadd`
-
-Starts the low-cap submission flow.
-
-**Example**  
-`!lowcapadd`
-
-This opens a submission form where you can submit:
-- coin name
-- contract address
-- narrative
-- why it’s interesting
-- optional extra context
-
-### Important
-Low-cap submissions do **not** go live instantly.
-
-They are reviewed before being added.
-
-That’s intentional — it keeps the list curated instead of useless.
+This is **not** a spam feed.
 
 ---
 
-# 5) Dev Intelligence
+### `!lowcap <ca>`
 
-McGBot also lets you look up known dev context.
+Look up a low-cap entry.
 
-This is useful when you want to know whether a wallet, X handle, or nickname is already tied to known history.
+### `!lowcaps`
 
-## `!dev <wallet | @x | nickname>`
+Browse the watchlist.
 
-Looks up a tracked dev.
+### `!lowcapadd`
 
-**Examples**
-- `!dev @exampledev`
-- `!dev 9abc123wallet...`
-- `!dev nickname`
+Submit a coin for review.
 
-Use this when you want a quick lookup.
-
-## `!devcard <wallet | @x | nickname>`
-
-Shows a cleaner profile-style dev card.
-
-**Example**  
-`!devcard @exampledev`
-
-This is usually the nicer way to view dev context.
-
-## `!devleaderboard`
-
-Shows dev leaderboard information.
-
-**Example**  
-`!devleaderboard`
-
-## `!devsubmit`
-
-Starts the dev intel submission flow.
-
-**Example**  
-`!devsubmit`
-
-Use this when you want to submit useful dev context for staff review.
-
-Like the low-cap system, this is reviewed intentionally.
+Submissions are reviewed before going live — that’s what keeps the list useful.
 
 ---
 
-# 6) Profiles, Credit, and Identity
+## 5) Dev Intelligence
 
-McGBot also lets you control how you show up in the system.
+Dev Intelligence helps track useful dev context like:
 
-That matters because attribution is a real part of the bot.
+* Wallets
+* X handles
+* Known launches
+* Notes & tags
 
-## `!profile`
+---
 
-Shows a user profile card.
+### `!dev <wallet | @x | nickname>`
 
-**Examples**
-- `!profile`
-- `!profile @user`
+Quick lookup.
 
-## `!myprofile`
+### `!devcard <wallet | @x | nickname>`
 
-Shortcut for viewing your own profile.
+Cleaner profile-style view.
 
-**Example**  
-`!myprofile`
+### `!devleaderboard`
 
-## `!credit <mode>`
+Dev leaderboard.
+
+### `!devsubmit`
+
+Submit dev intel for review.
+
+---
+
+## 6) Profiles, Credit, and Identity
+
+---
+
+### `!profile` / `!profile @user`
+
+View a profile.
+
+### `!myprofile`
+
+Shortcut for your own profile.
+
+---
+
+### `!credit <mode>`
 
 Controls how your call credit is displayed.
 
-**Examples**
-- `!credit anonymous`
-- `!credit discord`
-- `!credit xtag`
+Options:
 
-### Credit Modes
-- `anonymous` → hides your public caller identity
-- `discord` → shows Discord-style credit
-- `xtag` → uses your X tag (**requires X verification**)
-
-This is useful if you care about how your calls are attributed publicly.
+* `anonymous` → hides identity
+* `discord` → shows Discord identity
+* `xtag` → shows X identity (requires verification)
 
 ---
 
-# 7) X Verification
+## 7) X Verification
 
-McGBot supports X verification so your Discord identity and X identity can connect properly.
+X verification connects your Discord and X identity.
 
-This matters because it can improve:
+Benefits:
 
-- attribution
-- milestone credit
-- cross-platform continuity
-- trust context
+* Better attribution
+* Proper milestone credit
+* Cross-platform recognition
 
-## Why it matters
-
-If you make calls on X and in Discord, verification helps the bot connect that activity more cleanly.
-
-That can improve how your calls are credited and recognized over time.
-
-In some flows, it can also help milestone posts properly reflect your identity.
+If you use both platforms, it’s worth doing.
 
 ---
 
-# 8) X + Discord Cross-Platform Features
+## 8) Cross-Platform Features
 
-One of the cooler parts of McGBot is that it is not locked to Discord only.
+McGBot isn’t limited to Discord.
 
-Depending on how the server has it configured, McGBot can also interact with X-side call activity.
+Depending on server setup, it can:
 
-That can include things like:
+* Track X-originated calls
+* Ingest mentions
+* Link X activity to Discord identity
 
-- X-originated calls
-- tagged bot flows
-- mention ingestion
-- X-linked attribution
-
-This helps the bot preserve signal across platforms instead of letting it stay fragmented.
+This helps keep signal unified across platforms.
 
 ---
 
-# 9) Membership / Premium
+## 9) Membership & Premium
 
-McGBot also supports membership / Premium infrastructure.
+For most users, these commands are informational.
 
-For most users, these commands are mainly informational.
-
-## `!membership`
-
-Shows membership-related info.
-
-**Example**  
-`!membership`
-
-## `!premium`
-
-Shows Premium-related info.
-
-**Example**  
-`!premium`
-
-## `!plans`
-
-Shows membership / plan info.
-
-**Example**  
-`!plans`
+* `!membership`
+* `!premium`
+* `!plans`
 
 ---
 
-# 10) Trusted Pro Calls
+## 10) Trusted Pro Calls
 
-Some higher-trust users may have access to:
+Some higher-trust users have access to:
 
-## `!procall <ca> | <title> | <why> | <risk?>`
+`!procall <ca> | <title> | <why> | <risk?>`
 
-This is a structured higher-conviction call format.
+This is a structured, higher-conviction call format.
 
-**Example**  
-`!procall 9abc123... | Strong CTO setup | Clean narrative + known community | Could still fail if no volume returns`
-
-This is **not** a normal user command.  
-It is intentionally gated.
-
-But if you see these calls, that’s what they are.
+This is gated and not available to everyone.
 
 ---
 
-# 11) Things That Happen Automatically
+## 11) Automatic Features
 
-Some parts of McGBot work without you manually typing commands.
+Some systems work automatically:
 
-That includes things like:
+* Auto-scanning pasted contract addresses
+* Background monitoring
+* Milestone tracking
+* Review and approval systems
 
-- auto-scanning pasted contract addresses
-- X-side ingestion flows
-- milestone tracking
-- review / approval systems
-- background monitoring
-
-So even if you’re not manually using commands constantly, the bot may still be doing useful work in the background.
+You don’t need to trigger everything manually.
 
 ---
 
-# Best Way to Use McGBot
+## Best Way to Use McGBot
 
-You’ll get the most value from the bot if you use it like a **signal and context tool**, not a magic answer machine.
+Use it as a **signal and context tool**, not a magic solution.
 
-Best uses:
-- track calls cleanly
-- check context before aping
-- look up devs before trusting them
-- use the low-cap watchlist for ideas, not gospel
-- submit things with an actual thesis
-- pay attention to who is consistently right
+Best practices:
 
-That’s where the edge is.
+* Check context before acting
+* Use calls and watchlists as inputs, not guarantees
+* Research devs before trusting
+* Submit meaningful ideas, not spam
+* Pay attention to who performs consistently
 
 ---
 
-# What McGBot Is Not
+## What McGBot Is Not
 
-McGBot is not trying to be:
+McGBot is not:
 
-- a replacement for your judgment
-- a blind auto-alpha feed
-- a spam scanner
-- a bot that magically makes bad setups good
+* A replacement for judgment
+* A guaranteed alpha feed
+* A bot that makes bad setups good
 
-It’s a structure layer.
+It’s a structure and context layer.
 
 Used properly, it makes the room sharper.

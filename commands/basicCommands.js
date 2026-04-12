@@ -22,7 +22,7 @@ const {
   getCallerLeaderboard,
   getBotStats
 } = require('../utils/callerStatsService');
-const { fetchGeckoChart } = require('../utils/chartCapture');
+const { renderPriceChart, seriesFromTrackedPriceHistory } = require('../utils/renderChart');
 
 function memberCanManageGuild(member) {
   if (!member?.permissions) return false;
@@ -858,10 +858,23 @@ async function hydrateTraderCallChartMessage(message, scan, embedOptions = {}) {
     return;
   }
   try {
-    const buf = await fetchGeckoChart({
-      contractAddress: scan.contractAddress,
-      pairAddress: scan.pairAddress
-    });
+    let buf = null;
+    const tracked = getTrackedCall(scan.contractAddress);
+    const series = tracked ? seriesFromTrackedPriceHistory(tracked) : null;
+
+    if (series) {
+      try {
+        buf = await renderPriceChart({
+          prices: series.prices,
+          timestamps: series.timestamps,
+          label: scan.ticker || scan.tokenName || 'MC'
+        });
+      } catch (renderErr) {
+        console.error('[CallChart]', scan.contractAddress, renderErr.message);
+        buf = null;
+      }
+    }
+
     const embed = createTraderScanEmbed(scan, {
       ...embedOptions,
       chartPending: false,

@@ -23,6 +23,9 @@ const {
   isLikelySolanaCA
 } = require('./commands/basicCommands');
 
+const { handleGuideCommand } = require('./utils/guideCommand');
+const { handleInteractiveHelp } = require('./utils/interactiveHelp');
+const { handleHelpUiInteraction } = require('./utils/helpUi');
 const { startMonitoring, stopMonitoring } = require('./utils/monitoringEngine');
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
 const { createPost } = require('./utils/xPoster');
@@ -329,6 +332,81 @@ async function replyLongText(message, content, limit = 1900) {
       });
     }
   }
+}
+
+const DM_BLOCKED_COMMAND_LIST_REPLY =
+  "I couldn't DM you. Please enable DMs and try again.";
+
+/**
+ * Plain-text McGBot command list (same sections as legacy !help / !commands).
+ * @param {import('discord.js').Message} message
+ * @param {{ memberCanManageGuild: Function, isBotOwner: Function }} permissions
+ */
+function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner }) {
+  const canSeeModHelp = memberCanManageGuild(message.member) || isBotOwner(message.author);
+  const canSeeOwnerHelp = isBotOwner(message.author);
+
+  let contentOut = `📘 **McGBot Command List**\n\n`;
+
+  contentOut +=
+    `👤 **User Commands**\n` +
+    `• \`!help\` / \`!commands\` — This list\n` +
+    `• \`!ping\` — Quick alive check\n` +
+    `• \`!status\` — Bot status\n` +
+    `• \`!ca <ca>\` — Compact contract intel (no tracking)\n` +
+    `• \`!scan\` — Random scanner-style test\n` +
+    `• \`!scan <ca>\` — Deep scan a token (no tracking)\n` +
+    `• \`!call <ca>\` — Official call + track\n` +
+    `• \`!watch <ca>\` — Track without caller credit\n` +
+    `• \`!tracked\` / \`!tracked <ca>\` — Tracked summary or detail (live refresh)\n` +
+    `• \`!caller <name>\` or \`!caller @user\` — Caller stats (embed)\n` +
+    `• \`!callerboard\` — Top callers (embed)\n` +
+    `• \`!botstats\` — McGBot aggregate stats\n` +
+    `• \`!profile\` / \`!myprofile\` — Your caller profile (+ Verify X button)\n` +
+    `• \`!credit anonymous\` / \`discord\` / \`xtag\` — Public credit label on calls\n` +
+    `• \`!resetstats\` — Reset your tracked stat flags (mods: \`!resetstats @user\`)\n` +
+    `• **X verification:** use **#verify-x** or **!profile → Verify X** (not a user \`!verifyx\` text command)\n` +
+    `• \`!bestcall24h\` / \`!bestcallweek\` / \`!bestcallmonth\` — Best user call windows\n` +
+    `• \`!topcaller24h\` / \`!topcallerweek\` / \`!topcallermonth\` — Top caller windows\n` +
+    `• \`!bestbot24h\` / \`!bestbotweek\` / \`!bestbotmonth\` — Best bot call windows\n` +
+    `• \`!devleaderboard\` — Dev leaderboard (embed)\n` +
+    `• \`!addlaunch <dev_wallet> <token_ca>\` — Log a launch on a tracked dev\n` +
+    `• \`!testreal <ca>\` — Live provider / token test (embed)\n` +
+    `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
+    `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n\n`;
+
+  if (canSeeModHelp) {
+    contentOut +=
+      `🛡️ **Mod / Manage Server**\n` +
+      `• Approval buttons in **#mod-approvals** / mod flows\n` +
+      `• \`!approvalstats\` — Approval queue counts\n` +
+      `• \`!pendingapprovals\` — Pending X verifications + top pending **bot** approvals\n` +
+      `• \`!recentcalls\` — Recent bot-tracked calls\n` +
+      `• \`!monitorstatus\` — Active / archived / pending / scanner state\n` +
+      `• \`!scanner\` — Show whether scanner is ON or OFF\n` +
+      `• \`!scanner on\` / \`!scanner off\` — Start or stop scanner + monitor + auto-call\n` +
+      `• \`!verifyx @user\` — Approve a member’s pending X verification (requires **Manage Server**)\n` +
+      `• \`!resetbotstats\` — Reset bot-call stat exclusions on tracked data\n` +
+      `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
+      `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
+      `• \`!truebotstats\` — Bot stats including reset/excluded calls\n\n`;
+  }
+
+  if (canSeeOwnerHelp) {
+    contentOut +=
+      `⚙️ **Bot owner only** (commands below enforce **BOT_OWNER_ID**)\n` +
+
+      `📊 **Scanner thresholds**\n` +
+      `• \`!setminmc\` / \`!setminliq\` / \`!setminvol5m\` / \`!setminvol1h\`\n` +
+      `• \`!setmintxns5m\` / \`!setmintxns1h\` / \`!setapprovalx <number>\`\n` +
+      `• \`!setapprovalladder\` — Custom approval milestone rungs (comma-separated)\n\n` +
+
+      `🧪 **Sanity filters**\n` +
+      `• \`!setsanityminmc\` / \`!setsanityminliq\` / \`!setsanityminliqratio\` / \`!setsanitymaxliqratio\`\n` +
+      `• \`!setsanitymaxratio5m\` / \`!setsanitymaxratio1h\`\n`;
+  }
+
+  return contentOut;
 }
 
 function memberCanManageGuild(member) {
@@ -1366,6 +1444,22 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
 
 client.on('interactionCreate', async (interaction) => {
   try {
+    const helpCustomId = interaction.customId || '';
+    if (
+      interaction.isStringSelectMenu() ||
+      interaction.isButton()
+    ) {
+      if (
+        helpCustomId === 'help_ui_category' ||
+        helpCustomId === 'help_ui_topic' ||
+        helpCustomId === 'help_ui_back_cats' ||
+        helpCustomId.startsWith('help_ui_topics_')
+      ) {
+        const helpHandled = await handleHelpUiInteraction(interaction);
+        if (helpHandled) return;
+      }
+    }
+
     if (interaction.isButton()) {
       const parts = interaction.customId.split(':');
 
@@ -2442,75 +2536,43 @@ if (lowerContent.startsWith('!setsanitymaxratio1h ')) {
   return;
 }
 
-if (lowerContent === '!commands' || lowerContent === '!help') {
-  const canSeeModHelp = memberCanManageGuild(message.member) || isBotOwner(message.author);
-  const canSeeOwnerHelp = isBotOwner(message.author);
+if (lowerContent === '!guide') {
+  await handleGuideCommand(message, {
+    memberCanManageGuild,
+    isBotOwner,
+    splitDiscordMessage
+  });
+  return;
+}
 
-  let contentOut = `📘 **McGBot Command List**\n\n`;
+if (lowerContent === '!commands') {
+  const contentOut = buildMcgbotCommandListText(message, {
+    memberCanManageGuild,
+    isBotOwner
+  });
+  const chunks = splitDiscordMessage(contentOut, 2000).filter(
+    c => String(c || '').length > 0
+  );
 
-  // USER COMMANDS
-  contentOut +=
-    `👤 **User Commands**\n` +
-    `• \`!help\` / \`!commands\` — This list\n` +
-    `• \`!ping\` — Quick alive check\n` +
-    `• \`!status\` — Bot status\n` +
-    `• \`!ca <ca>\` — Compact contract intel (no tracking)\n` +
-    `• \`!scan\` — Random scanner-style test\n` +
-    `• \`!scan <ca>\` — Deep scan a token (no tracking)\n` +
-    `• \`!call <ca>\` — Official call + track\n` +
-    `• \`!watch <ca>\` — Track without caller credit\n` +
-    `• \`!tracked\` / \`!tracked <ca>\` — Tracked summary or detail (live refresh)\n` +
-    `• \`!caller <name>\` or \`!caller @user\` — Caller stats (embed)\n` +
-    `• \`!callerboard\` — Top callers (embed)\n` +
-    `• \`!botstats\` — McGBot aggregate stats\n` +
-    `• \`!profile\` / \`!myprofile\` — Your caller profile (+ Verify X button)\n` +
-    `• \`!credit anonymous\` / \`discord\` / \`xtag\` — Public credit label on calls\n` +
-    `• \`!resetstats\` — Reset your tracked stat flags (mods: \`!resetstats @user\`)\n` +
-    `• **X verification:** use **#verify-x** or **!profile → Verify X** (not a user \`!verifyx\` text command)\n` +
-    `• \`!bestcall24h\` / \`!bestcallweek\` / \`!bestcallmonth\` — Best user call windows\n` +
-    `• \`!topcaller24h\` / \`!topcallerweek\` / \`!topcallermonth\` — Top caller windows\n` +
-    `• \`!bestbot24h\` / \`!bestbotweek\` / \`!bestbotmonth\` — Best bot call windows\n` +
-    `• \`!devleaderboard\` — Dev leaderboard (embed)\n` +
-    `• \`!addlaunch <dev_wallet> <token_ca>\` — Log a launch on a tracked dev\n` +
-    `• \`!testreal <ca>\` — Live provider / token test (embed)\n` +
-    `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
-    `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n\n`;
-
-  // MOD COMMANDS (Manage Server — bot owner always sees this block too)
-  if (canSeeModHelp) {
-    contentOut +=
-      `🛡️ **Mod / Manage Server**\n` +
-      `• Approval buttons in **#mod-approvals** / mod flows\n` +
-      `• \`!approvalstats\` — Approval queue counts\n` +
-      `• \`!pendingapprovals\` — Pending X verifications + top pending **bot** approvals\n` +
-      `• \`!recentcalls\` — Recent bot-tracked calls\n` +
-      `• \`!monitorstatus\` — Active / archived / pending / scanner state\n` +
-      `• \`!scanner\` — Show whether scanner is ON or OFF\n` +
-      `• \`!scanner on\` / \`!scanner off\` — Start or stop scanner + monitor + auto-call\n` +
-      `• \`!verifyx @user\` — Approve a member’s pending X verification (requires **Manage Server**)\n` +
-      `• \`!resetbotstats\` — Reset bot-call stat exclusions on tracked data\n` +
-      `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
-      `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
-      `• \`!truebotstats\` — Bot stats including reset/excluded calls\n\n`;
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      await message.author.send({
+        content: chunks[i],
+        allowedMentions: { parse: [] }
+      });
+    }
+  } catch (_err) {
+    await message.reply({
+      content: DM_BLOCKED_COMMAND_LIST_REPLY,
+      allowedMentions: { repliedUser: false }
+    });
   }
 
-  // BOT OWNER ONLY
-  if (canSeeOwnerHelp) {
-    contentOut +=
-      `⚙️ **Bot owner only** (commands below enforce **BOT_OWNER_ID**)\n` +
+  return;
+}
 
-      `📊 **Scanner thresholds**\n` +
-      `• \`!setminmc\` / \`!setminliq\` / \`!setminvol5m\` / \`!setminvol1h\`\n` +
-      `• \`!setmintxns5m\` / \`!setmintxns1h\` / \`!setapprovalx <number>\`\n` +
-      `• \`!setapprovalladder\` — Custom approval milestone rungs (comma-separated)\n\n` +
-
-      `🧪 **Sanity filters**\n` +
-      `• \`!setsanityminmc\` / \`!setsanityminliq\` / \`!setsanityminliqratio\` / \`!setsanitymaxliqratio\`\n` +
-      `• \`!setsanitymaxratio5m\` / \`!setsanitymaxratio1h\`\n`;
-  }
-
-  await replyLongText(message, contentOut, 1900);
-
+if (lowerContent === '!help' || lowerContent.startsWith('!help ')) {
+  await handleInteractiveHelp(message, content, { splitDiscordMessage });
   return;
 }
 

@@ -1,570 +1,204 @@
 # McGBot Master Commands Reference
 
-This is the authoritative internal reference for McGBot’s currently available commands, actions, and user flows.
+This is the authoritative reference for all McGBot commands, actions, and interaction flows.
 
-This file is intentionally more complete than the user, mod, or admin guides. It exists to document the **actual live command surface** so the rest of the docs can stay cleaner and more audience-specific.
+This document is intentionally more complete than the user, mod, or admin guides. It reflects the **real command surface**, including:
 
-If a command exists in code, it should be represented here — even if it’s internal, niche, or not meant for normal users.
+* Public commands
+* Moderator tools
+* Admin tools
+* Owner-only controls
+* Non-command interaction flows
+* Background behaviors
 
----
-
-# 1) Regular User Commands
-
-These commands are generally available to normal users without special permissions.
-
----
-
-## Basic / Utility
-
-### `!ping`
-**Usage:** `!ping`  
-**Who can use it:** Anyone  
-**What it does:** Basic alive check. Returns “Pong!”
-
-### `!status`
-**Usage:** `!status`  
-**Who can use it:** Anyone  
-**What it does:** Returns a basic bot online/status line.
-
-### `!help` / `!commands`
-**Usage:** `!help` or `!commands`  
-**Who can use it:** Anyone  
-**What it does:** Shows a basic command list.
-
-**Notes:**
-- There appears to be both a plain-text help implementation and an embed-based implementation in the codebase.
-- The current live help path should be treated as the authoritative one until cleaned up.
+If it exists in the bot, it belongs here.
 
 ---
 
-## Membership / Profile
+## 1) Regular User Commands
 
-### `!membership`
-**Usage:** `!membership`  
-**Who can use it:** Anyone  
-**What it does:** Shows membership / Premium info and payment flow entry points.
+### Basic / Utility
 
-### `!premium`
-**Usage:** `!premium`  
-**Who can use it:** Anyone  
-**What it does:** Shows premium-related info.
-
-### `!plans`
-**Usage:** `!plans`  
-**Who can use it:** Anyone  
-**What it does:** Shows available plan / membership information if configured.
-
-### `!profile`
-**Usage:** `!profile` or `!profile @user`  
-**Who can use it:** Anyone  
-**What it does:** Shows a user profile card.
-
-### `!myprofile`
-**Usage:** `!myprofile`  
-**Who can use it:** Anyone  
-**What it does:** Shortcut for viewing your own profile.
-
-### `!credit <mode>`
-**Usage:**  
-- `!credit anonymous`
-- `!credit discord`
-- `!credit xtag`
-
-**Who can use it:** Anyone  
-**What it does:** Sets how your caller credit is displayed on tracked calls.
-
-**Notes:**
-- `xtag` requires X verification.
+`!ping` — Basic alive check
+`!status` — Bot status
+`!help` / `!commands` — Command list
 
 ---
 
-## Calls / Tracking / Scan
+### Profile & Membership
 
-### `!call <ca>`
-**Usage:** `!call <SOLANA_CA>`  
-**Who can use it:** Anyone  
-**What it does:** Creates an official tracked call with caller credit.
-
-### `!watch <ca>`
-**Usage:** `!watch <SOLANA_CA>`  
-**Who can use it:** Anyone  
-**What it does:** Starts tracking a coin without caller credit.
-
-### `!tracked`
-**Usage:** `!tracked`  
-**Who can use it:** Anyone  
-**What it does:** Shows tracked-call summary information.
-
-### `!tracked <ca>`
-**Usage:** `!tracked <SOLANA_CA>`  
-**Who can use it:** Anyone  
-**What it does:** Shows tracked-call detail for a specific CA.
-
-### `!ca <ca>`
-**Usage:** `!ca <SOLANA_CA>`  
-**Who can use it:** Anyone  
-**What it does:** Runs a compact intel scan without starting tracking.
-
-### `!scan`
-**Usage:** `!scan`  
-**Who can use it:** Anyone  
-**What it does:** Shows a simulated scan embed.
-
-### `!scan <ca>`
-**Usage:** `!scan <SOLANA_CA>`  
-**Who can use it:** Anyone  
-**What it does:** Runs a simulated deeper scan for a specific CA.
-
-### `!testreal <ca>`
-**Usage:** `!testreal <SOLANA_CA>`  
-**Who can use it:** Anyone  
-**What it does:** Performs a live provider fetch and returns a more debug-style result.
-
-### `!autoscantest [profile]`
-**Usage:**  
-- `!autoscantest`
-- `!autoscantest conservative`
-- `!autoscantest balanced`
-- `!autoscantest aggressive`
-
-**Who can use it:** Anyone  
-**What it does:** Simulates an auto-alert filter run using mock setups.
+* `!profile` / `!profile @user` — View profile
+* `!myprofile` — Shortcut to your own profile
+* `!credit <anonymous|discord|xtag>` — Set caller credit display
+* `!membership` — Membership info
+* `!premium` — Premium info
+* `!plans` — Plan information
 
 ---
 
-## Caller Stats / Public Leaderboards
+### Calls & Tracking
 
-### `!caller <name>` / `!caller @user`
-**Usage:** `!caller <name>` or `!caller @user`  
-**Who can use it:** Anyone  
-**What it does:** Shows caller stats.
-
-### `!callerboard`
-**Usage:** `!callerboard`  
-**Who can use it:** Anyone  
-**What it does:** Shows top caller leaderboard.
-
-### `!botstats`
-**Usage:** `!botstats`  
-**Who can use it:** Anyone  
-**What it does:** Shows aggregate McGBot stats.
-
-### Performance windows
-These are user-facing leaderboard / performance snapshot commands.
-
-#### `!bestcall24h`
-#### `!bestcallweek`
-#### `!bestcallmonth`
-**What they do:** Show best user call in the selected timeframe.
-
-#### `!topcaller24h`
-#### `!topcallerweek`
-#### `!topcallermonth`
-**What they do:** Show top caller in the selected timeframe.
-
-#### `!bestbot24h`
-#### `!bestbotweek`
-#### `!bestbotmonth`
-**What they do:** Show best bot call in the selected timeframe.
+* `!call <ca>` — Make a tracked call
+* `!watch <ca>` — Track without caller credit
+* `!tracked` — View tracked calls
+* `!tracked <ca>` — View specific tracked call
+* `!ca <ca>` — Quick scan
+* `!scan` — Scan output
+* `!scan <ca>` — Deeper scan
+* `!testreal <ca>` — Debug provider fetch
+* `!autoscantest [profile]` — Simulate auto-alert filter
 
 ---
 
-## Dev Intelligence (Public)
+### Caller Stats
 
-### `!dev <wallet | @x | nickname>`
-**Usage:** `!dev <wallet | @x | nickname>`  
-**Who can use it:** Anyone  
-**What it does:** Looks up tracked dev context.
+* `!caller <name|@user>` — View caller stats
+* `!callerboard` — Leaderboard
+* `!botstats` — Bot stats
 
-### `!devcard <wallet | @x | nickname>`
-**Usage:** `!devcard <wallet | @x | nickname>`  
-**Who can use it:** Anyone  
-**What it does:** Shows a cleaner dev profile-style card.
+#### Time Windows
 
-### `!devleaderboard`
-**Usage:** `!devleaderboard`  
-**Who can use it:** Anyone  
-**What it does:** Shows dev leaderboard information.
+* `!bestcall24h | week | month`
+* `!topcaller24h | week | month`
+* `!bestbot24h | week | month`
 
 ---
 
-## Low-Cap Watchlist (Public)
+### Dev Intelligence
 
-### `!lowcap <ca>`
-**Usage:** `!lowcap <SOLANA_CA>`  
-**Who can use it:** Anyone  
-**What it does:** Looks up a tracked low-cap watchlist entry.
-
-### `!lowcaps`
-**Usage:** `!lowcaps`  
-**Who can use it:** Anyone  
-**What it does:** Lists current curated low-cap entries.
-
-### `!lowcapadd`
-**Usage:** `!lowcapadd`  
-**Who can use it:** Anyone  
-**What it does:** Starts the low-cap submission flow.
+* `!dev <wallet|@x|nickname>`
+* `!devcard <wallet|@x|nickname>`
+* `!devleaderboard`
+* `!devsubmit`
 
 ---
 
-# 2) Trusted / Special User Commands
+### Low-Cap System
 
-These commands are not for normal users, but also aren’t standard moderator tools.
-
----
-
-### `!procall <ca> | <title> | <why> | <risk?>`
-**Usage:** `!procall <ca> | <title> | <why> | <risk?>`  
-**Who can use it:** Users with `trusted_pro` trust level  
-**What it does:** Creates a structured Trusted Pro call.
-
-**Notes:**
-- This is intentionally gated.
-- It is designed for higher-conviction / higher-context calls.
+* `!lowcap <ca>` — View low-cap entry
+* `!lowcaps` — Browse watchlist
+* `!lowcapadd` — Submit low-cap entry
 
 ---
 
-# 3) Moderator Commands
+## 2) Trusted / Special Commands
 
-These commands are intended for moderators / staff with appropriate permissions (typically Manage Server or equivalent).
-
----
-
-## Scanner / Monitoring
-
-### `!scanner`
-**Usage:** `!scanner`  
-**What it does:** Shows scanner ON/OFF state.
-
-### `!scanner on`
-### `!scanner off`
-**What they do:** Start or stop the monitoring / auto-call loop.
-
-### `!monitorstatus`
-**Usage:** `!monitorstatus`  
-**What it does:** Shows monitor summary counts and scanner state.
-
-### `!resetmonitor`
-**Usage:** `!resetmonitor`  
-**What it does:** Clears tracked coins, pending approvals, and monitoring state.
-
-**Warning:** Destructive.
+* `!procall <ca> | <title> | <why> | <risk?>`
+  (Trusted Pro only)
 
 ---
 
-## Approval Queue / Review Visibility
+## 3) Moderator Commands
 
-### `!approvalstats`
-**Usage:** `!approvalstats`  
-**What it does:** Shows approval queue counts.
+### Scanner & Monitoring
 
-### `!pendingapprovals`
-**Usage:** `!pendingapprovals`  
-**What it does:** Shows pending review items.
-
-### `!recentcalls`
-**Usage:** `!recentcalls`  
-**What it does:** Shows recent bot calls.
+* `!scanner [on|off]`
+* `!monitorstatus`
+* `!approvalstats`
+* `!pendingapprovals`
+* `!recentcalls`
+* `!resetmonitor` ⚠️ destructive
 
 ---
 
-## Caller Trust / Reputation Management
+### Trust & Reputation
 
-### `!getcallertrust @user`
-**What it does:** Shows current caller trust level.
-
-### `!setcallertrust @user <level>`
-**What it does:** Sets caller trust level.
-
-### `!topcallercheck @user`
-**What it does:** Shows top caller eligibility / context.
-
-### `!approvetopcaller @user`
-**What it does:** Promotes a user to `top_caller`.
-
-### `!removetopcaller @user`
-**What it does:** Removes `top_caller` status.
-
-**Notes:**
-- `trusted_pro` should be treated as curated and not casually overwritten.
+* `!getcallertrust @user`
+* `!setcallertrust @user <level>`
+* `!topcallercheck @user`
+* `!approvetopcaller @user`
+* `!removetopcaller @user`
 
 ---
 
-## Membership / Referral Operations
+### Membership & Referrals
 
-### `!memberstatus @user`
-Shows membership and referral state.
+* `!memberstatus @user`
+* `!syncmemberrole @user`
+* `!grantmembership @user <tier> <months>`
+* `!extendmembership @user <months>`
+* `!compmembership @user <tier> <months?>`
+* `!cancelmembership @user`
+* `!removemembership @user`
 
-### `!syncmemberrole @user`
-Forces Premium role sync.
+Referral commands:
 
-### `!grantmembership @user <tier> <months>`
-Grants membership.
-
-### `!extendmembership @user <months>`
-Extends membership.
-
-### `!compmembership @user <tier> <months?>`
-Comped membership grant.
-
-### `!cancelmembership @user`
-Cancels membership.
-
-### `!removemembership @user`
-Removes membership.
-
-### Referral operations
-#### `!referralstatus @user`
-#### `!setreferrer @user @referrer`
-#### `!clearreferrer @user`
-#### `!markreferralconverted @user <none|joined|paid|refunded>`
-#### `!referralrewardstatus @user`
-#### `!grantreferralreward @user <months>`
-#### `!applyreferralreward @user <months?>`
-#### `!rewardreferrer @referredUser`
-
-**What they do:** Manage referral attribution and reward credits.
+* `!referralstatus @user`
+* `!setreferrer @user @referrer`
+* `!clearreferrer @user`
+* `!markreferralconverted @user <state>`
+* `!referralrewardstatus @user`
+* `!grantreferralreward @user <months>`
+* `!applyreferralreward @user <months?>`
+* `!rewardreferrer @user`
 
 ---
 
-## Dev Registry / Dev Ops
+### Dev & Data Tools
 
-### `!addlaunch <dev_wallet> <token_ca>`
-**Usage:** `!addlaunch <dev_wallet> <token_ca>`  
-**What it does:** Adds a launch to an existing tracked dev.
-
-### `!verifyx @user`
-**Usage:** `!verifyx @user`  
-**What it does:** Approves a pending X verification request manually.
-
-### `!backfillprofiles`
-### `!backfillprofiles run`
-**What they do:** Preview or create missing bot profiles.
-
-### `!resetbotstats`
-**What it does:** Resets bot-call stat exclusions.
-
-### `!truestats @user`
-**What it does:** Shows “true” user stats including excluded/reset calls.
-
-### `!truebotstats`
-**What it does:** Shows “true” aggregate bot stats.
-
-### `!testx`
-**What it does:** Sends a test X post via integration.
+* `!addlaunch <dev_wallet> <token_ca>`
+* `!verifyx @user`
+* `!backfillprofiles [run]`
+* `!resetbotstats`
+* `!truestats @user`
+* `!truebotstats`
+* `!testx`
 
 ---
 
-# 4) Admin / Owner Commands
+## 4) Admin / Owner Commands
 
-These are restricted to the configured bot owner or highest-level operator.
+### X & Posting
 
----
-
-## X / Posting Utilities
-
-### `!xpostpreview <CA> [milestoneX]`
-**Who can use it:** Bot owner only  
-**What it does:** Previews milestone X post output without posting.
+* `!xpostpreview <CA> [milestoneX]`
 
 ---
 
-## Scanner / Threshold Controls
+### Scanner & Threshold Controls
 
-### Threshold setters
-These commands tune scanner / approval thresholds.
+* `!setminmc`
+* `!setminliq`
+* `!setminvol5m`
+* `!setminvol1h`
+* `!setmintxns5m`
+* `!setmintxns1h`
+* `!setapprovalx`
+* `!setapprovalladder`
 
-- `!setminmc <number>`
-- `!setminliq <number>`
-- `!setminvol5m <number>`
-- `!setminvol1h <number>`
-- `!setmintxns5m <number>`
-- `!setmintxns1h <number>`
-- `!setapprovalx <number>`
-- `!setapprovalladder <comma-separated values>`
+Sanity filters:
 
-### Sanity filter setters
-- `!setsanityminmc <number>`
-- `!setsanityminliq <number>`
-- `!setsanityminliqratio <number>`
-- `!setsanitymaxliqratio <number>`
-- `!setsanitymaxratio5m <number>`
-- `!setsanitymaxratio1h <number>`
-
-### X ingestion test/apply controls
-- `!testxintake ...`
-- `!testxmention ...`
-
-**Notes:**
-- Mods/owner may be able to dry-run some of these flows.
-- Owner-only apply behavior should be treated as authoritative.
+* `!setsanityminmc`
+* `!setsanityminliq`
+* `!setsanityminliqratio`
+* `!setsanitymaxliqratio`
+* `!setsanitymaxratio5m`
+* `!setsanitymaxratio1h`
 
 ---
 
-# 5) Non-Command User Actions / Interaction Flows
+## 5) Non-Command Interaction Flows
 
-These are real bot entry points even if they are not traditional `!commands`.
-
-They matter and should be documented.
-
----
-
-## Profile / Credit Buttons
-
-### `profile_set_credit:<mode>`
-**Who can use it:** User on their own profile  
-**What it does:** Changes caller credit display mode.
-
-### `profile_open_verify_modal`
-**Who can use it:** User  
-**What it does:** Opens X verification modal.
+* Profile buttons (credit, verify)
+* X verification modals
+* Dev submission flows
+* Low-cap submission flows
+* Call moderation buttons
+* Watch / Call buttons
+* Membership claim flows
+* Top caller review
 
 ---
 
-## X Verification Flow
+## 6) Background Behaviors
 
-### Modal: `verify_x_handle_modal`
-**What it does:** Starts X verification request.
-
-### Button: `xverify_submit_review`
-**What it does:** Sends verification request into staff review.
-
-### Buttons:
-- `xverify_accept:<userId>:<handle>`
-- `xverify_deny:<userId>:<handle>`
-
-**What they do:** Approve or deny X verification.
-
-### Modal: `xverify_deny_modal:<userId>:<handle>`
-**What it does:** Captures deny reason.
+* Auto-scan on pasted CAs
+* X mention ingestion
+* Background monitoring & milestones
 
 ---
 
-## Dev Intel Submission Flow
+## 7) Notes
 
-### `!devsubmit`
-**Who can use it:** Users in allowed dev channels  
-**What it does:** Starts the dev intel submission flow.
-
-### Button: `devintel_open_submit_modal`
-Opens the dev intel modal.
-
-### Modal: `devintel_submit_modal`
-Creates a pending dev intel submission.
-
-### Buttons:
-- `devintel_approve:<submissionId>`
-- `devintel_deny:<submissionId>`
-
-Used by staff to resolve dev intel submissions.
-
----
-
-## Low-Cap Submission Flow
-
-### `!lowcapadd`
-Starts the low-cap submission flow.
-
-### Button: `lowcap_open_submit_modal`
-Opens the low-cap modal.
-
-### Modal: `lowcap_submit_modal`
-Creates a pending low-cap submission.
-
-### Buttons:
-- `lowcap_approve:<submissionId>`
-- `lowcap_deny:<submissionId>`
-
-Used by staff to resolve low-cap submissions.
-
----
-
-## Coin Approval / Tracked Call Moderation
-
-### Buttons:
-- `approve_call:<ca>`
-- `deny_call:<ca>`
-- `exclude_call:<ca>`
-
-Used by staff to resolve tracked call moderation items.
-
-### Follow-up buttons:
-- `tag_call:<ca>`
-- `note_call:<ca>`
-- `done_call:<ca>`
-
-### Modals:
-- `tag_modal:<ca>`
-- `note_modal:<ca>`
-
-These allow staff to tag or annotate tracked calls.
-
----
-
-## Call / Watch Buttons
-
-### Buttons:
-- `call_coin:<ca>`
-- `watch_coin:<ca>`
-
-**Who can use them:** Generally anyone who can see them  
-**What they do:** Trigger tracked call / watch behavior from a button interaction.
-
----
-
-## SOL Membership Claim Flow
-
-### Button: `solmember_open_claim_modal`
-Opens membership claim modal.
-
-### Modal: `solmember_claim_modal`
-Submits SOL payment proof.
-
-### Buttons:
-- `solmember_approve:<userId>`
-- `solmember_deny:<userId>`
-
-Used by staff to resolve membership claims.
-
----
-
-## Top Caller Review Buttons
-
-### Buttons:
-- `topcaller_approve:<userId>`
-- `topcaller_dismiss:<userId>`
-
-Used by staff to approve or dismiss top caller candidates.
-
----
-
-# 6) Background / Automated Behaviors
-
-These are not user-entered commands, but they are real parts of the system.
-
----
-
-## Auto-scan on pasted CA
-If a user posts a short message containing a valid Solana contract address, McGBot may automatically run a scan depending on channel behavior.
-
----
-
-## X mention ingestion
-When enabled, McGBot can ingest qualifying X mentions in the background and process them into tracked behavior.
-
-This is environment-driven and not a standard command flow, but it is a real user-visible system.
-
----
-
-# 7) Known Ambiguities / Cleanup Notes
-
-These are worth preserving for future cleanup.
-
-- Some commands appear duplicated or shadowed by `index.js` handling.
-- `!help` / `!commands` likely have multiple implementations.
-- `!caller`, `!callerboard`, and `!botstats` may have duplicate plain-text and embed paths.
-- Some commands appear more debug/ops-oriented than true public features.
-- Some user-visible copy may still contain outdated wording.
-- Some “anyone can use this” flows may still rely more on channel placement than explicit permission checks.
-
-This file should be updated as command surfaces evolve.
+* Some commands may have duplicate implementations
+* Some features rely on channel placement rather than explicit permissions
+* This file should be updated as the bot evolves

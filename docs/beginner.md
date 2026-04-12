@@ -1,333 +1,295 @@
 # McGBot Beginner Guide
 
-If you’re new to McGBot, don’t worry — you do **not** need to learn everything at once.
+If you’re new to McGBot, don’t worry — you **do not** need to learn everything at once.
 
-This guide is the easiest place to start.
+This guide shows you the easiest way to start getting value.
 
-McGBot does a lot, but for most people, the useful part is simple:
+McGBot does a lot, but the core idea is simple:
 
-> it helps you track calls, check context, and stop relying on memory and hype alone
+> **It helps you track calls, check context, and stop relying on memory and hype alone.**
 
-That’s the core idea.
+That’s the entire point.
 
 ---
 
-# What McGBot Is (in simple terms)
+## What McGBot Is (In Simple Terms)
 
 McGBot is a crypto community bot that helps organize signal.
 
-Instead of letting everything disappear into chat, it helps the server keep track of:
+Instead of everything disappearing into chat, McGBot helps the server remember:
 
-- coin calls
-- who made them
-- how they performed
-- dev context
-- useful low-cap ideas
-- cross-platform identity between Discord and X
+* Coin calls and how they performed
+* Who made those calls
+* Dev and project context
+* Useful low-cap ideas
+* Identity across Discord and X
 
-You can think of it like:
+Think of it as:
 
-## a memory + context + signal tool
-
-That’s the easiest way to understand it.
+> **Memory + Context + Signal**
 
 ---
 
-# What You Should Actually Care About First
+## What You Should Focus on First
 
-If you’re brand new, don’t worry about all the advanced stuff.
+If you’re brand new, don’t worry about advanced systems.
 
 The most useful beginner features are:
 
-- checking coins
-- tracking calls
-- browsing low-cap ideas
-- looking up devs
-- understanding who has been cooking
+* Checking coins quickly
+* Making and tracking calls
+* Browsing low-cap ideas
+* Looking up devs
+* Seeing who actually has a track record
 
-That alone is enough to get value from the bot.
+You can get real value from McGBot using just these.
 
 ---
 
-# The 5 Most Useful Beginner Commands
+## The 5 Most Useful Beginner Commands
 
-If you only remember a few commands, remember these:
+If you only learn a few commands, start with these:
 
-## 1) `!ca <ca>`
+---
+
+### `!ca <contract address>`
+
 Quickly checks a coin.
 
-**Example**  
+**Example:**
 `!ca 9abc123...`
 
 Use this when:
-- you see a coin posted
-- you want quick context
-- you don’t want to commit to tracking it yet
+
+* You see a coin posted
+* You want fast context
+* You’re not ready to commit to tracking it yet
 
 ---
 
-## 2) `!call <ca>`
+### `!call <contract address>`
+
 Creates an official tracked call.
 
-**Example**  
+**Example:**
 `!call 9abc123...`
 
 Use this when:
-- you actually want to make a call
-- you want it tied to your name / profile
-- you want it to count in the system
+
+* You want to make a real call
+* You want it tied to you
+* You want it tracked long-term
 
 ---
 
-## 3) `!watch <ca>`
-Tracks a coin without claiming it as your own call.
+### `!watch <contract address>`
 
-**Example**  
+Tracks a coin without claiming it as your call.
+
+**Example:**
 `!watch 9abc123...`
 
 Use this when:
-- you’re interested
-- but you don’t want to say “I’m calling this”
 
-That’s a useful difference.
+* You’re interested
+* But you don’t want to claim it as your own call
+
+This difference matters.
 
 ---
 
-## 4) `!lowcaps`
+### `!lowcaps`
+
 Shows the current low-cap watchlist.
 
-**Example**  
-`!lowcaps`
-
 Use this when:
-- you want to browse sleeper / revival ideas
-- you want to see what’s already being watched
+
+* You want to browse early or forgotten ideas
+* You want to see what the community is tracking
 
 ---
 
-## 5) `!dev <wallet | @x | nickname>`
+### `!dev <wallet | @x | nickname>`
+
 Looks up a tracked dev.
 
-**Example**  
+**Example:**
 `!dev @exampledev`
 
 Use this when:
-- you want to know if a dev is already known
-- you want context before trusting something
+
+* You want to know who is behind something
+* You want context before trusting a project
 
 ---
 
-# Your Best Beginner Flow
+## A Simple Beginner Workflow
 
-If you want to use McGBot the smart way, this is the easiest starter flow:
+Here’s the easiest way to use McGBot effectively:
 
-## Step 1
-You see a coin posted.
+### Step 1 — See a coin
 
-## Step 2
+Someone posts a token or you find one.
+
+### Step 2 — Check it
+
 Run:
-`!ca <ca>`
 
-Now you have some quick context.
+`!ca <contract address>`
 
-## Step 3
-If you think it’s interesting:
-- use `!watch <ca>` if you just want to monitor it
-- use `!call <ca>` if you actually want to call it
+Now you have real context.
 
-## Step 4
-If you want deeper context:
-- use `!dev <wallet | @x | nickname>`
-- or check whether it’s already on the low-cap watchlist with `!lowcap <ca>`
+### Step 3 — Decide
 
-That’s already enough to use the bot better than most people do.
+If it’s interesting:
 
----
+* Use `!watch` to track it quietly
+* Use `!call` if you want to officially call it
 
-# What the Low-Cap Watchlist Is
+### Step 4 — Go deeper (optional)
 
-One of the coolest parts of McGBot is the **Low-Cap Watchlist**.
+* Check the dev with `!dev`
+* See if it’s already in the low-cap watchlist with `!lowcap <ca>`
 
-This is not meant to be random junk.
-
-It’s meant to track things like:
-
-- sleeper coins
-- forgotten runners
-- revival setups
-- interesting low-cap narratives
-
-The key idea is:
-
-> not just “it’s low cap”  
-> but “here’s why it might matter”
-
-That’s a huge difference.
+That’s already more effective than what most people do.
 
 ---
 
-## Useful low-cap commands
+## The Low-Cap Watchlist
 
-### `!lowcaps`
-Browse the watchlist.
+McGBot’s low-cap system is **curated**, not a spam list.
 
-### `!lowcap <ca>`
-Check a specific low-cap entry.
+It’s meant for:
 
-### `!lowcapadd`
-Submit a coin for review.
+* Sleeper coins
+* Revival plays
+* Interesting low-cap setups with a real thesis
 
-**Important:**  
-Submissions are reviewed before they get added.
+It’s not about being low cap — it’s about *why it matters*.
 
-That keeps the list useful.
+### Useful commands:
 
----
+* `!lowcaps` — browse the watchlist
+* `!lowcap <ca>` — check a specific entry
+* `!lowcapadd` — submit a coin for review
 
-# What Dev Intelligence Is
-
-McGBot also includes a **Dev Intelligence** system.
-
-This helps the server track useful dev context like:
-
-- wallets
-- X handles
-- known launches
-- notes / tags
-- known history
-
-That matters because a lot of crypto comes down to:
-
-> “who is actually behind this?”
-
-McGBot helps keep that context from getting lost.
+Submissions are reviewed before being added. That’s what keeps the list useful.
 
 ---
 
-## Useful dev commands
+## Dev Intelligence
 
-### `!dev <wallet | @x | nickname>`
-Quick lookup
+McGBot includes a Dev Intelligence system.
 
-### `!devcard <wallet | @x | nickname>`
-Cleaner profile-style view
+This tracks:
 
-### `!devsubmit`
-Submit useful dev intel for review
+* Wallets
+* X handles
+* Known launches
+* Notes & history
 
----
+This matters because in crypto, a lot depends on **who is behind the project**.
 
-# What “Tracked Calls” Means
+### Useful commands:
 
-When a call is tracked, it means it’s no longer just a message that gets buried.
-
-McGBot can keep track of:
-
-- who called it
-- when they called it
-- how it moved later
-- milestone progress
-- performance history
-
-That matters because crypto communities are full of:
-
-- hindsight
-- fake memory
-- “I posted that first”
-- random hype with no accountability
-
-Tracked calls help fix that.
+* `!dev <wallet | @x | nickname>`
+* `!devcard <wallet | @x | nickname>`
+* `!devsubmit` — submit new dev info for review
 
 ---
 
-# Why X Verification Matters
+## Tracked Calls Explained
 
-McGBot also supports X verification.
+A tracked call isn’t just a message.
 
-This matters more than it sounds like.
+It stores:
 
-If you use both:
-- Discord
-- and X
+* Who called it
+* When it was called
+* How it performed over time
+* Milestone progress
 
-…verification can help connect your identity across both.
+This helps avoid:
 
-That can improve:
-
-- attribution
-- milestone credit
-- trust continuity
-- cross-platform recognition
-
-If you’re active on both, it’s worth doing.
+* “I called that” hindsight
+* Fake memory
+* Lost signal
 
 ---
 
-# What “Trust” Means
+## Why X Verification Matters
 
-You may notice some people are treated differently in the system.
+If you’re active on both Discord and X, verification helps connect your identity.
 
-That’s because McGBot includes a trust / reputation layer.
+Benefits include:
 
-That helps distinguish between:
-- normal users
-- stronger callers
-- higher-trust contributors
-- restricted users
+* Better attribution
+* Proper credit for milestones
+* Consistent identity across platforms
 
-This exists for a simple reason:
-
-## not all signal is equal
-
-That’s a good thing.
+If you use both, it’s worth doing.
 
 ---
 
-# Best Beginner Mindset
+## Trust & Reputation
 
-McGBot is most useful when you use it as a **signal tool**, not a shortcut to avoid thinking.
+McGBot includes a trust layer.
 
-Best ways to use it:
+This helps distinguish:
 
-- check context before aping
-- use calls and watchlists as inputs, not guarantees
-- pay attention to who has real track record
-- use the bot to reduce noise, not increase it
+* Normal users
+* Stronger callers
+* Higher-trust contributors
+* Restricted accounts
 
-That’s where the real edge is.
+Because:
 
----
+> **Not all signal is equal.**
 
-# What McGBot Is NOT
-
-McGBot is **not**:
-
-- a magic alpha machine
-- a replacement for judgment
-- a guarantee that something will run
-- a bot that makes bad setups good
-
-It’s a structure tool.
-
-Used properly, it helps you make better decisions with better context.
+That’s a feature, not a bug.
 
 ---
 
-# Bottom Line
+## The Right Mindset
+
+Use McGBot as a signal tool, not a shortcut.
+
+Best practices:
+
+* Check context before acting
+* Use calls and watchlists as inputs, not guarantees
+* Pay attention to who has real performance
+* Use the bot to reduce noise, not amplify hype
+
+---
+
+## What McGBot Is Not
+
+McGBot is not:
+
+* A magic alpha machine
+* A guarantee
+* A substitute for thinking
+* A way to make bad setups good
+
+It’s a **context and structure tool**.
+
+---
+
+## Bottom Line
 
 If you only remember one thing, remember this:
 
-> McGBot helps you stop relying on hype and memory alone
+> **McGBot helps you stop relying on hype and memory alone.**
 
-That’s what makes it useful.
+You don’t need to master everything immediately.
 
-You do **not** need to master everything right away.
+Start with:
 
-Just start with:
-- `!ca`
-- `!call`
-- `!watch`
-- `!lowcaps`
-- `!dev`
+* `!ca`
+* `!call`
+* `!watch`
+* `!lowcaps`
+* `!dev`
 
-That’s enough to start using it well.
+That’s enough to start using McGBot well.

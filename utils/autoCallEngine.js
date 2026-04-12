@@ -3,7 +3,7 @@ const { autoCallConfig } = require('../config/autoCallConfig');
 const { scanFilterConfig } = require('../config/scanFilterConfig');
 const { AttachmentBuilder } = require('discord.js');
 const { createAutoCallEmbed } = require('./alertEmbeds');
-const { fetchGeckoChart } = require('./chartCapture');
+const { renderPriceChart, seriesFromTrackedPriceHistory } = require('./renderChart');
 const { loadScannerSettings } = require('./scannerSettingsService');
 const {
   saveTrackedCall,
@@ -165,10 +165,23 @@ async function hydrateAutoCallChartMessage(message, scan, profileName) {
     return;
   }
   try {
-    const buf = await fetchGeckoChart({
-      contractAddress: scan.contractAddress,
-      pairAddress: scan.pairAddress
-    });
+    let buf = null;
+    const tracked = getTrackedCall(scan.contractAddress);
+    const series = tracked ? seriesFromTrackedPriceHistory(tracked) : null;
+
+    if (series) {
+      try {
+        buf = await renderPriceChart({
+          prices: series.prices,
+          timestamps: series.timestamps,
+          label: scan.ticker || scan.tokenName || 'MC'
+        });
+      } catch (renderErr) {
+        console.error('[AutoCallChart]', scan.contractAddress, renderErr.message);
+        buf = null;
+      }
+    }
+
     const embed = createAutoCallEmbed(scan, profileName, {
       chartPending: false,
       chartImageUrl: buf ? 'attachment://chart.png' : undefined
@@ -191,12 +204,6 @@ async function postBotCallScan(channel, scan, profileName) {
     const embed = createAutoCallEmbed(scan, profileName, { chartPending: true });
     const sentMessage = await channel.send({ embeds: [embed] });
 
-    hydrateAutoCallChartMessage(sentMessage, scan, profileName).catch(err => {
-      console.error('[AutoCallChart]', scan?.contractAddress, err.message);
-    });
-
-    markRecentTickerCall(scan);
-
     const tracked = trackAutoCall(scan);
     if (tracked && sentMessage?.id) {
       updateTrackedCallData(scan.contractAddress, {
@@ -204,6 +211,12 @@ async function postBotCallScan(channel, scan, profileName) {
         discordChannelId: sentMessage.channel?.id || null
       });
     }
+
+    hydrateAutoCallChartMessage(sentMessage, scan, profileName).catch(err => {
+      console.error('[AutoCallChart]', scan?.contractAddress, err.message);
+    });
+
+    markRecentTickerCall(scan);
 
     markCalled(scan.contractAddress);
     callsThisHour += 1;

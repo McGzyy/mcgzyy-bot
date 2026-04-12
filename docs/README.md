@@ -1,25 +1,62 @@
-# McGBot documentation
+# McGBot Documentation
 
-This folder holds **human-readable guides** for admins, mods, users, curious members, and crypto newcomers.
+This folder contains the official human-readable guides for McGBot — for admins, moderators, users, and anyone curious about how the system works.
 
-## Internal note (workflow)
+These docs explain **how McGBot works today**, not a future roadmap.
 
-Update these guides **together** when terminology, commands, env vars, or workflows change so everything stays consistent across:
+---
 
-- Admin Guide (`admin.md`)
-- Mod Guide (`mod.md`)
-- User Guide (`user.md`)
-- Explanation / Showcase (`explanation.md`)
-- Beginner / Onboarding (`beginner.md`)
+## Who should read what?
 
-## Files
+| Guide                | Who it’s for                          |
+| -------------------- | ------------------------------------- |
+| `beginner.md`        | New users / crypto newcomers          |
+| `user.md`            | Regular Discord users                 |
+| `mod.md`             | Moderators & staff                    |
+| `admin.md`           | Server owner / operators              |
+| `explanation.md`     | Overview + feature showcase           |
+| `MASTER_COMMANDS.md` | Complete command reference (internal) |
 
-| File | Audience |
-| ---- | ---------- |
-| `admin.md` | Server owner / operator |
-| `mod.md` | Moderators |
-| `user.md` | General Discord users |
-| `explanation.md` | Narrative “why McGBot” |
-| `beginner.md` | New to crypto |
+If you’re new, start with:
 
-The guides are written to reflect the **current bot behavior** as of the repo they live in—not a future roadmap.
+👉 `beginner.md`
+
+---
+
+## Internal Documentation
+
+These files support operations, development, and long-term maintenance:
+
+| File                | Purpose                      |
+| ------------------- | ---------------------------- |
+| `SYSTEM_MAP.md`     | Architecture & system flow   |
+| `DATA_CONTRACTS.md` | Data structures & schema     |
+| `REFACTOR_PLAN.md`  | Refactor goals & migration   |
+| `ENVIRONMENT.md`    | Runtime & setup requirements |
+| `DEPLOYMENT.md`     | How to run & deploy McGBot   |
+
+---
+
+## Updating These Docs
+
+Whenever:
+
+* Commands change
+* Environment variables change
+* Data structures change
+* Workflows change
+
+…these guides should be updated together to keep documentation consistent.
+
+---
+
+## Guiding Principles
+
+McGBot is built around:
+
+* Curation over chaos
+* Signal over noise
+* Context over raw data
+* Trust over randomness
+
+The documentation should reflect that.

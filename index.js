@@ -51,7 +51,10 @@ const {
   takePendingDevSubmission,
   returnPendingDevSubmission,
   updatePendingDevSubmission,
-  parseCommaSeparatedAddresses
+  parseCommaSeparatedAddresses,
+  parseDevSubmitTags,
+  parseDevSubmitNotesAndTags,
+  coerceStoredDevXHandle
 } = require('./utils/devSubmissionService');
 
 const {
@@ -63,7 +66,9 @@ const {
   createCallerCardEmbed,
   createCallerLeaderboardEmbed,
   createSingleCallEmbed,
-  createTopCallerTimeframeEmbed
+  createTopCallerTimeframeEmbed,
+  createReferralCommandEmbed,
+  createReferralLeaderboardEmbed
 } = require('./utils/alertEmbeds');
 
 const {
@@ -79,7 +84,8 @@ const {
   removeTrackedDev,
   removeLaunchFromTrackedDev,
   getDevRankData,
-  getDevLeaderboard
+  getDevLeaderboard,
+  findTrackedDevsByLookup
 } = require('./utils/devRegistryService');
 
 const {
@@ -132,10 +138,22 @@ const {
   isLikelyXHandle
 } = require('./utils/userProfileService');
 
+const {
+  hydrateInviteCacheFromClient,
+  handleGuildMemberAdd: handleReferralGuildMemberAdd,
+  getReferralStatsForReferrer,
+  getReferralLeaderboardTop,
+  getOrCreateUserReferral
+} = require('./utils/referralService');
+
+const { startReferralApiServer } = require('./apiServer');
+const { supabase } = require('./utils/supabaseClient');
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.MessageContent
   ]
 });
@@ -761,7 +779,8 @@ function buildDevIntelChannelEmbed() {
       '• **Dev name** is required.',
       '• **At least one Solana dev wallet** is required (comma-separated if several).',
       '• **Coins (CAs)** are optional — known tokens can be linked from tracked calls after approval.',
-      '• **Tags** and **notes** are optional.'
+      '• **X handle** is optional (`@name` or profile link).',
+      '• **Tags / notes:** optional — for tags, start the notes box with `Tags: tag1, tag2` on line 1, then your notes below.'
     ].join('\n'))
     .setTimestamp();
 }
@@ -811,18 +830,20 @@ function buildDevSubmitModal() {
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId('dev_sm_tags')
-          .setLabel('Tags — optional, comma-separated')
+          .setCustomId('dev_sm_xhandle')
+          .setLabel('X Handle — optional')
           .setStyle(TextInputStyle.Short)
           .setRequired(false)
-          .setMaxLength(200)
+          .setPlaceholder('@username or link')
+          .setMaxLength(100)
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId('dev_sm_notes')
-          .setLabel('Notes — optional')
+          .setLabel('Tags & notes — optional')
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(false)
+          .setPlaceholder('Tags: tag1, tag2 (optional, line 1)\n\nNotes…')
           .setMaxLength(1000)
       )
     );
@@ -849,6 +870,11 @@ function buildDevSubmissionReviewEmbed(submission) {
     )
     .addFields(
       { name: 'Nickname', value: (submission.nickname || '—').slice(0, 1024), inline: false },
+      {
+        name: 'X handle',
+        value: (submission.xHandle || '—').toString().slice(0, 1024),
+        inline: false
+      },
       { name: 'Wallets', value: fmtList(submission.walletAddresses).slice(0, 1024), inline: false },
       { name: 'Coins (CAs)', value: fmtList(submission.coinAddresses).slice(0, 1024), inline: false },
       { name: 'Tags', value: tags.slice(0, 1024), inline: false },
@@ -881,6 +907,7 @@ function buildDevSubmissionEditModal(submissionId, submission) {
   const coinsStr = (submission.coinAddresses || []).join(', ');
   const tagsStr = (submission.tags || []).join(', ');
   const notesStr = String(submission.notes || '');
+  const xHandleStr = String(submission.xHandle || '');
 
   const clip = (s, max) => String(s || '').slice(0, max);
 
@@ -917,6 +944,16 @@ function buildDevSubmissionEditModal(submissionId, submission) {
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
+          .setCustomId('dev_ed_xhandle')
+          .setLabel('X Handle — optional')
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setPlaceholder('@username or link')
+          .setValue(clip(xHandleStr, 95))
+          .setMaxLength(100)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
           .setCustomId('dev_ed_notes')
           .setLabel('Notes')
           .setStyle(TextInputStyle.Paragraph)
@@ -925,14 +962,6 @@ function buildDevSubmissionEditModal(submissionId, submission) {
           .setMaxLength(1000)
       )
     );
-}
-
-function parseDevSubmitTags(text) {
-  return String(text || '')
-    .split(/[,;\n]+/)
-    .map(s => s.trim())
-    .filter(Boolean)
-    .slice(0, 25);
 }
 
 function appendMergedDevNote(existingNote, sectionLabel, body) {
@@ -1629,6 +1658,7 @@ async function handleDevSessionReply(message) {
       athMarketCap,
       firstCalledMarketCap,
       xFromCall,
+      migrated: trackedCall.migrated === true,
       discordMessageId: trackedCall.discordMessageId || null,
       addedAt: new Date().toISOString()
     };
@@ -1820,6 +1850,10 @@ async function handleDevSubmissionApprove(interaction, submissionId) {
       if (nick && !String(existing.nickname || '').trim()) {
         updates.nickname = nick;
       }
+      const subX = coerceStoredDevXHandle(submission.xHandle || '');
+      if (subX) {
+        updates.xHandle = subX;
+      }
       updateTrackedDev(targetWallet, updates);
 
       for (const ca of submission.coinAddresses || []) {
@@ -1845,6 +1879,7 @@ async function handleDevSubmissionApprove(interaction, submissionId) {
           athMarketCap,
           firstCalledMarketCap,
           xFromCall,
+          migrated: trackedCall.migrated === true,
           discordMessageId: trackedCall.discordMessageId || null,
           addedAt: new Date().toISOString()
         };
@@ -1862,12 +1897,14 @@ async function handleDevSubmissionApprove(interaction, submissionId) {
       }
       const combinedNote = noteParts.join('\n\n').slice(0, 3500);
 
+      const subXNew = coerceStoredDevXHandle(submission.xHandle || '');
       const createdDev = addTrackedDev({
         walletAddress: targetWallet,
         addedById: submission.submitterId,
         addedByUsername: submission.submitterUsername || 'Unknown',
         nickname: submission.nickname,
-        note: combinedNote
+        note: combinedNote,
+        xHandle: subXNew
       });
 
       if (tagList.length && createdDev) {
@@ -1898,6 +1935,7 @@ async function handleDevSubmissionApprove(interaction, submissionId) {
           athMarketCap,
           firstCalledMarketCap,
           xFromCall,
+          migrated: trackedCall.migrated === true,
           discordMessageId: trackedCall.discordMessageId || null,
           addedAt: new Date().toISOString()
         };
@@ -2012,6 +2050,24 @@ async function ensureVerifyXPrompt(guild) {
 client.once('clientReady', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
+  (async () => {
+    try {
+      const { error } = await supabase.from('referrals').insert({
+        owner_discord_id: '732566370914664499',
+        referred_user_id: 'test_user_1',
+        joined_at: Date.now()
+      });
+
+      if (error) {
+        console.error('❌ Supabase insert error:', error);
+      } else {
+        console.log('✅ Test referral inserted into Supabase');
+      }
+    } catch (err) {
+      console.error('❌ Supabase failed:', err);
+    }
+  })();
+
   setImmediate(() => {
     try {
       startAdminReports(client);
@@ -2055,11 +2111,26 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
   await ensureVerifyXPrompt(firstGuild);
   await ensureDevIntelPrompt(firstGuild);
 
+  try {
+    await hydrateInviteCacheFromClient(client);
+    console.log('[Referral] Invite use cache hydrated from guild.invites.fetch()');
+  } catch (e) {
+    console.error('[Referral] Startup hydrate failed:', e?.message || e);
+  }
+
   setInterval(() => {
     cleanupExpiredApprovals().catch(err => {
       console.error('[ApprovalQueue] Interval cleanup failed:', err.message);
     });
   }, 60 * 1000);
+});
+
+client.on('guildMemberAdd', member => {
+  Promise.resolve()
+    .then(() => handleReferralGuildMemberAdd(member))
+    .catch(err => {
+      console.error('[Referral] guildMemberAdd handler:', err?.message || err);
+    });
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -2605,8 +2676,9 @@ let updated = null;
         const nickname = interaction.fields.getTextInputValue('dev_sm_nick').trim();
         const coinsRaw = interaction.fields.getTextInputValue('dev_sm_coins');
         const walletsRaw = interaction.fields.getTextInputValue('dev_sm_wallets');
-        const tagsRaw = interaction.fields.getTextInputValue('dev_sm_tags');
-        const notes = interaction.fields.getTextInputValue('dev_sm_notes').trim();
+        const xHandle = interaction.fields.getTextInputValue('dev_sm_xhandle').trim().slice(0, 100);
+        const notesRaw = interaction.fields.getTextInputValue('dev_sm_notes');
+        const { tags, notes } = parseDevSubmitNotesAndTags(notesRaw);
 
         if (!nickname) {
           await interaction.reply({
@@ -2628,8 +2700,6 @@ let updated = null;
           return;
         }
 
-        const tags = parseDevSubmitTags(tagsRaw);
-
         const submission = await createPendingDevSubmission({
           submitterId: interaction.user.id,
           submitterUsername: interaction.user.username,
@@ -2637,7 +2707,8 @@ let updated = null;
           walletAddresses,
           coinAddresses,
           tags,
-          notes
+          notes,
+          ...(xHandle ? { xHandle } : {})
         });
 
         const approvalsCh = getModApprovalsChannel(interaction.guild);
@@ -2713,6 +2784,7 @@ let updated = null;
         const walletsRaw = interaction.fields.getTextInputValue('dev_ed_wallets');
         const coinsRaw = interaction.fields.getTextInputValue('dev_ed_coins');
         const tagsRaw = interaction.fields.getTextInputValue('dev_ed_tags');
+        const xHandle = interaction.fields.getTextInputValue('dev_ed_xhandle').trim().slice(0, 100);
         const notes = interaction.fields.getTextInputValue('dev_ed_notes').trim();
 
         const walletAddresses = parseCommaSeparatedAddresses(walletsRaw, isLikelySolWallet);
@@ -2732,7 +2804,8 @@ let updated = null;
           walletAddresses,
           coinAddresses,
           tags,
-          notes
+          notes,
+          xHandle: xHandle || ''
         });
 
         const refreshed = await refreshDevSubmissionApprovalMessage(
@@ -3126,6 +3199,156 @@ saveBotSettings(BOT_SETTINGS);
 
         return;
       }
+
+      if (lowerContent === '!referral') {
+        if (!message.guild) {
+          await replyText(message, '❌ Use `!referral` in a server.');
+          return;
+        }
+
+        try {
+          const userId = message.author.id;
+          const invite = await getOrCreateUserReferral(userId, message.guild);
+          const stats = await getReferralStatsForReferrer(userId);
+          const embed = createReferralCommandEmbed({
+            inviteUrl: invite.url || '',
+            total: stats.total,
+            last24h: stats.last24h,
+            last7d: stats.last7d,
+            last30d: stats.last30d
+          });
+
+          await message.reply({
+            embeds: [embed],
+            allowedMentions: { repliedUser: false }
+          });
+        } catch (err) {
+          console.error('[Referral] !referral command failed:', err?.message || err);
+          await replyText(message, '❌ Could not load your referral info. Try again later.');
+        }
+
+        return;
+      }
+
+      if (lowerContent === '!refboard') {
+        if (!message.guild) {
+          await replyText(message, '❌ Use `!refboard` in a server.');
+          return;
+        }
+
+        try {
+          const entries = await getReferralLeaderboardTop(message.guild, client, 10);
+          const embed = createReferralLeaderboardEmbed(entries);
+
+          await message.reply({
+            embeds: [embed],
+            allowedMentions: { repliedUser: false }
+          });
+        } catch (err) {
+          console.error('[Referral] !refboard failed:', err?.message || err);
+          await replyText(message, '❌ Could not load the referral leaderboard. Try again later.');
+        }
+
+        return;
+      }
+
+      const devLookupParts = content.split(/\s+/).filter(Boolean);
+      const devLookupCmd = devLookupParts[0] ? devLookupParts[0].toLowerCase() : '';
+
+      if (devLookupCmd === '!devcard') {
+        const query = devLookupParts.slice(1).join(' ').trim();
+        if (!query) {
+          await replyText(message, '❌ Usage: `!devcard <wallet | @nickname | nickname>`');
+          return;
+        }
+
+        const matches = findTrackedDevsByLookup(query);
+        if (!matches.length) {
+          await replyText(message, '❌ No tracked dev matched that query.');
+          return;
+        }
+        if (matches.length > 1) {
+          const lines = matches
+            .slice(0, 10)
+            .map(d =>
+              d.nickname
+                ? `• **${d.nickname}** — \`${d.walletAddress}\``
+                : `• \`${d.walletAddress}\``
+            )
+            .join('\n');
+          await replyText(
+            message,
+            `Several devs matched — narrow it down:\n${lines}${matches.length > 10 ? '\n…' : ''}`
+          );
+          return;
+        }
+
+        const dev = matches[0];
+        await message.reply({
+          embeds: [
+            createDevCheckEmbed({
+              walletAddress: dev.walletAddress,
+              trackedDev: dev,
+              checkedBy: message.author.username,
+              contextLabel: 'Dev Card',
+              rankData: getDevRankData(dev),
+              showDevEditMenu: false,
+              compactCard: true
+            })
+          ],
+          allowedMentions: { repliedUser: false }
+        });
+
+        return;
+      }
+
+      if (devLookupCmd === '!dev') {
+        const query = devLookupParts.slice(1).join(' ').trim();
+        if (!query) {
+          await replyText(message, '❌ Usage: `!dev <wallet | @nickname | nickname>`');
+          return;
+        }
+
+        const matches = findTrackedDevsByLookup(query);
+        if (!matches.length) {
+          await replyText(message, '❌ No tracked dev matched that query.');
+          return;
+        }
+        if (matches.length > 1) {
+          const lines = matches
+            .slice(0, 10)
+            .map(d =>
+              d.nickname
+                ? `• **${d.nickname}** — \`${d.walletAddress}\``
+                : `• \`${d.walletAddress}\``
+            )
+            .join('\n');
+          await replyText(
+            message,
+            `Several devs matched — narrow it down:\n${lines}${matches.length > 10 ? '\n…' : ''}`
+          );
+          return;
+        }
+
+        const dev = matches[0];
+        await message.reply({
+          embeds: [
+            createDevCheckEmbed({
+              walletAddress: dev.walletAddress,
+              trackedDev: dev,
+              checkedBy: message.author.username,
+              contextLabel: 'Dev Lookup',
+              rankData: getDevRankData(dev),
+              showDevEditMenu: false,
+              compactCard: false
+            })
+          ],
+          allowedMentions: { repliedUser: false }
+        });
+
+        return;
+      }
+
 if (lowerContent.startsWith('!resetstats')) {
         const mentionedUser = message.mentions.users.first();
         const isModOrAdmin = message.member?.permissions?.has('ManageGuild');
@@ -4037,6 +4260,7 @@ if (lowerContent.startsWith('!truestats')) {
           athMarketCap,
           firstCalledMarketCap,
           xFromCall,
+          migrated: trackedCall.migrated === true,
           discordMessageId: trackedCall.discordMessageId || null,
           addedAt: new Date().toISOString()
         };
@@ -4220,5 +4444,6 @@ if (lowerContent.startsWith('!truestats')) {
     return;
   }
 
+  startReferralApiServer();
   client.login(process.env.DISCORD_TOKEN);
 })();

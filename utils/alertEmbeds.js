@@ -2,6 +2,7 @@ const { EmbedBuilder } = require('discord.js');
 const { resolvePublicCallerName } = require('./userProfileService');
 const { formatAgeMinutes } = require('./formatAgeMinutes');
 const { applyScanThumbnailToEmbed } = require('./embedTokenThumbnail');
+const { isLaunchMigrated } = require('./devRegistryService');
 
 function formatUsd(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
@@ -443,6 +444,44 @@ function createDevAddedEmbed(dev) {
     .setTimestamp();
 }
 
+/**
+ * @param {object|null} trackedDev
+ * @param {number} limit
+ * @returns {object[]}
+ */
+function getRecentDevLaunchesByTime(trackedDev, limit) {
+  const n = Math.min(Math.max(1, Math.floor(Number(limit) || 3)), 3);
+  const all = Array.isArray(trackedDev?.previousLaunches) ? [...trackedDev.previousLaunches] : [];
+  return all
+    .sort((a, b) => {
+      const ta = new Date(a?.addedAt || 0).getTime();
+      const tb = new Date(b?.addedAt || 0).getTime();
+      if (tb !== ta) return tb - ta;
+      return String(b?.contractAddress || '').localeCompare(String(a?.contractAddress || ''));
+    })
+    .slice(0, n);
+}
+
+/**
+ * @param {object} launch
+ * @returns {string}
+ */
+function formatRecentDevLaunchLine(launch) {
+  const name = `**${formatValue(launch.tokenName, 'Unknown')}** ($${formatValue(launch.ticker, 'UNKNOWN')})`;
+  const xStr = formatX(launch.xFromCall);
+  const athStr = formatUsd(launch.athMarketCap);
+  let stats;
+  if (xStr !== 'N/A' && athStr !== 'N/A') {
+    stats = `${xStr} • ATH ${athStr}`;
+  } else if (xStr !== 'N/A') {
+    stats = xStr;
+  } else {
+    stats = `ATH ${athStr}`;
+  }
+  const mig = isLaunchMigrated(launch) ? '✅ Migrated' : '⚪ Not migrated';
+  return `${name} — ${stats} — ${mig}`;
+}
+
 function createDevLaunchAddedEmbed(dev, launch) {
   const displayName = dev?.nickname
     ? `${dev.nickname} (${shortenWallet(dev.walletAddress)})`
@@ -474,7 +513,9 @@ function createDevCheckEmbed({
   trackedDev = null,
   checkedBy = 'Unknown',
   contextLabel = 'Dev Check',
-  rankData = null
+  rankData = null,
+  showDevEditMenu = true,
+  compactCard = false
 }) {
   const isTracked = !!trackedDev;
 
@@ -496,7 +537,33 @@ function createDevCheckEmbed({
     descriptionParts.push(`**Registry Notes:** ${trackedDev.note}`);
   }
 
-  if (rankData && isTracked) {
+  const perf = rankData?.performance;
+  if (rankData && isTracked && perf && perf.coinCount > 0) {
+    const rateLine =
+      perf.migrationRate != null && Number.isFinite(perf.migrationRate)
+        ? formatPercent(perf.migrationRate * 100)
+        : 'N/A';
+    const riskLine = rankData.riskLabel || '—';
+    descriptionParts.push(
+      '',
+      `## 📊 Performance (all coins)`,
+      `**Risk:** ${riskLine}`,
+      `**Avg ATH MC:** ${formatUsd(perf.avgAthMc)}`,
+      `**Best ATH MC:** ${formatUsd(perf.bestAthMc)}`,
+      `**Avg X:** ${formatX(perf.avgX)}`,
+      `**Coins:** ${formatValue(perf.coinCount, 0)}`,
+      `**Migration rate:** ${rateLine} (${formatValue(perf.migratedCount, 0)}/${formatValue(perf.coinCount, 0)})`
+    );
+  } else if (rankData && isTracked && perf && perf.coinCount === 0) {
+    descriptionParts.push(
+      '',
+      `## 📊 Performance (all coins)`,
+      `**Risk:** —`,
+      `**Coins:** 0 — add launches to populate ATH, X, and migration stats.`
+    );
+  }
+
+  if (rankData && isTracked && !compactCard) {
     descriptionParts.push(
       '',
       `## 🏅 Dev Rank`,
@@ -506,11 +573,26 @@ function createDevCheckEmbed({
       `**Avg X (Top 5):** ${formatX(rankData.avgX)}`,
       `**Tracked Launches:** ${formatValue(rankData.launchCount, 0)}`
     );
+  } else if (rankData && isTracked && compactCard) {
+    descriptionParts.push(
+      '',
+      `**Rank:** ${formatValue(rankData.tier, 'Unranked')} • Score ${formatValue(rankData.score, 0)}/100`
+    );
   }
 
   if (Array.isArray(trackedDev?.previousLaunches) && trackedDev.previousLaunches.length > 0) {
+    const recentLimit = compactCard ? 2 : 3;
+    const recent = getRecentDevLaunchesByTime(trackedDev, recentLimit);
+    if (recent.length) {
+      const recentLines = recent
+        .map((launch, index) => `${index + 1}. ${formatRecentDevLaunchLine(launch)}`)
+        .join('\n');
+      descriptionParts.push('', `## 🕐 Recent Launches`, recentLines);
+    }
+
+    const limit = compactCard ? 3 : 5;
     const topLaunches = trackedDev.previousLaunches
-      .slice(0, 5)
+      .slice(0, limit)
       .map((launch, index) => {
         return `${index + 1}. **${formatValue(launch.tokenName, 'Unknown')}** ($${formatValue(launch.ticker, 'UNKNOWN')}) — ${formatX(launch.xFromCall)} • ATH ${formatUsd(launch.athMarketCap)}`;
       })
@@ -519,7 +601,7 @@ function createDevCheckEmbed({
     descriptionParts.push('', `## 🏆 Previous Top Launches`, topLaunches);
   }
 
-  if (isTracked) {
+  if (isTracked && showDevEditMenu) {
     descriptionParts.push(
       '',
       `## ✏️ Edit Options`,
@@ -539,7 +621,9 @@ function createDevCheckEmbed({
     .setColor(isTracked ? 0x22c55e : 0x64748b)
     .setTitle(' ')
     .setDescription(descriptionParts.join('\n'))
-    .setFooter({ text: 'Crypto Scanner Bot • Dev Feed' })
+    .setFooter({
+      text: compactCard ? 'Crypto Scanner Bot • Dev Card' : 'Crypto Scanner Bot • Dev Feed'
+    })
     .setTimestamp();
 }
 
@@ -670,6 +754,57 @@ function createTopCallerTimeframeEmbed(stats, title = '👤 TOP CALLER') {
     .setTimestamp();
 }
 
+/**
+ * @param {{ inviteUrl: string, total: number, last24h: number, last7d: number, last30d: number }} p
+ */
+function createReferralCommandEmbed(p) {
+  const total = Number(p.total) || 0;
+  const last24h = Number(p.last24h) || 0;
+  const last7d = Number(p.last7d) || 0;
+  const last30d = Number(p.last30d) || 0;
+  const url = String(p.inviteUrl || '').trim();
+
+  const linkBlock = url
+    ? url
+    : 'Could not create a link. Set **REFERRAL_INVITE_CHANNEL_ID** (recommended) or add a **#verification** text channel, and ensure the bot can create invites there.';
+
+  return new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('Your referrals')
+    .setDescription(`**Your invite link**\n${linkBlock}`)
+    .addFields(
+      { name: 'Total referrals', value: `${total}`, inline: true },
+      { name: 'Last 24 hours', value: `${last24h}`, inline: true },
+      { name: 'Last 7 days', value: `${last7d}`, inline: true },
+      { name: 'Last 30 days', value: `${last30d}`, inline: true }
+    )
+    .setFooter({ text: 'Crypto Scanner Bot • Only you see this summary' })
+    .setTimestamp();
+}
+
+/**
+ * @param {Array<{ username: string, count: number }>} entries
+ */
+function createReferralLeaderboardEmbed(entries = []) {
+  const body =
+    entries.length > 0
+      ? entries
+          .map((e, i) => {
+            const name = formatValue(e.username, 'Unknown').slice(0, 80);
+            const n = Number(e.count) || 0;
+            return `${i + 1}. **${name}** — **${n}**`;
+          })
+          .join('\n')
+      : 'No referrals recorded yet.';
+
+  return new EmbedBuilder()
+    .setColor(0x3b82f6)
+    .setTitle('Referral leaderboard')
+    .setDescription(body)
+    .setFooter({ text: 'Crypto Scanner Bot • Top 10 • Bots excluded' })
+    .setTimestamp();
+}
+
 module.exports = {
   createAutoCallEmbed,
   createMilestoneEmbed,
@@ -681,5 +816,7 @@ module.exports = {
   createCallerCardEmbed,
   createCallerLeaderboardEmbed,
   createSingleCallEmbed,
-  createTopCallerTimeframeEmbed
+  createTopCallerTimeframeEmbed,
+  createReferralCommandEmbed,
+  createReferralLeaderboardEmbed
 };

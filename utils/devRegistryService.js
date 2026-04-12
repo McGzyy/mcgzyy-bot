@@ -1,5 +1,6 @@
 const path = require('path');
 const { readJson, writeJson } = require('./jsonStore');
+const { getTrackedCall } = require('./trackedCallsService');
 
 const trackedDevsFilePath = path.join(__dirname, '../data/trackedDevs.json');
 
@@ -97,7 +98,8 @@ function addTrackedDev({
   addedById = null,
   addedByUsername = 'Unknown',
   nickname = '',
-  note = ''
+  note = '',
+  xHandle = ''
 }) {
   const clean = normalizeWallet(walletAddress);
   const devs = loadTrackedDevs();
@@ -105,10 +107,13 @@ function addTrackedDev({
   const existing = devs.find(dev => dev.walletAddress === clean);
   if (existing) return existing;
 
+  const xh = String(xHandle || '').trim();
+
   const newDev = {
     walletAddress: clean,
     nickname: String(nickname || '').trim(),
     note: String(note || '').trim(),
+    ...(xh ? { xHandle: xh } : {}),
     addedById,
     addedByUsername,
     addedAt: new Date().toISOString(),
@@ -160,6 +165,7 @@ function addLaunchToTrackedDev(walletAddress, launchEntry = {}) {
       athMarketCap: Number(launchEntry.athMarketCap || 0),
       firstCalledMarketCap: Number(launchEntry.firstCalledMarketCap || 0),
       xFromCall: Number(launchEntry.xFromCall || 0),
+      migrated: launchEntry.migrated === true,
       discordMessageId: launchEntry.discordMessageId || null,
       addedAt: launchEntry.addedAt || new Date().toISOString()
     });
@@ -229,6 +235,117 @@ function calculateAverage(numbers = []) {
   return valid.reduce((sum, num) => sum + num, 0) / valid.length;
 }
 
+/**
+ * Whether this launch migrated to Raydium-class pool (stored flag and/or current tracked call).
+ * @param {{ migrated?: boolean, contractAddress?: string|null }} launch
+ * @returns {boolean}
+ */
+function isLaunchMigrated(launch) {
+  if (launch?.migrated === true) return true;
+  const ca = launch?.contractAddress;
+  if (!ca) return false;
+  const call = getTrackedCall(ca);
+  return call?.migrated === true;
+}
+
+/**
+ * Performance over all coins in previousLaunches (computed; migration uses live tracked call when missing on the launch).
+ * @param {object|null} dev
+ * @returns {{ coinCount: number, avgAthMc: number, bestAthMc: number, avgX: number, migratedCount: number, migrationRate: number|null }}
+ */
+function getDevPerformanceStats(dev) {
+  const launches = Array.isArray(dev?.previousLaunches) ? dev.previousLaunches : [];
+  const coinCount = launches.length;
+
+  if (!coinCount) {
+    return {
+      coinCount: 0,
+      avgAthMc: 0,
+      bestAthMc: 0,
+      avgX: 0,
+      migratedCount: 0,
+      migrationRate: null
+    };
+  }
+
+  const athValues = launches
+    .map(l => Number(l?.athMarketCap || 0))
+    .filter(n => Number.isFinite(n) && n > 0);
+  const xValues = launches
+    .map(l => Number(l?.xFromCall || 0))
+    .filter(n => Number.isFinite(n) && n > 0);
+
+  let migratedCount = 0;
+  for (const launch of launches) {
+    if (isLaunchMigrated(launch)) migratedCount += 1;
+  }
+
+  return {
+    coinCount,
+    avgAthMc: athValues.length ? athValues.reduce((a, b) => a + b, 0) / athValues.length : 0,
+    bestAthMc: athValues.length ? Math.max(...athValues) : 0,
+    avgX: xValues.length ? xValues.reduce((a, b) => a + b, 0) / xValues.length : 0,
+    migratedCount,
+    migrationRate: migratedCount / coinCount
+  };
+}
+
+/**
+ * Simple risk tier from all-coin migration rate and avg X (same basis as performance block).
+ * Reliable: high migration (≥50%) and decent avg X (≥3×).
+ * Risky: low migration (<35%) or poor avg X (<2×).
+ * Mixed: everything else with at least one coin on file.
+ *
+ * @param {{ coinCount?: number, migrationRate?: number|null, avgX?: number }} perf
+ * @returns {'Reliable'|'Mixed'|'Risky'|null}
+ */
+function getDevRiskLabel(perf) {
+  if (!perf || perf.coinCount === 0) return null;
+
+  const rate = perf.migrationRate;
+  const avgX = Number(perf.avgX);
+
+  const highMig =
+    typeof rate === 'number' && Number.isFinite(rate) && rate >= 0.5;
+  const lowMig =
+    typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0.35;
+  const decentX = Number.isFinite(avgX) && avgX >= 3;
+  const poorX = !Number.isFinite(avgX) || avgX < 2;
+
+  if (highMig && decentX) return 'Reliable';
+  if (lowMig || poorX) return 'Risky';
+  return 'Mixed';
+}
+
+/**
+ * @param {string} query
+ * @returns {Array<object>}
+ */
+function findTrackedDevsByLookup(query) {
+  const raw = String(query || '').trim();
+  if (!raw) return [];
+
+  if (isLikelySolWallet(raw)) {
+    const d = getTrackedDev(raw);
+    return d ? [d] : [];
+  }
+
+  const term = raw.startsWith('@') ? raw.slice(1).trim() : raw;
+  const termLower = term.toLowerCase();
+  if (!termLower) return [];
+
+  const devs = getAllTrackedDevs();
+  const exact = devs.filter(
+    d => String(d.nickname || '').trim().toLowerCase() === termLower
+  );
+  if (exact.length) return exact;
+
+  return devs.filter(d => {
+    const nick = String(d.nickname || '').trim().toLowerCase();
+    return nick.includes(termLower);
+  });
+}
+
 function getDevRankData(dev) {
   const topLaunches = getTopLaunches(dev, 5);
   const launchCount = Array.isArray(dev?.previousLaunches) ? dev.previousLaunches.length : 0;
@@ -274,13 +391,17 @@ function getDevRankData(dev) {
   else if (score >= 25) tier = 'D Tier';
   else if (score > 0) tier = 'F Tier';
 
+  const performance = getDevPerformanceStats(dev);
+
   return {
     score,
     tier,
     avgAth,
     avgX,
     launchCount,
-    topLaunches
+    topLaunches,
+    performance,
+    riskLabel: getDevRiskLabel(performance)
   };
 }
 
@@ -310,5 +431,9 @@ module.exports = {
   updateTrackedDev,
   removeLaunchFromTrackedDev,
   getDevRankData,
-  getDevLeaderboard
+  getDevLeaderboard,
+  getDevPerformanceStats,
+  getDevRiskLabel,
+  findTrackedDevsByLookup,
+  isLaunchMigrated
 };

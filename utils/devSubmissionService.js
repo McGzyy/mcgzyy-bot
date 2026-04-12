@@ -58,6 +58,68 @@ function parseCommaSeparatedAddresses(text, isValid) {
   return out;
 }
 
+function parseDevSubmitTags(text) {
+  return String(text || '')
+    .split(/[,;\n]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .slice(0, 25);
+}
+
+/**
+ * Notes field may start with `Tags: a, b` (first line only); remainder is notes.
+ * @param {string} combinedText
+ * @returns {{ tags: string[], notes: string }}
+ */
+function parseDevSubmitNotesAndTags(combinedText) {
+  const raw = String(combinedText || '').replace(/\r\n/g, '\n');
+  const trimmed = raw.trim();
+  if (!trimmed) return { tags: [], notes: '' };
+  const lines = trimmed.split('\n');
+  const first = lines[0].trimEnd();
+  const match = /^tags:\s*(.+)$/i.exec(first);
+  if (match) {
+    const tags = parseDevSubmitTags(match[1]);
+    const notes = lines.slice(1).join('\n').trim();
+    return { tags, notes };
+  }
+  return { tags: [], notes: trimmed };
+}
+
+/**
+ * Trim; accept @handle or profile URL. Never throws; weak matches still return a sensible @handle when possible.
+ * @param {string} raw
+ * @returns {string} normalized like @name, or '' if empty after trim
+ */
+function normalizeDevSubmitXHandle(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return '';
+  const urlMatch = t.match(
+    /(?:https?:\/\/)?(?:www\.)?(?:twitter\.com|x\.com)\/(?:i\/)?(?:intent\/user\?screen_name=)?@?([A-Za-z0-9_]{1,30})/i
+  );
+  if (
+    urlMatch &&
+    !/^(share|home|search|settings|messages|notifications|i|intent|hashtag)$/i.test(urlMatch[1])
+  ) {
+    return `@${urlMatch[1]}`;
+  }
+  const stripped = t.replace(/^@+/, '').split(/[\s/?#]/)[0] || '';
+  return stripped ? `@${stripped}` : '';
+}
+
+/**
+ * Prefer normalized handle; if input is non-empty but unparseable, keep trimmed text (mods can fix).
+ * @param {string} raw
+ * @returns {string}
+ */
+function coerceStoredDevXHandle(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  const normalized = normalizeDevSubmitXHandle(trimmed);
+  if (normalized) return normalized.slice(0, 100);
+  return trimmed.slice(0, 100);
+}
+
 /**
  * @param {object} payload
  * @returns {Promise<{ id: string } & object>}
@@ -132,5 +194,9 @@ module.exports = {
   returnPendingDevSubmission,
   updatePendingDevSubmission,
   parseCommaSeparatedAddresses,
+  parseDevSubmitTags,
+  parseDevSubmitNotesAndTags,
+  normalizeDevSubmitXHandle,
+  coerceStoredDevXHandle,
   PENDING_PATH
 };

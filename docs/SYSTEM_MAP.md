@@ -1,33 +1,41 @@
-# System map (living document)
+## System map (living document)
 
-**Purpose:** Single reference for how McGBot / Crypto Scanner fits together—entry points, data, charts, milestones, X, and risks.
+**Purpose:** Single reference for how the Crypto Scanner dashboard (`mcgbot-dashboard/`) fits together—routes, API flows, and key data paths.
 
-**Files (this doc):** `docs/SYSTEM_MAP.md`
+**File:** `docs/SYSTEM_MAP.md`
 
 ---
 
-## Event → Function Map
+## Profile system flow (current)
+
+This is the critical end-to-end path for profile editing and display:
+
+1. **Profile page UI**: `/user/[id]` (`mcgbot-dashboard/app/user/[id]/page.tsx`)
+2. **Open Edit Profile modal** → loads current user profile via:
+   - `GET /api/profile` (`mcgbot-dashboard/app/api/profile/route.ts`)
+3. **Save** → writes via:
+   - `POST /api/profile` → Supabase `users` upsert (server-side API route; uses service role key)
+4. **Reload / render** → reads public profile via:
+   - `GET /api/user/[id]` (`mcgbot-dashboard/app/api/user/[id]/route.ts`) → Supabase `users` select + `call_performance` select
+
+**Important note:** The profile page itself does **not** use `GET /api/profile` for display; it relies on `GET /api/user/[id]`. If these two routes read from different Supabase projects/permissions, UI can look stale even when the DB write succeeded.
+
+---
+
+## Event → Route Map (dashboard)
 
 User actions and runtime events map to handlers as below. Paths are repo-relative from the project root.
 
-| Event / user action | Handler or entry function | Primary file |
-|---------------------|---------------------------|--------------|
-| `!call <ca>` (text) | `handleCallCommand` | `commands/basicCommands.js` (invoked from `index.js` `messageCreate`) |
-| `Call` button (`call_coin`) | `handleCallCommand` (synthetic message / `followUp`) | `index.js` → `commands/basicCommands.js` |
-| `!watch <ca>` | `handleWatchCommand` | `commands/basicCommands.js` (via `index.js` or `interactionCreate` for `watch_coin`) |
-| Auto-call tick | `runAutoCallCycle` | `utils/autoCallEngine.js` |
-| Auto-call post + track | `postBotCallScan` → `trackAutoCall` → `hydrateAutoCallChartMessage` | `utils/autoCallEngine.js` |
-| Monitoring tick | `checkTrackedCoins` | `utils/monitoringEngine.js` |
-| Milestone / dump Discord send | `queueMilestone` / `queueDump` → `enqueueAlert` | `utils/monitoringEngine.js` → `utils/alertQueue.js` |
-| Approval queue post | `postApprovalReview` → `queueApprovalReview` | `utils/monitoringEngine.js` |
-| Approve / deny / exclude buttons | `interactionCreate` branch (`approve_call`, etc.) | `index.js` |
-| X post (approval / milestone) | `publishApprovedCoinToX` and/or `maybePublishApprovedMilestoneToX` → `createPost` | `index.js`, `utils/monitoringEngine.js` → `utils/xPoster.js` |
-| `!scanner on` / `off` | `messageCreate` → `startMonitoring` / `stopMonitoring`, `startAutoCallLoop` / `stopAutoCallLoop` | `index.js` |
-| Process boot | `client.once('clientReady', …)` | `index.js` |
-| Token / market fetch (live) | `fetchRealTokenData` → `fetchDexScreenerTokenData` | `providers/realTokenProvider.js` → `providers/dexScreenerProvider.js` |
-| Scan object for filters / embeds | `generateRealScan` | `utils/scannerEngine.js` |
-| Persist call row | `saveTrackedCall`, `updateTrackedCallData`, `reactivateTrackedCall` | `utils/trackedCallsService.js` |
-| User-call chart PNG | `hydrateTraderCallChartMessage` → `renderPriceChart` | `commands/basicCommands.js` → `utils/renderChart.js` |
+| Event / page | Route / API | Primary files |
+|-------------|-------------|---------------|
+| View profile | `GET /api/user/[id]` | `mcgbot-dashboard/app/api/user/[id]/route.ts`, `mcgbot-dashboard/app/user/[id]/page.tsx` |
+| Open edit profile | `GET /api/profile` | `mcgbot-dashboard/app/api/profile/route.ts` |
+| Save profile | `POST /api/profile` | `mcgbot-dashboard/app/api/profile/route.ts` |
+| Follow/unfollow | `POST/DELETE /api/follow` | `mcgbot-dashboard/app/api/follow/route.ts` |
+| Fetch follow stats | `GET /api/follow?userId=...` | `mcgbot-dashboard/app/api/follow/route.ts` |
+| Fetch trophies | `GET /api/user/[id]/trophies` | `mcgbot-dashboard/app/api/user/[id]/trophies/route.ts` |
+| Fetch badges (single) | `GET /api/user/[id]/badges` | `mcgbot-dashboard/app/api/user/[id]/badges/route.ts` |
+| Fetch badges (batch) | `POST /api/badges` | `mcgbot-dashboard/app/api/badges/route.ts` |
 
 ---
 

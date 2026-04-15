@@ -2050,40 +2050,6 @@ async function ensureVerifyXPrompt(guild) {
 client.once('clientReady', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  if (String(process.env.RUN_SUPABASE_STARTUP_TEST || '').toLowerCase() === 'true') {
-    (async () => {
-      try {
-        let supabase;
-        try {
-          supabase = getSupabase();
-        } catch (err) {
-          console.warn("Skipping early Supabase call");
-        }
-
-        if (!supabase) return;
-
-        const { error } = await supabase.from('referrals').insert({
-          owner_discord_id: '732566370914664499',
-          referred_user_id: 'test_user_1',
-          joined_at: Date.now()
-        });
-
-        if (error) {
-          console.error('❌ Supabase insert error:', error);
-        } else {
-          console.log('✅ Test referral inserted into Supabase');
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg && msg.toLowerCase().includes('supabase env not loaded')) {
-          console.warn("Skipping early Supabase call");
-          return;
-        }
-        console.error('❌ Supabase failed:', err);
-      }
-    })();
-  }
-
   setImmediate(() => {
     try {
       startAdminReports(client);

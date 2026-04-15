@@ -185,13 +185,24 @@ Loaded via **`dotenv`** from **`.env`** in the project root (unless the host inj
 
 If any are missing, `createPost` throws **“Missing X API credentials”** when invoked. Discord flows that do not call X still run.
 
-### 7.4 Optional (unused in default graph)
+### 7.4 Optional — Supabase (Discord bot, repo root)
+
+Used only when referral rows are mirrored to Postgres (`utils/referralService.js`). If unset, referral **file** tracking still works; Supabase insert is skipped when `getSupabase()` is never reached, or will error only if code paths call it without env.
+
+| Variable | Used in | Purpose |
+|----------|---------|---------|
+| **`SUPABASE_URL`** | `utils/supabaseClient.js` | Supabase project URL |
+| **`SUPABASE_ANON_KEY`** | `utils/supabaseClient.js` | Anon key for server-side bot inserts |
+
+**Dashboard note:** `mcgbot-dashboard/` uses the same variable **names** but reads from **its own** env (e.g. `.env.local` / Vercel). Keep projects aligned deliberately.
+
+### 7.5 Optional (unused in default graph)
 
 | Variable | Used in | Notes |
 |----------|---------|--------|
 | **`BIRDEYE_API_KEY`** | `providers/birdeyeProvider.js`, `holderIntelligenceProvider.js` | **Not** loaded by `index.js` today; only if you wire those modules. |
 
-### 7.5 Not in code (documentation-only)
+### 7.6 Not in code (documentation-only)
 
 Some docs mention vars (e.g. milestone chart toggles) that **do not** appear in `process.env` greps — treat as **not implemented** until code references them.
 
@@ -205,7 +216,8 @@ Some docs mention vars (e.g. milestone chart toggles) that **do not** appear in 
 4. Create `.env` with at least `DISCORD_TOKEN` (and `BOT_OWNER_ID` if you need owner commands).  
 5. Run `node index.js`.  
 6. If using X posting, add all four `X_*` variables and test with `!testx` (owner only).  
-7. If you enable Playwright-based code, run `npx playwright install chromium` (and `install-deps` on Linux if needed).
+7. If you enable Playwright-based code, run `npx playwright install chromium` (and `install-deps` on Linux if needed).  
+8. If you want **referral rows mirrored to Supabase**, add `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the **root** `.env` (see §7.4); otherwise the bot still tracks referrals in `data/referrals.json` without Postgres.
 
 ---
 

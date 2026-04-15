@@ -29,11 +29,14 @@ These files support operations, development, and long-term maintenance:
 
 | File                | Purpose                      |
 | ------------------- | ---------------------------- |
+| `PROJECT_HANDOFF.md`| **New-chat / ChatGPT bundle:** dashboard state + repo layout (bot vs `mcgbot-dashboard`) + Supabase bot notes |
 | `SYSTEM_MAP.md`     | Architecture & system flow   |
 | `DATA_CONTRACTS.md` | Data structures & schema     |
 | `REFACTOR_PLAN.md`  | Refactor goals & migration   |
 | `ENVIRONMENT.md`    | Runtime & setup requirements |
 | `DEPLOYMENT.md`     | How to run & deploy McGBot   |
+
+**Tip:** When starting a slow ChatGPT session fresh, upload **`PROJECT_HANDOFF.md`** plus **`SYSTEM_MAP.md`**, **`DATA_CONTRACTS.md`**, and **`ENVIRONMENT.md`** so the model matches this repo’s current behavior (see the “ChatGPT / new-session handoff” section at the top of `PROJECT_HANDOFF.md`).
 
 ---
 

@@ -6,6 +6,20 @@
 
 ---
 
+## Root Discord bot + Supabase (lazy client)
+
+The **dashboard** and the **Discord bot** are separate apps. Supabase env for the bot lives in the **repo root** `.env` (loaded by `index.js` via `dotenv`).
+
+| Concern | Detail |
+|---------|--------|
+| **Module** | `utils/supabaseClient.js` — exports `getSupabase()`; creates `@supabase/supabase-js` client on **first** successful call only. |
+| **Env** | `SUPABASE_URL`, `SUPABASE_ANON_KEY` (same names as dashboard; often **same project**, different file: root `.env` vs `mcgbot-dashboard/.env.local`). |
+| **Runtime use** | `utils/referralService.js` — `getSupabase()` only inside referral insert on **guild member join** (after local JSON attribution). No top-level `getSupabase()` in `utils/`. |
+| **Not used on startup** | `index.js` does **not** run Supabase queries in `clientReady` for smoke tests. `utils/adminReportsService.js` has no Supabase imports. |
+| **Maintenance** | If you add new bot features that talk to Supabase, call `getSupabase()` inside the handler (command, HTTP route, event), not at module top level. |
+
+---
+
 ## Profile system flow (current)
 
 This is the critical end-to-end path for profile editing and display:
@@ -72,6 +86,8 @@ Also update **`docs/DATA_CONTRACTS.md`** when storage contracts change.
 | Process entry | `index.js` (loads `dotenv`, creates `discord.js` `Client`, registers handlers) |
 | Discord login | `client.login(process.env.DISCORD_TOKEN)` |
 | Background loops | `client.once('clientReady', …)` in `index.js` when `SCANNER_ENABLED` and `#bot-calls` exists → `startMonitoring`, `startAutoCallLoop` |
+| Referral API (optional) | `apiServer.js` — started from `index.js`; separate from Supabase client unless you wire it later |
+| Supabase (bot) | `utils/supabaseClient.js` — used on demand via `getSupabase()` (see §Root Discord bot + Supabase above) |
 
 ---
 

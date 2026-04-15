@@ -6,6 +6,31 @@ The dashboard is a **Next.js App Router** app backed by **Supabase** and **NextA
 
 ---
 
+## ChatGPT / new-session handoff (what to upload)
+
+When you start a **fresh** assistant chat and want parity with this repo:
+
+1. **Always useful:** `docs/PROJECT_HANDOFF.md` (this file), `docs/SYSTEM_MAP.md`, `docs/DATA_CONTRACTS.md`, `docs/ENVIRONMENT.md`, `docs/DEPLOYMENT.md`.
+2. **If touching the dashboard:** also upload `mcgbot-dashboard/README.md` (if present) and any route you are editing under `mcgbot-dashboard/app/`.
+3. **If touching the Discord bot:** also skim `docs/SYSTEM_MAP.md` §Runtime entry and §Root bot + Supabase (lazy client).
+
+**Repo layout (two runtimes, same monorepo):**
+
+| Area | Entry / path | Notes |
+|------|----------------|-------|
+| **Discord bot** | `index.js` (repo root) | `node index.js`; uses `dotenv`, `data/*.json`, optional Supabase for referrals only. |
+| **Web dashboard** | `mcgbot-dashboard/` | Separate `package.json`; Vercel/Next; own `.env.local` / Vercel env. **Do not mix** dashboard env with bot `.env` unless intentional. |
+
+### Discord bot — Supabase (root project only)
+
+- **Client module:** `utils/supabaseClient.js` exports **`getSupabase()`** only. It **does not** call `createClient` at import time (avoids crashes when env loads late or is missing).
+- **First use:** `getSupabase()` throws **`Error: Supabase env not loaded`** if `SUPABASE_URL` or `SUPABASE_ANON_KEY` is missing **at the moment of the call** (not at import).
+- **Where it runs today:** `utils/referralService.js` calls `getSupabase()` **inside** the `guildMemberAdd` referral attribution path when inserting into Supabase — **not** on generic startup. `utils/adminReportsService.js` does **not** use Supabase.
+- **Removed:** Startup “test referral insert” from `client.once('clientReady')` in `index.js` — Supabase is **not** initialized for testing on bot boot.
+- **Scripts:** `scripts/*.js` that seed/fix data call `getSupabase()` inside their async IIFE when run manually (`node scripts/...`).
+
+---
+
 ## Project overview
 
 - **Frontend**: `mcgbot-dashboard/` (Next.js 16 App Router, Tailwind)

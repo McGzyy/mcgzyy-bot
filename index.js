@@ -2052,7 +2052,15 @@ client.once('clientReady', async () => {
 
   (async () => {
     try {
-      const supabase = getSupabase();
+      let supabase;
+      try {
+        supabase = getSupabase();
+      } catch (err) {
+        console.warn("Supabase not ready yet, skipping...");
+      }
+
+      if (!supabase) return;
+
       const { error } = await supabase.from('referrals').insert({
         owner_discord_id: '732566370914664499',
         referred_user_id: 'test_user_1',
@@ -2065,6 +2073,11 @@ client.once('clientReady', async () => {
         console.log('✅ Test referral inserted into Supabase');
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg && msg.toLowerCase().includes('supabase env not loaded')) {
+        console.warn("Supabase not ready yet, skipping...");
+        return;
+      }
       console.error('❌ Supabase failed:', err);
     }
   })();

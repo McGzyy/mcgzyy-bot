@@ -3,9 +3,9 @@
 require('dotenv').config();
 
 const { getSupabase } = require('../utils/supabaseClient');
-const supabase = getSupabase();
 
 (async () => {
+  const supabase = getSupabase();
   const { data, error } = await supabase
     .from('call_performance')
     .update({ source: 'user' })

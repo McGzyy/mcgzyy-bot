@@ -3,7 +3,6 @@
 require('dotenv').config();
 
 const { getSupabase } = require('../utils/supabaseClient');
-const supabase = getSupabase();
 
 const features = [
   {
@@ -33,6 +32,7 @@ const features = [
 ];
 
 (async () => {
+  const supabase = getSupabase();
   const { data, error } = await supabase
     .from('feature_access')
     .upsert(features, { onConflict: 'feature_key' });

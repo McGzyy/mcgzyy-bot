@@ -3,7 +3,6 @@
 require('dotenv').config();
 
 const { getSupabase } = require('../utils/supabaseClient');
-const supabase = getSupabase();
 
 const sample = [
   {
@@ -58,6 +57,7 @@ const sample = [
 ];
 
 (async () => {
+  const supabase = getSupabase();
   const { data, error } = await supabase.from('call_performance').insert(sample);
 
   if (error) {

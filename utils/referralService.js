@@ -3,7 +3,6 @@
 const path = require('path');
 const { readJson, writeJson } = require('./jsonStore');
 const { getSupabase } = require('./supabaseClient');
-const supabase = getSupabase();
 
 const REFERRALS_PATH = path.join(__dirname, '../data/referrals.json');
 const withJsonFile = writeJson.withFileLock;
@@ -421,6 +420,7 @@ async function handleGuildMemberAdd(member) {
             await writeParsed({ users });
             try {
               const joinedAt = Date.now();
+              const supabase = getSupabase();
               const { error: supabaseError } = await supabase.from('referrals').insert({
                 owner_discord_id: ownerId,
                 referred_user_id: member.id,

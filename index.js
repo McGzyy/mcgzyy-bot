@@ -148,7 +148,6 @@ const {
 
 const { startReferralApiServer } = require('./apiServer');
 const { getSupabase } = require('./utils/supabaseClient');
-const supabase = getSupabase();
 
 const client = new Client({
   intents: [
@@ -2053,6 +2052,7 @@ client.once('clientReady', async () => {
 
   (async () => {
     try {
+      const supabase = getSupabase();
       const { error } = await supabase.from('referrals').insert({
         owner_discord_id: '732566370914664499',
         referred_user_id: 'test_user_1',

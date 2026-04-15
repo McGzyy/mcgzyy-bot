@@ -2,7 +2,8 @@
 
 const path = require('path');
 const { readJson, writeJson } = require('./jsonStore');
-const { supabase } = require('./supabaseClient');
+const { getSupabase } = require('./supabaseClient');
+const supabase = getSupabase();
 
 const REFERRALS_PATH = path.join(__dirname, '../data/referrals.json');
 const withJsonFile = writeJson.withFileLock;

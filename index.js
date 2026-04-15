@@ -147,7 +147,8 @@ const {
 } = require('./utils/referralService');
 
 const { startReferralApiServer } = require('./apiServer');
-const { supabase } = require('./utils/supabaseClient');
+const { getSupabase } = require('./utils/supabaseClient');
+const supabase = getSupabase();
 
 const client = new Client({
   intents: [

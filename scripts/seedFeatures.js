@@ -2,7 +2,8 @@
 
 require('dotenv').config();
 
-const { supabase } = require('../utils/supabaseClient');
+const { getSupabase } = require('../utils/supabaseClient');
+const supabase = getSupabase();
 
 const features = [
   {

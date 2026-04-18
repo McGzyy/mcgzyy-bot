@@ -4386,7 +4386,7 @@ if (lowerContent.startsWith('!truestats')) {
 
     try {
       await handleBasicCommands(message, {
-        scanChannelNames: ['scanner', 'scanner-feed', 'calls', 'coin-calls', 'token-calls']
+        scanChannelNames: ['scanner', 'scanner-feed', 'calls', 'coin-calls', 'user-calls', 'token-calls']
       });
       return;
     } catch (scanError) {
@@ -4404,6 +4404,7 @@ if (lowerContent.startsWith('!truestats')) {
 });
 
 (async function startBot() {
+  startReferralApiServer(client);
   try {
     const { initUserProfilesStore } = require('./utils/userProfileService');
     const { initTrackedDevsStore } = require('./utils/devRegistryService');
@@ -4425,6 +4426,5 @@ if (lowerContent.startsWith('!truestats')) {
     return;
   }
 
-  startReferralApiServer();
   client.login(process.env.DISCORD_TOKEN);
 })();

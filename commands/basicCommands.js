@@ -1188,6 +1188,130 @@ async function handleDeepScanReply(message, contractAddress, withButtons = false
   return message.reply(payload);
 }
 
+function isUserCallsWebhookUrl(raw) {
+  try {
+    const u = new URL(String(raw || '').trim().replace(/\/+$/, ''));
+    if (u.protocol !== 'https:') return false;
+    const host = u.hostname.toLowerCase();
+    if (
+      host !== 'discord.com' &&
+      host !== 'discordapp.com' &&
+      host !== 'canary.discord.com' &&
+      host !== 'ptb.discord.com'
+    ) {
+      return false;
+    }
+    return /^\/api\/webhooks\/\d+\/[^/?]+$/.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Dashboard "Submit call" — same pipeline as `!call` in #user-calls, optionally
+ * preceded by a webhook line so it looks like the member typed `!call <ca>`.
+ * @param {import('discord.js').Client} client
+ * @param {{ userId: string, contractAddress: string, webhookUrl?: string | null }} opts
+ */
+async function handleCallFromDashboard(client, opts) {
+  const userId = String(opts.userId || '').trim();
+  const contractAddress = String(opts.contractAddress || '').trim();
+  const webhookUrl = (opts.webhookUrl || '').trim();
+
+  if (!userId || !contractAddress) {
+    throw new Error('Missing userId or contract address');
+  }
+
+  const guildId = String(process.env.DISCORD_GUILD_ID || '').trim();
+  if (!guildId) {
+    throw new Error('DISCORD_GUILD_ID is not configured');
+  }
+
+  const guild =
+    client.guilds.cache.get(guildId) ||
+    (await client.guilds.fetch(guildId).catch(() => null));
+  if (!guild) {
+    throw new Error('Bot is not in the configured guild (check DISCORD_GUILD_ID)');
+  }
+
+  const preferred = String(process.env.USER_CALLS_CHANNEL_NAME || 'user-calls')
+    .trim()
+    .toLowerCase();
+  const namesToTry = [...new Set([preferred, 'user-calls', 'token-calls'])];
+  let channel = null;
+  for (const name of namesToTry) {
+    channel = guild.channels.cache.find(
+      c => c && c.isTextBased() && String(c.name || '').toLowerCase() === name
+    );
+    if (channel) break;
+  }
+  if (!channel) {
+    throw new Error(
+      `No text channel named #${preferred} (also tried #user-calls, #token-calls)`
+    );
+  }
+
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) {
+    throw new Error('That Discord account is not a member of this server');
+  }
+
+  let triggerMessageId = null;
+  if (webhookUrl && isUserCallsWebhookUrl(webhookUrl)) {
+    const displayName =
+      member.displayName ||
+      member.user.globalName ||
+      member.user.username;
+    const avatarUrl = member.user.displayAvatarURL({ extension: 'png', size: 256 });
+    const whBody = JSON.stringify({
+      content: `!call ${contractAddress}`,
+      username: String(displayName).slice(0, 80),
+      avatar_url: avatarUrl,
+      allowed_mentions: { parse: [] }
+    });
+    const whUrl = webhookUrl.includes('?')
+      ? `${webhookUrl}&wait=true`
+      : `${webhookUrl}?wait=true`;
+    const whRes = await fetch(whUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: whBody
+    });
+    if (!whRes.ok) {
+      const txt = await whRes.text().catch(() => '');
+      throw new Error(`User-calls webhook failed (${whRes.status}): ${txt}`.trim());
+    }
+    const whJson = await whRes.json().catch(() => null);
+    triggerMessageId = whJson && whJson.id ? String(whJson.id) : null;
+  }
+
+  const messageStub = {
+    id: triggerMessageId || 'dashboard',
+    author: member.user,
+    member,
+    channel,
+    guild,
+    content: `!call ${contractAddress}`,
+    async reply(payload) {
+      const out = { ...payload };
+      if (triggerMessageId) {
+        out.reply = { messageReference: triggerMessageId, failIfNotExists: false };
+      }
+      try {
+        return await channel.send(out);
+      } catch (err) {
+        if (triggerMessageId && out.reply) {
+          delete out.reply;
+          return channel.send(out);
+        }
+        throw err;
+      }
+    }
+  };
+
+  return handleCallCommand(messageStub, contractAddress, 'dashboard');
+}
+
 async function handleCallCommand(message, contractAddress, source = 'command') {
   const realData = await runQuickCa(contractAddress);
   const scan = normalizeRealDataToScan(realData);
@@ -1309,7 +1433,14 @@ async function handleBasicCommands(message, options = {}) {
   const content = message.content.trim();
   const lowerContent = content.toLowerCase();
 
-  const scanChannelNames = options.scanChannelNames || ['scanner', 'scanner-feed', 'calls', 'coin-calls'];
+  const scanChannelNames = options.scanChannelNames || [
+    'scanner',
+    'scanner-feed',
+    'calls',
+    'coin-calls',
+    'user-calls',
+    'token-calls'
+  ];
   const isScannerStyleChannel = scanChannelNames.includes(String(message.channel?.name || '').toLowerCase());
 
   if (lowerContent === '!ping') {
@@ -1573,6 +1704,7 @@ module.exports = {
   buildActionButtons,
   buildDisabledActionButtons,
   handleCallCommand,
+  handleCallFromDashboard,
   handleWatchCommand,
   isLikelySolanaCA
 };

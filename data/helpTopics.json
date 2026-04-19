@@ -141,9 +141,9 @@
       "relatedCommands": ["!profile", "!myprofile", "!credit"]
     },
     {
-      "title": "X verification",
+      "title": "X account linking",
       "faq": true,
-      "faqSummary": "Link X via **`#verify-x`** and/or **Verify X** on your profile. Mods approve with **`!verifyx`**—that command isn’t for regular members.",
+      "faqSummary": "Link X with **OAuth** from **`#verify-x`**, **`!profile` → Connect X**, or the **web dashboard** — no bio code, tweet, or mod approval.",
       "category": "Account",
       "keywords": [
         "x",
@@ -160,7 +160,7 @@
         "x handle verify",
         "blue check x"
       ],
-      "content": "Linking **X (Twitter)** proves which handle is yours so the bot can show a **consistent public identity** on calls (when you choose that credit mode).\n\nMost servers use a **#verify-x** channel and/or the **Verify X** action on **`!profile`**. Follow the **on-screen steps** your server provides.\n\n**Moderators** approve pending verifications with **`!verifyx`** — regular users don’t run that command themselves.",
+      "content": "Linking **X (Twitter)** proves which handle is yours so the bot can show a **consistent public identity** on calls (when you choose that credit mode).\n\nUse **#verify-x**, **`!profile` → Connect X**, or your **web dashboard**: you sign in with X (**OAuth 2.0**). The bot stores your **@handle** when X confirms the login.\n\nThere is **no** verification code in your bio, **no** tweet requirement, and **no** mod approval step for X.",
       "relatedCommands": ["!profile", "!myprofile", "!credit"]
     },
     {
@@ -202,7 +202,7 @@
         "community safety",
         "call reputation"
       ],
-      "content": "McGBot helps your community **remember calls and context** — it does **not** replace **judgment** or **moderation**.\n\n**Trust** builds from **track records** (who called what, how it performed) and from **mods** who curate **bot approvals**, **X verification**, and server rules.\n\nIf something looks off, use your server’s **reporting** or **mod** channels. Never treat any bot output as **financial advice**.",
+      "content": "McGBot helps your community **remember calls and context** — it does **not** replace **judgment** or **moderation**.\n\n**Trust** builds from **track records** (who called what, how it performed) and from **mods** who curate **bot approvals** and server rules.\n\nIf something looks off, use your server’s **reporting** or **mod** channels. Never treat any bot output as **financial advice**.",
       "relatedCommands": ["!approvalstats", "!pendingapprovals"]
     },
     {

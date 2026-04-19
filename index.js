@@ -2,7 +2,7 @@ require('dotenv').config({ path: __dirname + '/.env' });
 
 const path = require('path');
 const { readJson, writeJson } = require('./utils/jsonStore');
-const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
+const { createXOAuthAuthorizeUrl } = require('./utils/xOAuthService');
 
 const {
   Client,
@@ -39,7 +39,6 @@ const { resolveGuildForTrackedApproval } = require('./utils/resolveGuildForTrack
 const { setBotEmbedThumbnailFallbackUrl } = require('./utils/embedTokenThumbnail');
 const {
   buildCompactCoinApprovalEmbed,
-  buildCompactXVerifyEmbed,
   applyCompactFinalViewToMessage,
   finalizeWithCompactEmbed,
   resolveCoinDeletionKind
@@ -130,13 +129,7 @@ const {
   upsertUserProfile,
   getUserProfileByDiscordId,
   setPublicCreditMode,
-  startXVerification,
-  getPendingXVerifications,
-  completeXVerification,
-  denyXVerification,
-  getPreferredPublicName,
-  normalizeXHandle,
-  isLikelyXHandle
+  getPreferredPublicName
 } = require('./utils/userProfileService');
 
 const {
@@ -161,8 +154,6 @@ const client = new Client({
 const devEditSessions = new Map();
 const DEV_EDIT_SESSION_TTL_MS = 10 * 60 * 1000;
 
-const xVerificationSessions = new Map();
-const X_VERIFY_SESSION_TTL_MS = 30 * 60 * 1000;
 const X_VERIFY_CHANNEL_NAME = 'verify-x';
 const X_VERIFY_CHANNEL_SLUGS = new Set(['verify-x', 'x-verify']);
 
@@ -206,7 +197,6 @@ function getModApprovalsChannel(guild) {
 }
 
 const X_VERIFIED_ROLE_NAME = 'X Verified';
-const MOD_CHANNEL_NAME = 'mod-chat';
 
 const BOT_SETTINGS_PATH = path.join(__dirname, 'data', 'botSettings.json');
 
@@ -289,49 +279,6 @@ function getDevEditSession(userId, channelId) {
 
 function clearDevEditSession(userId, channelId) {
   devEditSessions.delete(createDevSessionKey(userId, channelId));
-}
-
-function createXVerifySessionKey(userId, channelId) {
-  return `${userId}:${channelId}`;
-}
-
-function generateVerificationCode(userId, handle) {
-  const suffix = Math.floor(100000 + Math.random() * 900000);
-  return `MCGZYY-${normalizeXHandle(handle).toUpperCase()}-${suffix}`.slice(0, 32);
-}
-
-function setXVerifySession(userId, channelId, session) {
-  xVerificationSessions.set(createXVerifySessionKey(userId, channelId), {
-    ...session,
-    updatedAt: Date.now()
-  });
-}
-
-function getXVerifySession(userId, channelId) {
-  const key = createXVerifySessionKey(userId, channelId);
-  const session = xVerificationSessions.get(key);
-
-  if (!session) return null;
-
-  if ((Date.now() - session.updatedAt) > X_VERIFY_SESSION_TTL_MS) {
-    xVerificationSessions.delete(key);
-    return null;
-  }
-
-  return session;
-}
-
-function clearXVerifySession(userId, channelId) {
-  xVerificationSessions.delete(createXVerifySessionKey(userId, channelId));
-}
-
-function clearXVerifySessionsForUser(userId) {
-  const prefix = `${String(userId)}:`;
-  for (const key of [...xVerificationSessions.keys()]) {
-    if (key.startsWith(prefix)) {
-      xVerificationSessions.delete(key);
-    }
-  }
 }
 
 async function replyText(message, content) {
@@ -460,10 +407,10 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!caller <name>\` or \`!caller @user\` — Caller stats (embed)\n` +
     `• \`!callerboard\` — Top callers (embed)\n` +
     `• \`!botstats\` — McGBot aggregate stats\n` +
-    `• \`!profile\` / \`!myprofile\` — Your caller profile (+ Verify X button)\n` +
+    `• \`!profile\` / \`!myprofile\` — Your caller profile (+ **Connect X**)\n` +
     `• \`!credit anonymous\` / \`discord\` / \`xtag\` — Public credit label on calls\n` +
     `• \`!resetstats\` — Reset your tracked stat flags (mods: \`!resetstats @user\`)\n` +
-    `• **X verification:** use **#verify-x** or **!profile → Verify X** (not a user \`!verifyx\` text command)\n` +
+    `• **X linking:** **#verify-x**, **!profile → Connect X**, or the **web dashboard** (OAuth; no mod approval)\n` +
     `• \`!bestcall24h\` / \`!bestcallweek\` / \`!bestcallmonth\` — Best user call windows\n` +
     `• \`!topcaller24h\` / \`!topcallerweek\` / \`!topcallermonth\` — Top caller windows\n` +
     `• \`!bestbot24h\` / \`!bestbotweek\` / \`!bestbotmonth\` — Best bot call windows\n` +
@@ -478,12 +425,11 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
       `🛡️ **Mod / Manage Server**\n` +
       `• Approval buttons in **#mod-approvals** / mod flows\n` +
       `• \`!approvalstats\` — Approval queue counts\n` +
-      `• \`!pendingapprovals\` — Pending X verifications + top pending **bot** approvals\n` +
+      `• \`!pendingapprovals\` — Top pending **bot** coin approvals\n` +
       `• \`!recentcalls\` — Recent bot-tracked calls\n` +
       `• \`!monitorstatus\` — Active / archived / pending / scanner state\n` +
       `• \`!scanner\` — Show whether scanner is ON or OFF\n` +
       `• \`!scanner on\` / \`!scanner off\` — Start or stop scanner + monitor + auto-call\n` +
-      `• \`!verifyx @user\` — Approve a member’s pending X verification (requires **Manage Server**)\n` +
       `• \`!resetbotstats\` — Reset bot-call stat exclusions on tracked data\n` +
       `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
       `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
@@ -561,30 +507,6 @@ function getPrimaryGuildForBotAlerts(discordClient) {
   return values.sort((a, b) => a.id.localeCompare(b.id))[0] ?? null;
 }
 
-function getModChannel(guild) {
-  if (!guild) return null;
-
-  return guild.channels.cache.find(
-    ch =>
-      ch &&
-      ch.isTextBased &&
-      typeof ch.isTextBased === 'function' &&
-      ch.isTextBased() &&
-      ch.name === MOD_CHANNEL_NAME
-  ) || null;
-}
-function getXApprovalChannel(guild) {
-  if (!guild) return null;
-
-  return guild.channels.cache.find(
-    ch =>
-      ch &&
-      ch.isTextBased &&
-      typeof ch.isTextBased === 'function' &&
-      ch.isTextBased() &&
-      ch.name === 'x-approvals'
-  ) || null;
-}
 async function assignXVerifiedRole(member) {
   try {
     if (!member?.guild) return false;
@@ -602,6 +524,31 @@ async function assignXVerifiedRole(member) {
   }
 }
 
+async function sendXOAuthConnectReply(interaction) {
+  try {
+    const { authUrl } = createXOAuthAuthorizeUrl(interaction.user.id);
+    await interaction.reply({
+      ephemeral: true,
+      content:
+        '**Connect your X account**\nUse the link below to sign in with X. When you finish, your handle is verified automatically — no bio code or tweet needed.',
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setLabel('Connect with X')
+            .setStyle(ButtonStyle.Link)
+            .setURL(authUrl)
+        )
+      ]
+    });
+  } catch (err) {
+    const msg = err && err.message ? String(err.message) : 'Unknown error';
+    await interaction.reply({
+      content: `❌ X linking is not available right now.\n${msg}`,
+      ephemeral: true
+    });
+  }
+}
+
 function buildUserProfileEmbed(profile) {
   const mode = profile?.publicSettings?.publicCreditMode || 'discord_name';
   const modeLabel =
@@ -611,9 +558,7 @@ function buildUserProfileEmbed(profile) {
 
   const xStatus = profile?.isXVerified
     ? `✅ Verified (@${profile.verifiedXHandle})`
-    : profile?.xVerification?.status === 'pending'
-      ? `⏳ Pending (@${profile.xVerification.requestedHandle || profile.xHandle || 'unknown'})`
-      : 'Not verified';
+    : 'Not linked (use **Connect X** or the web dashboard)';
 
   const previewName = getPreferredPublicName(profile);
 
@@ -674,8 +619,8 @@ function buildProfileButtons(profile) {
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId('profile_open_verify_modal')
-        .setLabel(profile?.isXVerified ? 'Update X Verification' : 'Verify X')
+        .setCustomId('profile_connect_x')
+        .setLabel(profile?.isXVerified ? 'Reconnect X' : 'Connect X')
         .setStyle(ButtonStyle.Primary)
     )
   ];
@@ -684,15 +629,13 @@ function buildProfileButtons(profile) {
 function buildVerifyXChannelEmbed() {
   return new EmbedBuilder()
     .setColor(0x1d9bf0)
-    .setTitle('🧪 Verify Your X Handle')
+    .setTitle('🔗 Connect Your X Account')
     .setDescription([
-      'Click the button below to verify ownership of your X account.',
+      'Link your X profile so the bot can show your **verified @handle** when you choose that credit mode.',
       '',
-      'Once you submit your handle, the bot will give you a code to:',
-      '• put in your X bio, or',
-      '• post in a tweet',
+      'Click **Connect with X** below and approve access in your browser. You can also connect from the **web dashboard** (same secure OAuth flow).',
       '',
-      'Then click **Submit for Review** and a mod will verify it.'
+      '_No bio codes, tweets, or mod approval required._'
     ].join('\n'))
     .setTimestamp();
 }
@@ -702,67 +645,8 @@ function buildVerifyXChannelButtons() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('xverify_start')
-        .setLabel('Verify X Account')
+        .setLabel('Connect with X')
         .setStyle(ButtonStyle.Primary)
-    )
-  ];
-}
-
-function buildVerifyXHandleModal(options = {}) {
-  const fromChannel = options.fromChannel === true;
-  return new ModalBuilder()
-    .setCustomId(fromChannel ? 'verify_x_handle_modal_channel' : 'verify_x_handle_modal')
-    .setTitle('Verify Your X Handle')
-    .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('x_handle_input')
-          .setLabel('Enter your X handle')
-          .setPlaceholder('e.g. McGzyy')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setMaxLength(100)
-      )
-    );
-}
-
-function buildXVerifySubmitButtons() {
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('xverify_submit_review')
-        .setLabel('Submit for Review')
-        .setStyle(ButtonStyle.Success)
-    )
-  ];
-}
-
-function buildXVerifyEmbed({ user, handle, code }) {
-  return new EmbedBuilder()
-    .setColor(0x1d9bf0)
-    .setTitle('🧪 X Verification Request')
-    .setDescription([
-      `**User:** <@${user.id}> (${user.username})`,
-      `**Handle:** [@${handle}](https://x.com/${handle})`,
-      `**Verification Code:** \`${code}\``,
-      '',
-      'Verify that the code exists in bio or tweet.'
-    ].join('\n'))
-    .setTimestamp();
-}
-
-function buildXVerifyButtons(userId, handle) {
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`xverify_accept:${userId}:${handle}`)
-        .setLabel('Accept')
-        .setStyle(ButtonStyle.Success),
-
-      new ButtonBuilder()
-        .setCustomId(`xverify_deny:${userId}:${handle}`)
-        .setLabel('Deny')
-        .setStyle(ButtonStyle.Danger)
     )
   ];
 }
@@ -1472,23 +1356,6 @@ function buildNoteModal(contractAddress) {
     );
 }
 
-function buildXVerifyDenyModal(userId, handle) {
-  return new ModalBuilder()
-    .setCustomId(`xverify_deny_modal:${userId}:${handle}`)
-    .setTitle('Deny X Verification')
-    .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('deny_reason')
-          .setLabel('Reason for denial')
-          .setPlaceholder('e.g. Could not find verification code on profile or recent posts')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setMaxLength(300)
-      )
-    );
-}
-
 async function handleDevSessionReply(message) {
   const session = getDevEditSession(message.author.id, message.channel.id);
   if (!session) return false;
@@ -2031,10 +1898,11 @@ async function ensureVerifyXPrompt(guild) {
     const recentMessages = await verifyChannel.messages.fetch({ limit: 10 }).catch(() => null);
     if (!recentMessages) return;
 
-    const existingBotPrompt = recentMessages.find(msg =>
-      msg.author?.id === client.user.id &&
-      msg.embeds?.[0]?.title === '🧪 Verify Your X Handle'
-    );
+    const existingBotPrompt = recentMessages.find(msg => {
+      if (msg.author?.id !== client.user.id) return false;
+      const t = msg.embeds?.[0]?.title || '';
+      return t.includes('Connect Your X') || t.includes('Verify Your X Handle');
+    });
 
     if (existingBotPrompt) return;
 
@@ -2049,8 +1917,6 @@ async function ensureVerifyXPrompt(guild) {
 
 client.once('clientReady', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-
-  startXDmVerificationPoller();
 
   setImmediate(() => {
     try {
@@ -2142,79 +2008,25 @@ client.on('interactionCreate', async (interaction) => {
 
       const parts = interaction.customId.split(':');
 
-      if (interaction.customId === 'xverify_start') {
-        await interaction.showModal(buildVerifyXHandleModal({ fromChannel: true }));
+      if (
+        interaction.customId === 'xverify_start' ||
+        interaction.customId === 'profile_connect_x' ||
+        interaction.customId === 'profile_open_verify_modal'
+      ) {
+        upsertUserProfile({
+          discordUserId: interaction.user.id,
+          username: interaction.user.username,
+          displayName:
+            interaction.member?.displayName ||
+            interaction.user.globalName ||
+            interaction.user.username
+        });
+        await sendXOAuthConnectReply(interaction);
         return;
       }
 
       if (interaction.customId === 'dev_submit_start') {
         await interaction.showModal(buildDevSubmitModal());
-        return;
-      }
-
-      if (interaction.customId === 'profile_open_verify_modal') {
-        await interaction.showModal(buildVerifyXHandleModal());
-        return;
-      }
-
-      if (interaction.customId === 'xverify_submit_review') {
-        const profile = getUserProfileByDiscordId(interaction.user.id);
-
-        if (!profile) {
-          await interaction.reply({
-            content: '❌ No profile found for verification.',
-            ephemeral: true
-          });
-          return;
-        }
-
-        const handle =
-          profile?.xVerification?.requestedHandle ||
-          profile?.xHandle ||
-          '';
-
-        const code =
-          profile?.xVerification?.verificationCode ||
-          '';
-
-        if (!handle || !code) {
-          await interaction.reply({
-            content: '❌ No active X verification request found. Please start again.',
-            ephemeral: true
-          });
-          return;
-        }
-
-        const embed = buildXVerifyEmbed({
-  user: interaction.user,
-  handle,
-  code
-});
-
-const buttons = buildXVerifyButtons(interaction.user.id, handle);
-
-const modChannel = getModChannel(interaction.guild);
-const xApprovalChannel = getXApprovalChannel(interaction.guild);
-
-if (modChannel) {
-  await modChannel.send({
-    embeds: [embed],
-    components: buttons
-  });
-}
-
-if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) {
-  await xApprovalChannel.send({
-    embeds: [embed],
-    components: buttons
-  });
-}
-
-        await interaction.update({
-          content: `✅ Your verification request has been submitted.\nA MOD will review and verify your request.`,
-          components: []
-        });
-
         return;
       }
 
@@ -2239,68 +2051,14 @@ if (xApprovalChannel && (!modChannel || xApprovalChannel.id !== modChannel.id)) 
         return;
       }
 
-      if (parts[0] === 'xverify_accept') {
-  const userId = parts[1];
-  const handle = parts[2];
-
-  const profile = getUserProfileByDiscordId(userId);
-
-  if (!profile || profile.isXVerified || profile.xVerification?.status !== 'pending') {
-    await interaction.reply({
-      content: 'This verification request has already been handled.',
-      ephemeral: true
-    });
-    return;
-  }
-
-  completeXVerification(userId, handle);
-
-  recordModAction({
-    moderatorId: interaction.user.id,
-    actionType: 'x_verify',
-    dedupeKey: `interaction:${interaction.id}:xverify_accept:${userId}:${handle}`
-  });
-
-  const member = await interaction.guild.members.fetch(userId).catch(() => null);
-  if (member) {
-    await assignXVerifiedRole(member);
-  }
-
-  const verifyChannel = findXVerifyTextChannel(interaction.guild);
-
-  if (verifyChannel) {
-    await verifyChannel.send(
-      `✅ <@${userId}> has been verified as **@${handle}**`
-    );
-  }
-
-  const xCompact = buildCompactXVerifyEmbed({
-    resultLabel: 'Approved',
-    moderatorUser: interaction.user,
-    handle
-  });
-  await finalizeWithCompactEmbed(interaction, xCompact, 'x_verify');
-
-  return;
-}
-
-      if (parts[0] === 'xverify_deny') {
-  const userId = parts[1];
-  const handle = parts[2];
-
-  const profile = getUserProfileByDiscordId(userId);
-
-  if (!profile || profile.isXVerified || profile.xVerification?.status !== 'pending') {
-    await interaction.reply({
-      content: 'This verification request has already been handled.',
-      ephemeral: true
-    });
-    return;
-  }
-
-  await interaction.showModal(buildXVerifyDenyModal(userId, handle));
-  return;
-}
+      if (parts[0] === 'xverify_accept' || parts[0] === 'xverify_deny') {
+        await interaction.reply({
+          content:
+            '❌ That X verification message used the **old** flow.\nUsers now link X with **OAuth** (**Connect X** on `!profile`, **#verify-x**, or the **web dashboard**).',
+          ephemeral: true
+        });
+        return;
+      }
 
       if (parts[0] === 'dev_sub_edit' && parts[1]) {
         if (!interaction.guild) {
@@ -2575,79 +2333,6 @@ let updated = null;
     if (interaction.isModalSubmit()) {
       const parts = interaction.customId.split(':');
 
-      if (
-        interaction.customId === 'verify_x_handle_modal' ||
-        interaction.customId === 'verify_x_handle_modal_channel'
-      ) {
-        const fromVerifyChannel = interaction.customId === 'verify_x_handle_modal_channel';
-
-        upsertUserProfile({
-          discordUserId: interaction.user.id,
-          username: interaction.user.username,
-          displayName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username
-        });
-
-        const rawHandle = interaction.fields.getTextInputValue('x_handle_input');
-        const handle = normalizeXHandle(rawHandle);
-
-        if (!isLikelyXHandle(handle)) {
-          await interaction.reply({
-            content: '❌ Please enter a valid X handle.',
-            ephemeral: true
-          });
-          return;
-        }
-
-        const code = generateVerificationCode(interaction.user.id, handle);
-
-        startXVerification(interaction.user.id, handle, code);
-        setXVerifySession(interaction.user.id, interaction.channel.id, {
-          handle,
-          code
-        });
-
-        const instructionContent = [
-          `🧪 To verify ownership of **@${handle}**:`,
-          '',
-          `**Option 1:** Add this code to your X bio`,
-          `**Option 2:** Post a tweet containing this code`,
-          '',
-          `**Verification Code:** \`${code}\``,
-          '',
-          `When you're done, click **Submit for Review** below.`,
-          `A MOD will review and verify your request.`
-        ].join('\n');
-
-        const instructionComponents = buildXVerifySubmitButtons();
-
-        if (fromVerifyChannel) {
-          try {
-            await interaction.user.send({
-              content: instructionContent,
-              components: instructionComponents
-            });
-            await interaction.reply({
-              content: '✅ Check your DMs for verification instructions.',
-              ephemeral: true
-            });
-          } catch (_) {
-            await interaction.reply({
-              content: ['Enable DMs and try again', '', instructionContent].join('\n'),
-              components: instructionComponents,
-              ephemeral: true
-            });
-          }
-        } else {
-          await interaction.reply({
-            content: instructionContent,
-            components: instructionComponents,
-            ephemeral: true
-          });
-        }
-
-        return;
-      }
-
       if (interaction.customId === 'dev_submit_modal') {
         if (!interaction.guild) {
           await interaction.reply({
@@ -2806,43 +2491,6 @@ let updated = null;
 
         return;
       }
-
-      if (parts[0] === 'xverify_deny_modal') {
-  const userId = parts[1];
-  const handle = parts[2];
-  const reason = interaction.fields.getTextInputValue('deny_reason');
-
-  const deniedProfile = denyXVerification(userId, handle, reason);
-
-  if (!deniedProfile) {
-    await interaction.reply({
-      content: 'This verification request has already been handled.',
-      ephemeral: true
-    });
-    return;
-  }
-
-  recordModAction({
-    moderatorId: interaction.user.id,
-    actionType: 'x_verify_deny',
-    dedupeKey: `interaction:${interaction.id}:xverify_deny_modal:${userId}:${handle}`
-  });
-
-  clearXVerifySessionsForUser(userId);
-
-  const verifyChannel = findXVerifyTextChannel(interaction.guild);
-  if (verifyChannel) {
-    await verifyChannel.send(`❌ <@${userId}>, your X verification for **@${handle}** was denied.\n**Reason:** ${reason}`);
-  }
-
-  const xDenyCompact = buildCompactXVerifyEmbed({
-    resultLabel: 'Denied',
-    moderatorUser: interaction.user,
-    handle
-  });
-  await finalizeWithCompactEmbed(interaction, xDenyCompact, 'x_verify');
-  return;
-}
 
       const [action, contractAddress] = interaction.customId.split(':');
       if (!action || !contractAddress) return;
@@ -3094,7 +2742,7 @@ saveBotSettings(BOT_SETTINGS);
         if (mode === 'verified_x_tag' && !profile.isXVerified) {
           await replyText(
             message,
-            `❌ You do not have a verified X handle yet.\nUse **#${X_VERIFY_CHANNEL_NAME}** or **!myprofile** first.`
+            `❌ You do not have a linked X handle yet.\nUse **#${X_VERIFY_CHANNEL_NAME}**, **!myprofile → Connect X**, or the web dashboard.`
           );
           return;
         }
@@ -3111,63 +2759,6 @@ saveBotSettings(BOT_SETTINGS);
           components: buildProfileButtons(updated),
           allowedMentions: { repliedUser: false }
         });
-
-        return;
-      }
-
-      if (lowerContent.startsWith('!verifyx ')) {
-        if (!message.member?.permissions?.has('ManageGuild')) {
-          await replyText(message, '❌ You need **Manage Server** permission to use this command.');
-          return;
-        }
-
-        const mentionedUser = message.mentions.users.first();
-        if (!mentionedUser) {
-          await replyText(message, '❌ Usage: `!verifyx @user`');
-          return;
-        }
-
-        const targetProfile = getUserProfileByDiscordId(mentionedUser.id);
-        if (!targetProfile) {
-          await replyText(message, '❌ That user does not have a profile yet.');
-          return;
-        }
-
-        const pendingHandle =
-          targetProfile?.xVerification?.requestedHandle ||
-          targetProfile?.xHandle ||
-          '';
-
-        if (!pendingHandle) {
-          await replyText(message, '❌ That user does not have a pending X verification request.');
-          return;
-        }
-
-        completeXVerification(mentionedUser.id, pendingHandle);
-
-        recordModAction({
-          moderatorId: message.author.id,
-          actionType: 'x_verify',
-          dedupeKey: `message:${message.id}:verifyx:${mentionedUser.id}:${pendingHandle}`
-        });
-
-        const member = await message.guild.members.fetch(mentionedUser.id).catch(() => null);
-        if (member) {
-          await assignXVerifiedRole(member);
-        }
-
-        const verifyChannel = findXVerifyTextChannel(message.guild);
-
-        if (verifyChannel) {
-          await verifyChannel.send(
-            `✅ <@${mentionedUser.id}> has been verified as **@${pendingHandle}**`
-          );
-        }
-
-        await replyText(
-          message,
-          `✅ Verified **${mentionedUser.username}** as **@${pendingHandle}**${member ? ` and assigned **${X_VERIFIED_ROLE_NAME}**.` : '.'}`
-        );
 
         return;
       }
@@ -3763,10 +3354,7 @@ if (lowerContent === '!pendingapprovals') {
     return;
   }
 
-  const X_LIST_CAP = 8;
   const BOT_LIST_CAP = 8;
-
-  const pendingX = getPendingXVerifications(X_LIST_CAP);
 
   const pendingBot = getPendingApprovals(50).filter(
     c =>
@@ -3775,27 +3363,6 @@ if (lowerContent === '!pendingapprovals') {
       c.isActive !== false &&
       String(c.lifecycleStatus || 'active').toLowerCase() !== 'archived'
   );
-
-  const xLines = pendingX.map((profile, index) => {
-    const displayName =
-      profile.preferredPublicName ||
-      profile.username ||
-      profile.discordUsername ||
-      `User ${index + 1}`;
-
-    const handle = profile?.xVerification?.requestedHandle
-      ? `@${String(profile.xVerification.requestedHandle).replace(/^@/, '')}`
-      : 'Unknown';
-
-    let minutes = 0;
-    if (profile?.xVerification?.requestedAt) {
-      const diff =
-        Date.now() - new Date(profile.xVerification.requestedAt).getTime();
-      minutes = Math.floor(diff / 60000);
-    }
-
-    return `${index + 1}. **${displayName}** • ${handle} • ${minutes}m ago`;
-  });
 
   const rankedBot = [...pendingBot]
     .map(call => {
@@ -3819,9 +3386,7 @@ if (lowerContent === '!pendingapprovals') {
   await message.reply({
     content:
       `📋 **Pending Approvals**\n\n` +
-      `🔗 **Pending X Verifications**\n` +
-      (xLines.length ? xLines.join('\n') : 'None') +
-      `\n\n🔥 **Top Pending Bot Approval Coins**\n` +
+      `🔥 **Top Pending Bot Approval Coins**\n` +
       (botLines.length ? botLines.join('\n') : 'None'),
     allowedMentions: { repliedUser: false }
   });

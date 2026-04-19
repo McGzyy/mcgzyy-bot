@@ -14,6 +14,16 @@ const {
 } = require('./utils/trackedCallsService');
 const { listDevSubmissionsPostedToModApprovals } = require('./utils/devSubmissionService');
 const { isModOrAdminDiscordUserId } = require('./utils/modStaffGate');
+const {
+  isXOAuthConfigured,
+  createXOAuthAuthorizeUrl,
+  completeXOAuthCallback
+} = require('./utils/xOAuthService');
+const {
+  completeXVerification,
+  getUserProfileByDiscordId,
+  upsertUserProfile
+} = require('./utils/userProfileService');
 
 const PORT = Number(process.env.REFERRAL_API_PORT || process.env.PORT || 3001);
 
@@ -83,7 +93,8 @@ function startReferralApiServer(discordClient = null) {
       /** Present on builds that register GET /internal/mod-queue (dashboard mod approvals). */
       endpoints: {
         modQueueGet: true,
-        internalPost: ['call', 'watch']
+        internalPost: ['call', 'watch', 'x-oauth/start', 'x-oauth/complete'],
+        xOAuthConfigured: isXOAuthConfigured()
       }
     });
   });
@@ -239,6 +250,117 @@ function startReferralApiServer(discordClient = null) {
       approvalChannelId: s.approvalChannelId != null ? s.approvalChannelId : null
     };
   }
+
+  const X_VERIFIED_ROLE_NAME = 'X Verified';
+
+  async function assignXVerifiedRoleAcrossGuilds(discordUserId) {
+    if (!discordClient || !discordClient.isReady()) return;
+    const uid = String(discordUserId || '').trim();
+    if (!uid) return;
+
+    for (const guild of discordClient.guilds.cache.values()) {
+      const role = guild.roles.cache.find(r => r.name === X_VERIFIED_ROLE_NAME);
+      if (!role) continue;
+      const member = await guild.members.fetch(uid).catch(() => null);
+      if (!member || member.roles.cache.has(role.id)) continue;
+      await member.roles.add(role).catch(() => {});
+    }
+  }
+
+  app.post('/internal/x-oauth/start', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error:
+            'CALL_INTERNAL_SECRET is not set on the bot host (required for dashboard X OAuth).'
+        });
+        return;
+      }
+
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const userId = String(
+        body.userId || req.headers['x-discord-user-id'] || ''
+      ).trim();
+      if (!userId) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing userId (body.userId or X-Discord-User-Id header).'
+        });
+        return;
+      }
+
+      if (!isXOAuthConfigured()) {
+        res.status(503).json({
+          success: false,
+          error:
+            'X OAuth is not configured (set X_OAUTH2_CLIENT_ID, X_OAUTH2_CLIENT_SECRET, X_OAUTH2_REDIRECT_URI).'
+        });
+        return;
+      }
+
+      const { authUrl, state } = createXOAuthAuthorizeUrl(userId);
+      res.json({ success: true, authUrl, state });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'x-oauth/start failed';
+      console.error('[API] POST /internal/x-oauth/start', msg);
+      res.status(400).json({ success: false, error: msg });
+    }
+  });
+
+  app.post('/internal/x-oauth/complete', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error:
+            'CALL_INTERNAL_SECRET is not set on the bot host (required for dashboard X OAuth).'
+        });
+        return;
+      }
+
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const code = String(body.code || '').trim();
+      const state = String(body.state || '').trim();
+      if (!code || !state) {
+        res.status(400).json({ success: false, error: 'Missing code or state' });
+        return;
+      }
+
+      const { discordUserId, username } = await completeXOAuthCallback({ code, state });
+
+      if (!getUserProfileByDiscordId(discordUserId)) {
+        upsertUserProfile({
+          discordUserId,
+          username: '',
+          displayName: ''
+        });
+      }
+
+      completeXVerification(discordUserId, username);
+      await assignXVerifiedRoleAcrossGuilds(discordUserId);
+
+      res.json({ success: true, username, discordUserId });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'x-oauth/complete failed';
+      console.error('[API] POST /internal/x-oauth/complete', msg);
+      res.status(400).json({ success: false, error: msg });
+    }
+  });
 
   app.get('/internal/mod-queue', async (req, res) => {
     try {

@@ -95,7 +95,7 @@
       "id": "profile_x",
       "category": "profile",
       "keywords": ["profile", "!profile", "!myprofile", "verify", "x", "twitter", "credit", "!credit", "xtag", "anonymous"],
-      "helpText": "**`!profile`** / **`!myprofile`** opens your caller profile (with **Verify X** when it is your own profile).\n\nUse **`!credit anonymous`**, **`!credit discord`**, or **`!credit xtag`** to choose how your name shows on calls.\n\nX verification is also done in the **#verify-x** channel or via profile buttons — not the mod **`!verifyx @user`** command.",
+      "helpText": "**`!profile`** / **`!myprofile`** opens your caller profile (with **Connect X** when it is your own profile).\n\nUse **`!credit anonymous`**, **`!credit discord`**, or **`!credit xtag`** to choose how your name shows on calls.\n\nLink X via **OAuth** from **#verify-x**, the profile button, or the **web dashboard** — no bio code, tweet, or mod approval.",
       "relatedCommands": ["!profile", "!myprofile", "!credit"]
     },
     {
@@ -108,9 +108,9 @@
     {
       "id": "approvals_mod",
       "category": "scanner",
-      "keywords": ["approval", "pending", "!pendingapprovals", "!approvalstats", "mod approvals", "verifyx", "!verifyx", "moderator"],
-      "helpText": "Mods use **`!approvalstats`**, **`!pendingapprovals`**, and **`!verifyx @user`** (Manage Server) for queues and X verification.\n\nBot-call approvals also flow through **#mod-approvals** (buttons).",
-      "relatedCommands": ["!approvalstats", "!pendingapprovals", "!verifyx"]
+      "keywords": ["approval", "pending", "!pendingapprovals", "!approvalstats", "mod approvals", "moderator"],
+      "helpText": "Mods use **`!approvalstats`** and **`!pendingapprovals`** (Manage Server) for bot-call queues.\n\nBot-call approvals also flow through **#mod-approvals** (buttons). **X** is linked by members via **OAuth** (dashboard / **Connect X**), not the mod queue.",
+      "relatedCommands": ["!approvalstats", "!pendingapprovals"]
     },
     {
       "id": "monitor_reset",

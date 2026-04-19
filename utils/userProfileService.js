@@ -653,19 +653,6 @@ if (sourceType === 'watch_only') {
   return normalizeString(publicName) || fallback;
 }
 
-function getPendingXVerifications(limit = 10) {
-  const profiles = loadUserProfiles();
-
-  return profiles
-    .filter(profile => String(profile?.xVerification?.status || '').toLowerCase() === 'pending')
-    .sort((a, b) => {
-      const aTime = new Date(a?.xVerification?.requestedAt || 0).getTime();
-      const bTime = new Date(b?.xVerification?.requestedAt || 0).getTime();
-      return bTime - aTime;
-    })
-    .slice(0, limit);
-}
-
 function getPublicCallerIdentity({
   discordUserId = null,
   username = '',
@@ -741,9 +728,6 @@ module.exports = {
   findUserProfile,
   upsertUserProfile,
   updateUserProfile,
-
-   // x verification
-  getPendingXVerifications,
 
   // index.js compatibility
   setPublicCreditMode,

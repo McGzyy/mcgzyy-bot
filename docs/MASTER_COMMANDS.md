@@ -137,7 +137,6 @@ Referral commands:
 ### Dev & Data Tools
 
 * `!addlaunch <dev_wallet> <token_ca>`
-* `!verifyx @user`
 * `!backfillprofiles [run]`
 * `!resetbotstats`
 * `!truestats @user`

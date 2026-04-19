@@ -150,25 +150,13 @@ This creates a review card in `#mod-approvals`.
 
 ---
 
-## 4) X Verification Review
+## 4) X account linking (no mod queue)
 
-X verification connects Discord identity to X identity, improving:
+Linking **X** lets members use a **verified @handle** on calls when they choose that credit mode.
 
-* Attribution accuracy
-* Milestone credit
-* Cross-platform trust
-
-### Approve when:
-
-* Identity is clearly valid
-
-### Deny when:
-
-* Identity is mismatched or unverifiable
-* The verification appears manipulated
-
-**Manual command:**
-`!verifyx @user`
+* Members complete **OAuth 2.0** via **Connect X** on `!profile`, **#verify-x**, or the **web dashboard** (same bot API).
+* **No** bio codes, **no** tweets, and **no** moderator approval step for X.
+* Ensure the **X Verified** role exists if your server assigns it after linking.
 
 ---
 

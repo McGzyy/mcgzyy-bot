@@ -53,17 +53,17 @@ Use a **known-good contract** you are allowed to test with (not financial advice
 | 3.1 | Official call | `!call <ca>` | Reply + embed; coin appears in tracking; chart hydrate may follow (see §2 admin if chart errors). |
 | 3.2 | Watch without credit | `!watch <ca>` | Confirmation; tracked **without** caller credit. |
 | 3.3 | Tracked list / detail | `!tracked` then `!tracked <ca>` | Summary and/or refreshed detail for that CA. |
-| 3.4 | Profile | `!profile` or `!myprofile` | Profile embed; **Verify X** path visible for your own profile. |
+| 3.4 | Profile | `!profile` or `!myprofile` | Profile embed; **Connect X** visible for your own profile. |
 | 3.5 | Credit mode | `!credit anonymous` / `discord` / `xtag` (as applicable) | Preference updates; if `xtag` fails, X not verified yet — expected. |
 
 ---
 
-### Step 4 — X verification (user side)
+### Step 4 — X account linking (user side, OAuth)
 
 | # | Action | Commands / UI | Verify |
 |---|--------|----------------|--------|
-| 4.1 | Start verification | `#verify-x` flow and/or profile **Verify X** button | Modal or instructions appear; no crash. |
-| 4.2 | Submit for review | Complete flow per server rules | Request lands where mods expect (e.g. mod / X-approval channel — see your `index.js` / server layout). |
+| 4.1 | Start OAuth | `#verify-x` and/or profile **Connect X** | Ephemeral reply with **Connect with X** link; env `X_OAUTH2_*` set on bot host. |
+| 4.2 | Finish on X | User approves in browser | After redirect, dashboard calls `POST /internal/x-oauth/complete`; profile shows verified handle; **X Verified** role if configured. |
 
 ---
 
@@ -75,10 +75,9 @@ Repeat with an account that has **Manage Server** (or use an admin to grant it t
 |---|--------|----------|--------|
 | 5.1 | Scanner state | `!scanner` | Shows ON/OFF. |
 | 5.2 | Scanner toggle | `!scanner on` then `!scanner off` | Loops start/stop; `data/botSettings.json` reflects `scannerEnabled` after restart policy (see `DEPLOYMENT.md`). |
-| 5.3 | Approvals / queue | `!approvalstats`, `!pendingapprovals` | Reasonable counts; no permission error. |
-| 5.4 | X verify approve | `!verifyx @user` (pending user) | User verified per server rules; role assigned if `#role` exists. |
-| 5.5 | Mod channel buttons | Open **#mod-approvals** (or your configured channel) | Approve / deny / exclude buttons respond without error. |
-| 5.6 | Destructive check (optional, staging only) | `!resetmonitor` | **Only on a test server** — clears tracked state; confirm you understand data loss. |
+| 5.3 | Approvals / queue | `!approvalstats`, `!pendingapprovals` | Bot-call pending list; no permission error. |
+| 5.4 | Mod channel buttons | Open **#mod-approvals** (or your configured channel) | Approve / deny / exclude buttons respond without error. |
+| 5.5 | Destructive check (optional, staging only) | `!resetmonitor` | **Only on a test server** — clears tracked state; confirm you understand data loss. |
 
 ---
 

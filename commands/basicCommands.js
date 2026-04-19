@@ -463,7 +463,7 @@ function createCommandsEmbed(message) {
         '`!tracked` / `!tracked [CA]` — summary or detail\n' +
         '`!caller [name]` or `!caller @user` — caller stats\n' +
         '`!callerboard` / `!botstats` — leaderboards & McGBot stats\n' +
-        '`!profile` / `!myprofile` — profile + X verify (use **#verify-x** too)\n' +
+        '`!profile` / `!myprofile` — profile + **Connect X** (or **#verify-x** / dashboard)\n' +
         '`!credit` anonymous|discord|xtag — public credit label',
       inline: false
     },
@@ -480,7 +480,7 @@ function createCommandsEmbed(message) {
     fields.push({
       name: '🛡️ Manage Server (summary)',
       value:
-        '`!scanner` / `!scanner on|off`, approvals, `!pendingapprovals`, `!verifyx @user`, `!resetmonitor`, … — see `!help`',
+        '`!scanner` / `!scanner on|off`, approvals, `!pendingapprovals`, `!resetmonitor`, … — see `!help`',
       inline: false
     });
   }

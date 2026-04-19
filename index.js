@@ -2,6 +2,7 @@ require('dotenv').config({ path: __dirname + '/.env' });
 
 const path = require('path');
 const { readJson, writeJson } = require('./utils/jsonStore');
+const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
 
 const {
   Client,
@@ -2048,6 +2049,8 @@ async function ensureVerifyXPrompt(guild) {
 
 client.once('clientReady', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+
+  startXDmVerificationPoller();
 
   setImmediate(() => {
     try {

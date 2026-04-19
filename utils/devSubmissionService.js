@@ -187,12 +187,34 @@ async function updatePendingDevSubmission(id, updates) {
   return row;
 }
 
+/**
+ * Rows still in the pending store after a message was posted to #mod-approvals (Discord review).
+ * @returns {Promise<object[]>}
+ */
+async function listDevSubmissionsPostedToModApprovals() {
+  await hydrate();
+  if (!cache) return [];
+  const out = [];
+  for (const s of cache.values()) {
+    if (!s || !s.id) continue;
+    if (!s.approvalMessageId) continue;
+    out.push(s);
+  }
+  out.sort((a, b) => {
+    const ta = new Date(a.createdAt || 0).getTime();
+    const tb = new Date(b.createdAt || 0).getTime();
+    return tb - ta;
+  });
+  return out;
+}
+
 module.exports = {
   createPendingDevSubmission,
   takePendingDevSubmission,
   peekPendingDevSubmission,
   returnPendingDevSubmission,
   updatePendingDevSubmission,
+  listDevSubmissionsPostedToModApprovals,
   parseCommaSeparatedAddresses,
   parseDevSubmitTags,
   parseDevSubmitNotesAndTags,

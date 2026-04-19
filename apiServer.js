@@ -21,6 +21,7 @@ const {
 } = require('./utils/xOAuthService');
 const {
   completeXVerification,
+  clearXAccountLink,
   getUserProfileByDiscordId,
   upsertUserProfile
 } = require('./utils/userProfileService');
@@ -93,7 +94,7 @@ function startReferralApiServer(discordClient = null) {
       /** Present on builds that register GET /internal/mod-queue (dashboard mod approvals). */
       endpoints: {
         modQueueGet: true,
-        internalPost: ['call', 'watch', 'x-oauth/start', 'x-oauth/complete'],
+        internalPost: ['call', 'watch', 'x-oauth/start', 'x-oauth/complete', 'x-oauth/unlink'],
         xOAuthConfigured: isXOAuthConfigured()
       }
     });
@@ -358,6 +359,54 @@ function startReferralApiServer(discordClient = null) {
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'x-oauth/complete failed';
       console.error('[API] POST /internal/x-oauth/complete', msg);
+      res.status(400).json({ success: false, error: msg });
+    }
+  });
+
+  app.post('/internal/x-oauth/unlink', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error:
+            'CALL_INTERNAL_SECRET is not set on the bot host (required for dashboard X OAuth).'
+        });
+        return;
+      }
+
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const userId = String(
+        body.userId || req.headers['x-discord-user-id'] || ''
+      ).trim();
+      if (!userId) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing userId (body.userId or X-Discord-User-Id header).'
+        });
+        return;
+      }
+
+      let updated = clearXAccountLink(userId);
+      if (!updated) {
+        upsertUserProfile({
+          discordUserId: userId,
+          username: '',
+          displayName: ''
+        });
+        updated = clearXAccountLink(userId);
+      }
+
+      res.json({ success: true, cleared: Boolean(updated) });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'x-oauth/unlink failed';
+      console.error('[API] POST /internal/x-oauth/unlink', msg);
       res.status(400).json({ success: false, error: msg });
     }
   });

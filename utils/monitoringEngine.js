@@ -18,6 +18,7 @@ const {
 } = require('./alertEmbeds');
 const { enqueueAlert } = require('./alertQueue');
 const { createPost } = require('./xPoster');
+const { buildXPostText } = require('./buildXPostText');
 const { AttachmentBuilder } = require('discord.js');
 const {
   buildOhlcvCandlestickBuffer,
@@ -190,50 +191,6 @@ function getPublicCallerLabel(trackedCall, fallback = 'Unknown') {
   });
 }
 
-/**
- * =========================
- * X POST HELPERS
- * =========================
- */
-
-function buildXPostText(trackedCall) {
-  const ticker = trackedCall.ticker || 'UNKNOWN';
-  const ca = trackedCall.contractAddress || '';
-  const firstCalledMc = Number(trackedCall.firstCalledMarketCap || 0);
-  const latestMc = Number(
-    trackedCall.latestMarketCap ||
-    trackedCall.firstCalledMarketCap ||
-    0
-  );
-  const displayX =
-    firstCalledMc > 0 ? Number((latestMc / firstCalledMc).toFixed(2)) : 0;
-
-  const initialMcStr = formatUsd(firstCalledMc);
-  const athMcStr = formatUsd(
-    trackedCall.ath ||
-    trackedCall.athMc ||
-    trackedCall.athMarketCap ||
-    trackedCall.latestMarketCap ||
-    trackedCall.firstCalledMarketCap ||
-    0
-  );
-
-  return [
-    `🚀 $${ticker} — ${displayX.toFixed(2)}x from call`,
-    ``,
-    `Called by: @McGBot`,
-    ``,
-    `Initial MC: ${initialMcStr}`,
-    `ATH MC: ${athMcStr}`,
-    ``,
-    `CA:`,
-    `\`${ca}\``,
-    ``,
-    `📊 DexScreener: https://dexscreener.com/solana/${ca}`,
-    `📊 GMGN: https://gmgn.ai/sol/token/${ca}`
-  ].join('\n');
-}
-
 async function maybePublishApprovedMilestoneToX(trackedCall, latestScan = null) {
   try {
     if (!trackedCall || !trackedCall.xApproved) {
@@ -268,7 +225,7 @@ async function maybePublishApprovedMilestoneToX(trackedCall, latestScan = null) 
 
     const hasOriginal = !!trackedCall.xOriginalPostId;
 
-    const postText = buildXPostText(trackedCall);
+    const postText = await buildXPostText(trackedCall);
 
     let chartBuf = null;
     if (!hasOriginal) {

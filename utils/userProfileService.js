@@ -483,6 +483,27 @@ function completeXVerification(discordUserId, handle) {
 }
 
 /**
+ * Remove linked X account (OAuth unlink / dashboard).
+ */
+function clearXAccountLink(discordUserId) {
+  if (!discordUserId) return null;
+  const profile = getUserProfileByDiscordId(discordUserId);
+  if (!profile) return null;
+
+  return updateUserProfile(discordUserId, {
+    xHandle: '',
+    verifiedXHandle: '',
+    isXVerified: false,
+    xVerification: getDefaultXVerification(),
+    publicSettings: {
+      ...getDefaultPublicSettings(),
+      ...(profile.publicSettings || {}),
+      allowPublicXTag: false
+    }
+  });
+}
+
+/**
  * Persist a mod denial. Clears pending queue eligibility and unblocks a new request.
  */
 function denyXVerification(discordUserId, handle, reason = '') {
@@ -733,6 +754,7 @@ module.exports = {
   setPublicCreditMode,
   startXVerification,
   completeXVerification,
+  clearXAccountLink,
   denyXVerification,
   getPreferredPublicName,
 

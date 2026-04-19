@@ -137,5 +137,6 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null) {
 
 module.exports = {
   createPost,
-  uploadMediaPng
+  uploadMediaPng,
+  buildOAuthHeader
 };

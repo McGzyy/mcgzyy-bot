@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { buildOAuthHeader } = require('./xPoster');
 
 function startXDmVerificationPoller() {
   console.log('[XVerify/DM] Poller started');
@@ -13,9 +14,13 @@ function startXDmVerificationPoller() {
 
   setInterval(async () => {
     try {
-      const response = await axios.get('https://api.x.com/2/dm_events', {
+      const url = 'https://api.x.com/2/dm_events';
+
+      const authHeader = buildOAuthHeader('GET', url);
+
+      const response = await axios.get(url, {
         headers: {
-          Authorization: `Bearer ${process.env.X_ACCESS_TOKEN}`
+          Authorization: authHeader
         }
       });
 

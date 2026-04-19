@@ -447,10 +447,31 @@ function setPublicCreditMode(discordUserId, mode = 'discord_name') {
   });
 }
 
+/**
+ * Profiles waiting on DM-based X verification (poller reads this list).
+ * @param {number} [limit]
+ * @returns {Array<Record<string, unknown>>}
+ */
+function getPendingXVerifications(limit = 100) {
+  const cap =
+    Number.isFinite(Number(limit)) && Number(limit) > 0
+      ? Math.min(Math.floor(Number(limit)), 2000)
+      : 100;
+  const profiles = loadUserProfiles();
+  const out = [];
+  for (const p of profiles) {
+    if (String(p?.xVerification?.status || '').toLowerCase() !== 'pending') continue;
+    if (!String(p?.xVerification?.verificationCode || '').trim()) continue;
+    out.push(p);
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
 function startXVerification(discordUserId, handle, verificationCode = '') {
   const normalizedHandle = normalizeXHandle(handle);
 
-  return updateUserProfile(discordUserId, {
+  const updated = updateUserProfile(discordUserId, {
     xHandle: normalizedHandle,
     xVerification: {
       requestedHandle: normalizedHandle,
@@ -461,12 +482,24 @@ function startXVerification(discordUserId, handle, verificationCode = '') {
       deniedReason: ''
     }
   });
+
+  try {
+    const { queueUserXRowSyncToSupabase } = require('./dashboardProfileSync');
+    queueUserXRowSyncToSupabase(discordUserId, {
+      xHandle: normalizedHandle,
+      xVerified: false
+    });
+  } catch (e) {
+    console.error('[UserProfiles] X → dashboard sync (start):', e?.message || e);
+  }
+
+  return updated;
 }
 
 function completeXVerification(discordUserId, handle) {
   const normalizedHandle = normalizeXHandle(handle);
 
-  return updateUserProfile(discordUserId, {
+  const updated = updateUserProfile(discordUserId, {
     xHandle: normalizedHandle,
     verifiedXHandle: normalizedHandle,
     isXVerified: true,
@@ -480,6 +513,18 @@ function completeXVerification(discordUserId, handle) {
       allowPublicXTag: true
     }
   });
+
+  try {
+    const { queueUserXRowSyncToSupabase } = require('./dashboardProfileSync');
+    queueUserXRowSyncToSupabase(discordUserId, {
+      xHandle: normalizedHandle,
+      xVerified: true
+    });
+  } catch (e) {
+    console.error('[UserProfiles] X → dashboard sync (complete):', e?.message || e);
+  }
+
+  return updated;
 }
 
 /**
@@ -519,7 +564,7 @@ function denyXVerification(discordUserId, handle, reason = '') {
     existingV.requestedHandle || normalizeXHandle(handle) || ''
   );
 
-  return updateUserProfile(discordUserId, {
+  const updated = updateUserProfile(discordUserId, {
     xHandle: '',
     isXVerified: false,
     verifiedXHandle: normalizeXHandle(profile.verifiedXHandle || ''),
@@ -532,6 +577,18 @@ function denyXVerification(discordUserId, handle, reason = '') {
       deniedReason: String(reason || '').trim().slice(0, 500)
     }
   });
+
+  try {
+    const { queueUserXRowSyncToSupabase } = require('./dashboardProfileSync');
+    queueUserXRowSyncToSupabase(discordUserId, {
+      xHandle: '',
+      xVerified: false
+    });
+  } catch (e) {
+    console.error('[UserProfiles] X → dashboard sync (deny):', e?.message || e);
+  }
+
+  return updated;
 }
 
 function getPreferredPublicName(profile = {}) {
@@ -753,6 +810,7 @@ module.exports = {
   // index.js compatibility
   setPublicCreditMode,
   startXVerification,
+  getPendingXVerifications,
   completeXVerification,
   clearXAccountLink,
   denyXVerification,

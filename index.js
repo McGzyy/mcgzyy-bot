@@ -30,8 +30,9 @@ const { handleHelpUiInteraction } = require('./utils/helpUi');
 const { handleFaqCommand } = require('./utils/faqCommand');
 const { startMonitoring, stopMonitoring } = require('./utils/monitoringEngine');
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
-const { createPost } = require('./utils/xPoster');
-const { buildXPostText } = require('./utils/buildXPostText');
+const { createPost, getXBotUsernameForCopy } = require('./utils/xPoster');
+const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
+const { publishApprovedCoinToX } = require('./utils/publishApprovedCoinToX');
 const {
   buildOhlcvCandlestickBufferForTrackedCall
 } = require('./utils/ohlcvCandlestickBuffer');
@@ -130,7 +131,8 @@ const {
   upsertUserProfile,
   getUserProfileByDiscordId,
   setPublicCreditMode,
-  getPreferredPublicName
+  getPreferredPublicName,
+  normalizeXHandle
 } = require('./utils/userProfileService');
 
 const {
@@ -1157,71 +1159,6 @@ if (trackedCall.callSourceType === 'bot_call') {
   return embed;
 }
 
-async function publishApprovedCoinToX(contractAddress) {
-  const trackedCall = getTrackedCall(contractAddress);
-  if (!trackedCall) return { success: false, reason: 'missing_call' };
-  if (!trackedCall.xApproved) return { success: false, reason: 'not_approved' };
-
-  const milestoneX = getHighestEligibleApprovalMilestone(computeApprovalAthX(trackedCall));
-
-  if (!milestoneX) {
-    return { success: false, reason: 'no_milestone' };
-  }
-
-  const postedMilestones = Array.isArray(trackedCall.xPostedMilestones)
-    ? trackedCall.xPostedMilestones
-    : [];
-
-  if (postedMilestones.includes(milestoneX)) {
-    return { success: false, reason: 'already_posted' };
-  }
-
-  const hasOriginal = !!trackedCall.xOriginalPostId;
-
-  const postText = await buildXPostText(trackedCall);
-
-  let chartBuf = null;
-  if (!hasOriginal) {
-    chartBuf = await buildOhlcvCandlestickBufferForTrackedCall(trackedCall, null);
-  }
-
-  const result = await createPost(
-    postText,
-    hasOriginal ? trackedCall.xOriginalPostId : null,
-    chartBuf || undefined
-  );
-
-  if (!result.success || !result.id) {
-    return {
-      success: false,
-      reason: 'x_post_failed',
-      error: result.error || null
-    };
-  }
-
-  const updatedMilestones = [...postedMilestones, milestoneX].sort((a, b) => a - b);
-
-  const updates = {
-    xLastPostedAt: new Date().toISOString(),
-    xPostedMilestones: updatedMilestones
-  };
-
-  if (!hasOriginal) {
-    updates.xOriginalPostId = result.id;
-  } else {
-    updates.xLastReplyPostId = result.id;
-  }
-
-  setXPostState(contractAddress, updates);
-
-  return {
-    success: true,
-    milestoneX,
-    reply: hasOriginal,
-    postId: result.id
-  };
-}
-
 async function cleanupExpiredApprovals() {
   try {
     const allCalls = getAllTrackedCalls();
@@ -1936,6 +1873,51 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
       console.error('[ApprovalQueue] Interval cleanup failed:', err.message);
     });
   }, 60 * 1000);
+
+  const dmPollRaw = String(process.env.X_DM_VERIFICATION_POLL_MS ?? '').trim().toLowerCase();
+  if (dmPollRaw !== '0' && dmPollRaw !== 'false' && dmPollRaw !== 'off') {
+    try {
+      startXDmVerificationPoller(client, {
+        intervalMs: Math.max(60_000, Number(process.env.X_DM_VERIFICATION_POLL_MS) || 120_000),
+        onVerified: async ({ discordUserId, handle, dmEventId }) => {
+          const guild = getPrimaryGuildForBotAlerts(client);
+          if (guild) {
+            const member = await guild.members.fetch(discordUserId).catch(() => null);
+            if (member) {
+              await assignXVerifiedRole(member);
+            }
+
+            const verifyChannel = findXVerifyTextChannel(guild);
+            if (verifyChannel) {
+              await verifyChannel
+                .send(`✅ <@${discordUserId}> has been verified as **@${handle}** (X DM)`)
+                .catch(() => {});
+            }
+          }
+
+          try {
+            const user = await client.users.fetch(discordUserId);
+            await user
+              .send({
+                content: `✅ Your X account **@${handle}** is verified. You can set **Verified X Tag** in **!myprofile** if you want your @handle on public calls.`
+              })
+              .catch(() => {});
+          } catch (_) {
+            /* optional DM */
+          }
+
+          recordModAction({
+            moderatorId: client.user.id,
+            actionType: 'x_verify',
+            dedupeKey: `x_dm_event:${dmEventId}:${discordUserId}`
+          });
+        }
+      });
+      console.log('[XVerify/DM] Poller started (set X_DM_VERIFICATION_POLL_MS=0 to disable)');
+    } catch (e) {
+      console.error('[XVerify/DM] Failed to start poller:', e?.message || e);
+    }
+  }
 });
 
 client.on('guildMemberAdd', member => {
@@ -1990,6 +1972,26 @@ client.on('interactionCreate', async (interaction) => {
 
       if (interaction.customId === 'dev_submit_start') {
         await interaction.showModal(buildDevSubmitModal());
+        return;
+      }
+
+      if (interaction.customId === 'xverify_submit_review') {
+        const xName = getXBotUsernameForCopy();
+        const p = getUserProfileByDiscordId(interaction.user.id);
+        const submitted =
+          normalizeXHandle(p?.xVerification?.requestedHandle || p?.xHandle || '') || 'your';
+
+        await interaction.reply({
+          content: [
+            '**X verification is automatic now.** You do not need mod review.',
+            '',
+            `Open X and send your verification code in a **DM to @${xName}** from **@${submitted}** (the account you are verifying).`,
+            '',
+            'If this button is from an old message, you can ignore it — use **Connect X** on `!profile`, **#verify-x**, or the **web dashboard** (OAuth).'
+          ].join('\n'),
+          ephemeral: true
+        });
+
         return;
       }
 

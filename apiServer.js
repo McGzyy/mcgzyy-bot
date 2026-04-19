@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const { loadReferrals } = require('./utils/referralService');
@@ -14,6 +15,7 @@ const {
 } = require('./utils/trackedCallsService');
 const { listDevSubmissionsPostedToModApprovals } = require('./utils/devSubmissionService');
 const { isModOrAdminDiscordUserId } = require('./utils/modStaffGate');
+const { applyDashboardCallDecision } = require('./utils/dashboardCallApproval');
 const {
   isXOAuthConfigured,
   createXOAuthAuthorizeUrl,
@@ -22,9 +24,15 @@ const {
 const {
   completeXVerification,
   clearXAccountLink,
+  upsertUserProfile,
+  startXVerification,
   getUserProfileByDiscordId,
-  upsertUserProfile
+  normalizeXHandle,
+  isLikelyXHandle,
+  initUserProfilesStore
 } = require('./utils/userProfileService');
+const { generateXVerificationCode } = require('./utils/xVerificationCode');
+const { getXBotUsernameForCopy } = require('./utils/xPoster');
 
 const PORT = Number(process.env.REFERRAL_API_PORT || process.env.PORT || 3001);
 
@@ -89,14 +97,20 @@ function startReferralApiServer(discordClient = null) {
   app.use(express.json({ limit: '48kb' }));
 
   app.get('/health', (req, res) => {
+    const xOauth =
+      !!String(process.env.X_OAUTH2_CLIENT_ID || '').trim() &&
+      !!String(process.env.X_OAUTH2_CLIENT_SECRET || '').trim() &&
+      !!String(process.env.X_OAUTH2_REDIRECT_URI || '').trim();
     res.json({
       ok: true,
-      /** Present on builds that register GET /internal/mod-queue (dashboard mod approvals). */
       endpoints: {
         modQueueGet: true,
         internalPost: ['call', 'watch', 'x-oauth/start', 'x-oauth/complete', 'x-oauth/unlink'],
-        xOAuthConfigured: isXOAuthConfigured()
-      }
+        xOAuthConfigured: isXOAuthConfigured(),
+        xOAuth2: xOauth
+      },
+      cwd: process.cwd(),
+      loadedFrom: __filename
     });
   });
 
@@ -236,6 +250,9 @@ function startReferralApiServer(discordClient = null) {
   }
 
   function serializeDevSubmissionRow(s) {
+    const gid = s.approvalGuildId != null ? s.approvalGuildId : null;
+    const cid = s.approvalChannelId != null ? s.approvalChannelId : null;
+    const mid = s.approvalMessageId != null ? s.approvalMessageId : null;
     return {
       id: s.id,
       createdAt: s.createdAt,
@@ -247,8 +264,10 @@ function startReferralApiServer(discordClient = null) {
       coinAddresses: s.coinAddresses != null ? s.coinAddresses : null,
       tags: s.tags != null ? s.tags : null,
       notes: s.notes != null ? s.notes : null,
-      approvalMessageId: s.approvalMessageId != null ? s.approvalMessageId : null,
-      approvalChannelId: s.approvalChannelId != null ? s.approvalChannelId : null
+      approvalMessageId: mid,
+      approvalChannelId: cid,
+      approvalGuildId: gid,
+      discordJumpUrl: discordMessageJumpUrl(gid, cid, mid)
     };
   }
 
@@ -482,9 +501,222 @@ function startReferralApiServer(discordClient = null) {
     }
   });
 
+  app.post('/internal/x-verify/start', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error: 'CALL_INTERNAL_SECRET is not set on the bot host.'
+        });
+        return;
+      }
+
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const discordUserId = String(
+        req.headers['x-discord-user-id'] || req.headers['X-Discord-User-Id'] || ''
+      ).trim();
+      if (!discordUserId) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing X-Discord-User-Id header.'
+        });
+        return;
+      }
+
+      await initUserProfilesStore();
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const rawHandle = String(body.handle || body.xHandle || '').trim();
+      const handle = normalizeXHandle(rawHandle);
+
+      if (!isLikelyXHandle(handle)) {
+        res.status(400).json({
+          success: false,
+          error: 'Enter a valid X handle (letters, numbers, underscore; max 15).'
+        });
+        return;
+      }
+
+      const existing = getUserProfileByDiscordId(discordUserId);
+      if (!existing) {
+        const username = String(body.discordUsername || '').trim().slice(0, 80);
+        const displayName = String(body.displayName || '').trim().slice(0, 100);
+        upsertUserProfile({
+          discordUserId,
+          username: username || 'member',
+          displayName: displayName || username || 'member'
+        });
+      }
+
+      const code = generateXVerificationCode(discordUserId, handle);
+      startXVerification(discordUserId, handle, code);
+
+      res.json({
+        success: true,
+        handle,
+        code,
+        xBotUsername: getXBotUsernameForCopy()
+      });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'x-verify start failed';
+      console.error('[API] POST /internal/x-verify/start', msg);
+      res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+  });
+
+  app.get('/internal/x-verify/status', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error: 'CALL_INTERNAL_SECRET is not set on the bot host.'
+        });
+        return;
+      }
+
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const discordUserId = String(
+        req.headers['x-discord-user-id'] || req.headers['X-Discord-User-Id'] || ''
+      ).trim();
+      if (!discordUserId) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing X-Discord-User-Id header.'
+        });
+        return;
+      }
+
+      await initUserProfilesStore();
+
+      const profile = getUserProfileByDiscordId(discordUserId);
+      if (!profile) {
+        res.json({
+          success: true,
+          isXVerified: false,
+          xVerificationStatus: 'none',
+          requestedHandle: '',
+          verifiedXHandle: ''
+        });
+        return;
+      }
+
+      const st = String(profile.xVerification?.status || 'none').toLowerCase();
+
+      res.json({
+        success: true,
+        isXVerified: !!profile.isXVerified,
+        xVerificationStatus: st,
+        requestedHandle: normalizeXHandle(profile.xVerification?.requestedHandle || ''),
+        verifiedXHandle: normalizeXHandle(profile.verifiedXHandle || '')
+      });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'x-verify status failed';
+      console.error('[API] GET /internal/x-verify/status', msg);
+      res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+  });
+
+  app.post('/internal/mod/call-decision', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error:
+            'CALL_INTERNAL_SECRET is not set on the bot host (required for dashboard mod actions).'
+        });
+        return;
+      }
+
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      if (!discordClient || !discordClient.isReady()) {
+        res.status(503).json({
+          success: false,
+          error: 'Discord client is not ready yet; retry in a few seconds.'
+        });
+        return;
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const userId = String(body.userId || '').trim();
+      const contractAddress = String(body.contractAddress || '').trim();
+      const decision = String(body.decision || '')
+        .toLowerCase()
+        .trim();
+
+      if (!userId || !contractAddress || !decision) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing userId, contractAddress, or decision'
+        });
+        return;
+      }
+
+      if (!isModOrAdminDiscordUserId(userId)) {
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+
+      let moderatorUsername = 'moderator';
+      try {
+        const u = await discordClient.users.fetch(userId);
+        if (u && u.username) moderatorUsername = u.username;
+      } catch (_) {
+        /* non-fatal */
+      }
+
+      const result = await applyDashboardCallDecision(discordClient, {
+        contractAddress,
+        decision,
+        moderatorId: userId,
+        moderatorUsername
+      });
+
+      if (!result.success) {
+        res.status(400).json({
+          success: false,
+          error: result.error || 'Action failed'
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        discordMessageSkipped: result.discordMessageSkipped === true,
+        warning: result.warning || null,
+        xPublish: result.xPublish != null ? result.xPublish : null
+      });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'call-decision failed';
+      console.error('[API] POST /internal/mod/call-decision', msg);
+      res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+  });
+
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[API] Server listening on http://0.0.0.0:${PORT}`);
-    console.log(`[API] Health check: http://127.0.0.1:${PORT}/health (expect {"ok":true})`);
+    console.log(`[API] Loaded apiServer from: ${__filename}`);
+    console.log(`[API] process.cwd(): ${process.cwd()}`);
+    console.log(
+      `[API] Health check: http://127.0.0.1:${PORT}/health (expect ok + endpoints.modQueueGet)`
+    );
   });
 
   referralHttpServerBinding = server;

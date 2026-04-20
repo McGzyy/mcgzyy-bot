@@ -510,6 +510,50 @@ function getPrimaryGuildForBotAlerts(discordClient) {
   return values.sort((a, b) => a.id.localeCompare(b.id))[0] ?? null;
 }
 
+/**
+ * Shared by `!scanner on/off` and dashboard internal API.
+ * @returns {Promise<{ ok: boolean, error?: string, already?: boolean }>}
+ */
+async function applyScannerEnabledFromDashboard(enabled) {
+  const want = Boolean(enabled);
+  if (SCANNER_ENABLED === want) {
+    return { ok: true, already: true };
+  }
+
+  if (want) {
+    if (!client.isReady()) {
+      return { ok: false, error: 'Discord client is not ready yet; try again in a few seconds.' };
+    }
+    const firstGuild = getPrimaryGuildForBotAlerts(client);
+    const botChannel = firstGuild ? getBotCallsChannel(firstGuild) : null;
+    if (!botChannel) {
+      return { ok: false, error: 'Could not find #bot-calls channel.' };
+    }
+  }
+
+  SCANNER_ENABLED = want;
+  BOT_SETTINGS = { ...BOT_SETTINGS, scannerEnabled: want };
+  saveBotSettings(BOT_SETTINGS);
+
+  if (!client.isReady()) {
+    stopMonitoring();
+    stopAutoCallLoop();
+    return { ok: true };
+  }
+
+  const firstGuild = getPrimaryGuildForBotAlerts(client);
+  const botChannel = firstGuild ? getBotCallsChannel(firstGuild) : null;
+
+  if (want) {
+    startMonitoring(botChannel, 60000);
+    startAutoCallLoop(botChannel);
+  } else {
+    stopMonitoring();
+    stopAutoCallLoop();
+  }
+  return { ok: true };
+}
+
 async function assignXVerifiedRole(member) {
   try {
     if (!member?.guild) return false;
@@ -2590,25 +2634,15 @@ if (lowerContent === '!scanner on') {
     return;
   }
 
-  if (SCANNER_ENABLED) {
+  const result = await applyScannerEnabledFromDashboard(true);
+  if (!result.ok) {
+    await replyText(message, `❌ ${result.error || 'Could not enable scanner.'}`);
+    return;
+  }
+  if (result.already) {
     await replyText(message, '🟢 Scanner is already **ON**.');
     return;
   }
-
-  SCANNER_ENABLED = true;
-  BOT_SETTINGS.scannerEnabled = true;
-saveBotSettings(BOT_SETTINGS);
-
-  const botChannel = getBotCallsChannel(message.guild);
-
-if (!botChannel) {
-  await replyText(message, '❌ Could not find #bot-calls channel.');
-  return;
-}
-
-startMonitoring(botChannel, 60000);
-startAutoCallLoop(botChannel);
-
   await replyText(message, '🟢 Scanner **ENABLED** (monitor + auto-call running).');
   return;
 }
@@ -2619,18 +2653,15 @@ if (lowerContent === '!scanner off') {
     return;
   }
 
-  if (!SCANNER_ENABLED) {
+  const result = await applyScannerEnabledFromDashboard(false);
+  if (!result.ok) {
+    await replyText(message, `❌ ${result.error || 'Could not disable scanner.'}`);
+    return;
+  }
+  if (result.already) {
     await replyText(message, '🔴 Scanner is already **OFF**.');
     return;
   }
-
-  SCANNER_ENABLED = false;
-  BOT_SETTINGS.scannerEnabled = false;
-saveBotSettings(BOT_SETTINGS);
-
-  stopMonitoring();
-  stopAutoCallLoop();
-
   await replyText(message, '🔴 Scanner **DISABLED** (all loops stopped).');
   return;
 }
@@ -3937,7 +3968,6 @@ if (lowerContent.startsWith('!truestats')) {
 });
 
 (async function startBot() {
-  startReferralApiServer(client);
   try {
     const { initUserProfilesStore } = require('./utils/userProfileService');
     const { initTrackedDevsStore } = require('./utils/devRegistryService');
@@ -3958,6 +3988,11 @@ if (lowerContent.startsWith('!truestats')) {
     process.exitCode = 1;
     return;
   }
+
+  startReferralApiServer(client, {
+    getScannerEnabled: () => SCANNER_ENABLED,
+    applyScannerEnabled: applyScannerEnabledFromDashboard
+  });
 
   client.login(process.env.DISCORD_TOKEN);
 })();

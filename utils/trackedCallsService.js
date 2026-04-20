@@ -151,15 +151,34 @@ function getRecentBotCalls(limit = 10) {
     .slice(0, limit);
 }
 
-function getPendingApprovals(limit = 10) {
+/**
+ * @param {number} [limit]
+ * @param {{ callSourceType?: string | null, excludeCallSourceType?: string | null }} [opts]
+ */
+function getPendingApprovals(limit = 10, opts = {}) {
   const tracked = getAllTrackedCalls();
+  const wantSource =
+    opts.callSourceType != null && String(opts.callSourceType).trim()
+      ? String(opts.callSourceType).trim()
+      : null;
+  const excludeSource =
+    opts.excludeCallSourceType != null && String(opts.excludeCallSourceType).trim()
+      ? String(opts.excludeCallSourceType).trim()
+      : null;
 
   return tracked
-    .filter(call =>
-      String(call.approvalStatus || '').toLowerCase() === 'pending' &&
-      !!call.approvalRequestedAt &&
-      !!call.approvalMessageId
-    )
+    .filter(call => {
+      if (
+        String(call.approvalStatus || '').toLowerCase() !== 'pending' ||
+        !call.approvalRequestedAt ||
+        !call.approvalMessageId
+      ) {
+        return false;
+      }
+      if (wantSource && call.callSourceType !== wantSource) return false;
+      if (excludeSource && call.callSourceType === excludeSource) return false;
+      return true;
+    })
     .sort((a, b) => {
       const aTime = new Date(a.approvalRequestedAt || 0).getTime();
       const bTime = new Date(b.approvalRequestedAt || 0).getTime();

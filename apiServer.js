@@ -17,6 +17,7 @@ const {
 } = require('./utils/trackedCallsService');
 const { listDevSubmissionsPostedToModApprovals } = require('./utils/devSubmissionService');
 const { isModOrAdminDiscordUserId } = require('./utils/modStaffGate');
+const { getModActionStatsSummary } = require('./utils/modActionsService');
 const { applyDashboardCallDecision } = require('./utils/dashboardCallApproval');
 const {
   isXOAuthConfigured,
@@ -196,6 +197,7 @@ function startReferralApiServer(discordClient = null, opts = {}) {
       processUptimeSec: Math.floor(process.uptime()),
       endpoints: {
         modQueueGet: true,
+        modStatsGet: true,
         scannerState: true,
         internalPost: ['call', 'watch', 'x-oauth/start', 'x-oauth/complete', 'x-oauth/unlink'],
         xOAuthConfigured: isXOAuthConfigured(),
@@ -621,6 +623,48 @@ function startReferralApiServer(discordClient = null, opts = {}) {
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'mod-queue failed';
       console.error('[API] GET /internal/mod-queue', msg);
+      res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+  });
+
+  app.get('/internal/mod-stats', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error: 'CALL_INTERNAL_SECRET is not set on the bot host (required for dashboard mod stats).'
+        });
+        return;
+      }
+
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const userId = String(
+        req.headers['x-discord-user-id'] || req.headers['X-Discord-User-Id'] || req.query.userId || ''
+      ).trim();
+      if (!userId) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing viewer id (X-Discord-User-Id header or userId query).'
+        });
+        return;
+      }
+
+      if (!isModOrAdminDiscordUserId(userId)) {
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+
+      const summary = await getModActionStatsSummary(userId);
+      res.json({ success: true, ...summary });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'mod-stats failed';
+      console.error('[API] GET /internal/mod-stats', msg);
       res.status(500).json({ success: false, error: 'Internal Server Error' });
     }
   });

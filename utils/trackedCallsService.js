@@ -408,6 +408,11 @@ function saveTrackedCall(
 
       tokenName: scan.tokenName || existing.tokenName,
       ticker: scan.ticker || existing.ticker,
+      tokenImageUrl:
+        (scan.tokenImageUrl && String(scan.tokenImageUrl).trim()) ||
+        (scan.token?.imageUrl && String(scan.token.imageUrl).trim()) ||
+        (existing.tokenImageUrl && String(existing.tokenImageUrl).trim()) ||
+        null,
       contractAddress: scan.contractAddress || existing.contractAddress,
       latestMarketCap: scan.marketCap ?? existing.latestMarketCap,
       entryScore: scan.entryScore ?? existing.entryScore,
@@ -528,6 +533,10 @@ function saveTrackedCall(
   const trackedCallData = normalizeTrackedCall({
     tokenName: scan.tokenName,
     ticker: scan.ticker,
+    tokenImageUrl:
+      (scan.tokenImageUrl && String(scan.tokenImageUrl).trim()) ||
+      (scan.token?.imageUrl && String(scan.token.imageUrl).trim()) ||
+      null,
     contractAddress: scan.contractAddress,
     firstCalledMarketCap: scan.marketCap,
     latestMarketCap: scan.marketCap,
@@ -612,6 +621,11 @@ function reactivateTrackedCall(
     ...existing,
     tokenName: scan.tokenName || existing.tokenName,
     ticker: scan.ticker || existing.ticker,
+    tokenImageUrl:
+      (scan.tokenImageUrl && String(scan.tokenImageUrl).trim()) ||
+      (scan.token?.imageUrl && String(scan.token.imageUrl).trim()) ||
+      existing.tokenImageUrl ||
+      null,
     contractAddress: scan.contractAddress || existing.contractAddress,
     latestMarketCap: scan.marketCap ?? existing.latestMarketCap,
     entryScore: scan.entryScore ?? existing.entryScore,

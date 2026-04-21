@@ -354,6 +354,10 @@ function normalizeRealDataToScan(realData) {
   const dexTokenImageUrl =
     realData.token?.imageUrl || realData.token?.logoURI || null;
   const geckoTokenImageUrl = realData.token?.geckoImageUrl || null;
+  const flatImageUrl =
+    (dexTokenImageUrl && String(dexTokenImageUrl).trim()) ||
+    (geckoTokenImageUrl && String(geckoTokenImageUrl).trim()) ||
+    null;
 
   const tokenBlock = {};
   if (dexTokenImageUrl && String(dexTokenImageUrl).trim()) {
@@ -364,6 +368,7 @@ function normalizeRealDataToScan(realData) {
   }
 
   return {
+    tokenImageUrl: flatImageUrl,
     tokenName: realData.token?.tokenName || 'Unknown Token',
     ticker: realData.token?.ticker || 'UNKNOWN',
     contractAddress: realData.token?.contractAddress || 'Unknown',
@@ -415,9 +420,18 @@ async function refreshTrackedCallLive(contractAddress) {
     const realData = await fetchRealTokenData(contractAddress);
     const score = calculateQuickRealScore(realData);
 
+    const img =
+      realData.token?.imageUrl ||
+      realData.token?.logoURI ||
+      realData.token?.geckoImageUrl ||
+      null;
+
     updateTrackedCallData(contractAddress, {
       tokenName: realData.token?.tokenName || 'Unknown Token',
       ticker: realData.token?.ticker || 'UNKNOWN',
+      ...(img && String(img).trim()
+        ? { tokenImageUrl: String(img).trim().slice(0, 800) }
+        : {}),
       latestMarketCap: realData.market?.marketCap || 0,
       entryScore: score,
       grade: getQuickGrade(score),
@@ -1019,6 +1033,10 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
         marketCap: marketCap || 0,
         tokenName: liveScanData?.tokenName || 'Unknown Token',
         ticker: liveScanData?.ticker || 'UNKNOWN',
+        tokenImageUrl:
+          liveScanData?.tokenImageUrl ||
+          liveScanData?.token?.imageUrl ||
+          null,
         latestMarketCap: marketCap || 0,
         entryScore: liveScanData?.entryScore || 0,
         grade: liveScanData?.grade || 'N/A',
@@ -1055,6 +1073,11 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
           marketCap: marketCap || 0,
           tokenName: liveScanData?.tokenName || existingCall.tokenName,
           ticker: liveScanData?.ticker || existingCall.ticker,
+          tokenImageUrl:
+            liveScanData?.tokenImageUrl ||
+            liveScanData?.token?.imageUrl ||
+            existingCall.tokenImageUrl ||
+            null,
           latestMarketCap: marketCap || existingCall.latestMarketCap || 0,
           entryScore: liveScanData?.entryScore || existingCall.entryScore || 0,
           grade: liveScanData?.grade || existingCall.grade || 'N/A',
@@ -1082,6 +1105,11 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
           marketCap: marketCap || 0,
           tokenName: liveScanData?.tokenName || existingCall.tokenName,
           ticker: liveScanData?.ticker || existingCall.ticker,
+          tokenImageUrl:
+            liveScanData?.tokenImageUrl ||
+            liveScanData?.token?.imageUrl ||
+            existingCall.tokenImageUrl ||
+            null,
           latestMarketCap: marketCap || existingCall.latestMarketCap || 0,
           entryScore: liveScanData?.entryScore || existingCall.entryScore || 0,
           grade: liveScanData?.grade || existingCall.grade || 'N/A',
@@ -1104,6 +1132,11 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
       updateTrackedCallData(contractAddress, {
         tokenName: liveScanData?.tokenName || existingCall.tokenName,
         ticker: liveScanData?.ticker || existingCall.ticker,
+        tokenImageUrl:
+          (liveScanData?.tokenImageUrl && String(liveScanData.tokenImageUrl).trim()) ||
+          (liveScanData?.token?.imageUrl && String(liveScanData.token.imageUrl).trim()) ||
+          existingCall.tokenImageUrl ||
+          null,
         latestMarketCap: marketCap || existingCall.latestMarketCap || 0,
         entryScore: liveScanData?.entryScore || existingCall.entryScore || 0,
         grade: liveScanData?.grade || existingCall.grade || 'N/A',

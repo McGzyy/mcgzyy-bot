@@ -41,6 +41,22 @@ function callerRoleForDiscordId(discordId) {
   return 'user';
 }
 
+function snapshotMcUsd(tracked) {
+  const mcRaw = Number(
+    tracked.firstCalledMarketCap || tracked.latestMarketCap || 0
+  );
+  return Number.isFinite(mcRaw) && mcRaw > 0 ? mcRaw : null;
+}
+
+function snapshotImageUrl(tracked) {
+  const u = String(tracked.tokenImageUrl || '').trim();
+  return u ? u.slice(0, 800) : null;
+}
+
+function rowSourceFromTracked(tracked) {
+  return tracked.callSourceType === 'bot_call' ? 'bot' : 'user';
+}
+
 /**
  * Insert a dashboard leaderboard row for a fresh user call (same contract as
  * `call_performance` consumed by mcgbot-dashboard). Requires service role on the bot host.
@@ -78,20 +94,20 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
 
   const tokenNameRaw = String(tracked.tokenName || '').trim();
   const tokenTickerRaw = String(tracked.ticker || '').trim();
-  const mcRaw = Number(tracked.firstCalledMarketCap || 0);
-  const callMc =
-    Number.isFinite(mcRaw) && mcRaw > 0 ? mcRaw : null;
+  const callMc = snapshotMcUsd(tracked);
+  const tokenImageUrl = snapshotImageUrl(tracked);
 
   const row = {
     discord_id: discordId,
     username: username || 'Unknown',
     ath_multiple: computeAthMultiple(tracked),
-    source: 'user',
+    source: rowSourceFromTracked(tracked),
     call_time: callTimeMsFromTracked(tracked),
     call_ca: contract,
     token_name: tokenNameRaw ? tokenNameRaw.slice(0, 160) : null,
     token_ticker: tokenTickerRaw ? tokenTickerRaw.slice(0, 48) : null,
     call_market_cap_usd: callMc,
+    token_image_url: tokenImageUrl,
     message_url:
       typeof opts.messageUrl === 'string' && opts.messageUrl.trim()
         ? opts.messageUrl.trim().slice(0, 500)
@@ -124,7 +140,7 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
 }
 
 /**
- * Push latest ATH multiple to Supabase for mirrored user calls.
+ * Push latest ATH + token snapshot fields to Supabase for mirrored user calls.
  * @param {string} contractAddress
  */
 async function updateUserCallPerformanceAth(contractAddress) {
@@ -138,14 +154,24 @@ async function updateUserCallPerformanceAth(contractAddress) {
   if (!rowId) return;
 
   const mult = computeAthMultiple(tracked);
-  const { error } = await sb
-    .from('call_performance')
-    .update({ ath_multiple: mult })
-    .eq('id', rowId);
+  const tokenNameRaw = String(tracked.tokenName || '').trim();
+  const tokenTickerRaw = String(tracked.ticker || '').trim();
+  const callMc = snapshotMcUsd(tracked);
+  const tokenImageUrl = snapshotImageUrl(tracked);
+
+  const patch = {
+    ath_multiple: mult,
+    token_name: tokenNameRaw ? tokenNameRaw.slice(0, 160) : null,
+    token_ticker: tokenTickerRaw ? tokenTickerRaw.slice(0, 48) : null,
+    call_market_cap_usd: callMc,
+    token_image_url: tokenImageUrl
+  };
+
+  const { error } = await sb.from('call_performance').update(patch).eq('id', rowId);
 
   if (error) {
     console.error(
-      '[CallPerformanceSync] update ath failed:',
+      '[CallPerformanceSync] update row failed:',
       contractAddress,
       error.message || error
     );

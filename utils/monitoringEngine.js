@@ -35,7 +35,8 @@ const {
   getLifecycleChangeReason
 } = require('./lifecycleEngine');
 
-let monitoringInterval = null;
+let monitoringIntervalUser = null;
+let monitoringIntervalBot = null;
 let isRunning = false;
 
 /**
@@ -719,14 +720,27 @@ function isSuccessfulMarketScan(scan) {
  * =========================
  */
 
-async function checkTrackedCoins(channel) {
+/**
+ * @param {'user' | 'bot' | 'all'} [sourceBucket]
+ */
+async function checkTrackedCoins(channel, sourceBucket = 'all') {
   const tracked = getAllTrackedCalls();
-  const activeCoins = tracked.filter(
-    coin => coin.lifecycleStatus !== 'archived' && coin.isActive !== false
-  );
+  const activeCoins = tracked.filter(coin => {
+    if (coin.lifecycleStatus === 'archived' || coin.isActive === false) {
+      return false;
+    }
+    const src = String(coin.callSourceType || 'user_call');
+    if (sourceBucket === 'user') {
+      return src === 'user_call' || src === 'watch_only';
+    }
+    if (sourceBucket === 'bot') {
+      return src === 'bot_call';
+    }
+    return true;
+  });
 
   console.log(
-    `[Monitor] Checking ${activeCoins.length} active coins (${tracked.length} total tracked)`
+    `[Monitor] Checking ${activeCoins.length} active ${sourceBucket} coins (${tracked.length} total tracked)`
   );
 
   for (const coin of activeCoins) {
@@ -944,24 +958,53 @@ if (lifecycleStatus === 'archived') {
  * =========================
  */
 
-function startMonitoring(channel, intervalMs = 60000) {
+/**
+ * @param {import('discord.js').TextChannel} channel
+ * @param {number | { userIntervalMs?: number; botIntervalMs?: number }} [intervalOrOpts]
+ *        Legacy: single number = both buckets use same interval (old behavior).
+ */
+function startMonitoring(channel, intervalOrOpts = {}) {
   if (isRunning) return;
 
   isRunning = true;
 
-  console.log(`[Monitor] Running every ${intervalMs / 1000}s`);
+  let userMs = 30000;
+  let botMs = 60000;
 
-  checkTrackedCoins(channel);
+  if (typeof intervalOrOpts === 'number' && Number.isFinite(intervalOrOpts) && intervalOrOpts > 0) {
+    userMs = intervalOrOpts;
+    botMs = intervalOrOpts;
+  } else if (intervalOrOpts && typeof intervalOrOpts === 'object') {
+    const u = Number(intervalOrOpts.userIntervalMs);
+    const b = Number(intervalOrOpts.botIntervalMs);
+    if (Number.isFinite(u) && u >= 5000) userMs = u;
+    if (Number.isFinite(b) && b >= 5000) botMs = b;
+  }
 
-  monitoringInterval = setInterval(() => {
-    checkTrackedCoins(channel);
-  }, intervalMs);
+  console.log(
+    `[Monitor] User/watch bucket every ${userMs / 1000}s, bot bucket every ${botMs / 1000}s`
+  );
+
+  void checkTrackedCoins(channel, 'user');
+  void checkTrackedCoins(channel, 'bot');
+
+  monitoringIntervalUser = setInterval(() => {
+    void checkTrackedCoins(channel, 'user');
+  }, userMs);
+
+  monitoringIntervalBot = setInterval(() => {
+    void checkTrackedCoins(channel, 'bot');
+  }, botMs);
 }
 
 function stopMonitoring() {
-  if (monitoringInterval) {
-    clearInterval(monitoringInterval);
-    monitoringInterval = null;
+  if (monitoringIntervalUser) {
+    clearInterval(monitoringIntervalUser);
+    monitoringIntervalUser = null;
+  }
+  if (monitoringIntervalBot) {
+    clearInterval(monitoringIntervalBot);
+    monitoringIntervalBot = null;
   }
 
   isRunning = false;

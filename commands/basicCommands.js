@@ -4,7 +4,8 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  WebhookClient
 } = require('discord.js');
 
 const { generateFakeScan, generateBatchScans } = require('../utils/scannerEngine');
@@ -1226,7 +1227,8 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
   return {
     trackedCall,
     wasNewCall,
-    wasReactivated
+    wasReactivated,
+    wasUpgradedToUserCall
   };
 }
 
@@ -1311,8 +1313,59 @@ function isUserCallsWebhookUrl(raw) {
 }
 
 /**
- * Dashboard "Submit call" — same pipeline as `!call` in #user-calls, optionally
- * preceded by a webhook line so it looks like the member typed `!call <ca>`.
+ * When `DISCORD_USER_CALLS_WEBHOOK_URL` is set, post the call/watch embed **as the
+ * member** (username + avatar) via webhook instead of `channel.send` as the bot.
+ * @param {string} webhookUrl
+ * @param {import('discord.js').GuildMember} member
+ * @param {import('discord.js').GuildTextBasedChannel} channel
+ * @param {object} payload Discord.js message payload (content, embeds, components, …)
+ * @returns {Promise<{ id: string, channel: import('discord.js').GuildTextBasedChannel, guild: import('discord.js').Guild|null, edit: Function }>}
+ */
+async function sendUserCallsChannelPayloadAsMember(webhookUrl, member, channel, payload) {
+  const displayName =
+    member.displayName ||
+    member.user.globalName ||
+    member.user.username;
+  const avatarURL = member.user.displayAvatarURL({ extension: 'png', size: 256 });
+  const username = String(displayName).slice(0, 80);
+
+  const hook = new WebhookClient({ url: webhookUrl.trim() });
+  const sent = await hook.send({
+    content: payload.content ?? undefined,
+    embeds: payload.embeds ?? [],
+    components: payload.components,
+    files: payload.files,
+    username,
+    avatarURL,
+    allowedMentions: { parse: [] }
+  });
+  const id = sent?.id ? String(sent.id) : '';
+  if (!id) {
+    try {
+      hook.destroy();
+    } catch (_) {
+      /* ignore */
+    }
+    throw new Error('Webhook send returned no message id');
+  }
+  return {
+    id,
+    channel,
+    guild: channel.guild ?? null,
+    edit(editPayload) {
+      return hook.editMessage(id, {
+        ...editPayload,
+        username,
+        avatarURL
+      });
+    }
+  };
+}
+
+/**
+ * Dashboard "Submit call" — same pipeline as `!call` in #user-calls. When
+ * `DISCORD_USER_CALLS_WEBHOOK_URL` is configured, the status line + embed post **as
+ * the caller** (webhook username/avatar), not as McGBot.
  * @param {import('discord.js').Client} client
  * @param {{ userId: string, contractAddress: string, webhookUrl?: string | null }} opts
  */
@@ -1359,56 +1412,32 @@ async function handleCallFromDashboard(client, opts) {
     throw new Error('That Discord account is not a member of this server');
   }
 
-  let triggerMessageId = null;
-  if (webhookUrl && isUserCallsWebhookUrl(webhookUrl)) {
-    const displayName =
-      member.displayName ||
-      member.user.globalName ||
-      member.user.username;
-    const avatarUrl = member.user.displayAvatarURL({ extension: 'png', size: 256 });
-    const whBody = JSON.stringify({
-      content: `!call ${contractAddress}`,
-      username: String(displayName).slice(0, 80),
-      avatar_url: avatarUrl,
-      allowed_mentions: { parse: [] }
-    });
-    const whUrl = webhookUrl.includes('?')
-      ? `${webhookUrl}&wait=true`
-      : `${webhookUrl}?wait=true`;
-    const whRes = await fetch(whUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: whBody
-    });
-    if (!whRes.ok) {
-      const txt = await whRes.text().catch(() => '');
-      throw new Error(`User-calls webhook failed (${whRes.status}): ${txt}`.trim());
-    }
-    const whJson = await whRes.json().catch(() => null);
-    triggerMessageId = whJson && whJson.id ? String(whJson.id) : null;
-  }
+  const useWebhook = Boolean(webhookUrl && isUserCallsWebhookUrl(webhookUrl));
 
   const messageStub = {
-    id: triggerMessageId || 'dashboard',
+    id: 'dashboard',
     author: member.user,
     member,
     channel,
     guild,
     content: `!call ${contractAddress}`,
     async reply(payload) {
-      const out = { ...payload };
-      if (triggerMessageId) {
-        out.reply = { messageReference: triggerMessageId, failIfNotExists: false };
-      }
-      try {
-        return await channel.send(out);
-      } catch (err) {
-        if (triggerMessageId && out.reply) {
-          delete out.reply;
-          return channel.send(out);
+      if (useWebhook) {
+        try {
+          return await sendUserCallsChannelPayloadAsMember(
+            webhookUrl,
+            member,
+            channel,
+            payload
+          );
+        } catch (err) {
+          console.error(
+            '[handleCallFromDashboard] webhook send failed, falling back to bot:',
+            err?.message || err
+          );
         }
-        throw err;
       }
+      return channel.send(payload);
     }
   };
 
@@ -1416,8 +1445,8 @@ async function handleCallFromDashboard(client, opts) {
 }
 
 /**
- * Dashboard "Watch" (public) — same pipeline as `!watch` in #user-calls, optionally
- * preceded by a webhook line so it looks like the member typed `!watch <ca>`.
+ * Dashboard "Watch" (public) — same pipeline as `!watch` in #user-calls. When the
+ * user-calls webhook URL is set, the reply posts **as the member**, not as McGBot.
  * @param {import('discord.js').Client} client
  * @param {{ userId: string, contractAddress: string, webhookUrl?: string | null }} opts
  */
@@ -1464,56 +1493,32 @@ async function handleWatchFromDashboard(client, opts) {
     throw new Error('That Discord account is not a member of this server');
   }
 
-  let triggerMessageId = null;
-  if (webhookUrl && isUserCallsWebhookUrl(webhookUrl)) {
-    const displayName =
-      member.displayName ||
-      member.user.globalName ||
-      member.user.username;
-    const avatarUrl = member.user.displayAvatarURL({ extension: 'png', size: 256 });
-    const whBody = JSON.stringify({
-      content: `!watch ${contractAddress}`,
-      username: String(displayName).slice(0, 80),
-      avatar_url: avatarUrl,
-      allowed_mentions: { parse: [] }
-    });
-    const whUrl = webhookUrl.includes('?')
-      ? `${webhookUrl}&wait=true`
-      : `${webhookUrl}?wait=true`;
-    const whRes = await fetch(whUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: whBody
-    });
-    if (!whRes.ok) {
-      const txt = await whRes.text().catch(() => '');
-      throw new Error(`User-calls webhook failed (${whRes.status}): ${txt}`.trim());
-    }
-    const whJson = await whRes.json().catch(() => null);
-    triggerMessageId = whJson && whJson.id ? String(whJson.id) : null;
-  }
+  const useWebhook = Boolean(webhookUrl && isUserCallsWebhookUrl(webhookUrl));
 
   const messageStub = {
-    id: triggerMessageId || 'dashboard-watch',
+    id: 'dashboard-watch',
     author: member.user,
     member,
     channel,
     guild,
     content: `!watch ${contractAddress}`,
     async reply(payload) {
-      const out = { ...payload };
-      if (triggerMessageId) {
-        out.reply = { messageReference: triggerMessageId, failIfNotExists: false };
-      }
-      try {
-        return await channel.send(out);
-      } catch (err) {
-        if (triggerMessageId && out.reply) {
-          delete out.reply;
-          return channel.send(out);
+      if (useWebhook) {
+        try {
+          return await sendUserCallsChannelPayloadAsMember(
+            webhookUrl,
+            member,
+            channel,
+            payload
+          );
+        } catch (err) {
+          console.error(
+            '[handleWatchFromDashboard] webhook send failed, falling back to bot:',
+            err?.message || err
+          );
         }
-        throw err;
       }
+      return channel.send(payload);
     }
   };
 

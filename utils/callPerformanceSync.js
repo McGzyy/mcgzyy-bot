@@ -76,6 +76,12 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
     .trim()
     .slice(0, 80);
 
+  const tokenNameRaw = String(tracked.tokenName || '').trim();
+  const tokenTickerRaw = String(tracked.ticker || '').trim();
+  const mcRaw = Number(tracked.firstCalledMarketCap || 0);
+  const callMc =
+    Number.isFinite(mcRaw) && mcRaw > 0 ? mcRaw : null;
+
   const row = {
     discord_id: discordId,
     username: username || 'Unknown',
@@ -83,6 +89,9 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
     source: 'user',
     call_time: callTimeMsFromTracked(tracked),
     call_ca: contract,
+    token_name: tokenNameRaw ? tokenNameRaw.slice(0, 160) : null,
+    token_ticker: tokenTickerRaw ? tokenTickerRaw.slice(0, 48) : null,
+    call_market_cap_usd: callMc,
     message_url:
       typeof opts.messageUrl === 'string' && opts.messageUrl.trim()
         ? opts.messageUrl.trim().slice(0, 500)

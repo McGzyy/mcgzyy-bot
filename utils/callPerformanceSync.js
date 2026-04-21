@@ -23,11 +23,12 @@ function computeAthMultiple(tracked) {
   return Number(x.toFixed(4));
 }
 
-function callTimeIsoFromTracked(tracked) {
+/** DB `call_performance.call_time` is BIGINT (UTC epoch ms), not timestamptz. */
+function callTimeMsFromTracked(tracked) {
   const raw = tracked.firstCalledAt;
   const ms = raw ? new Date(raw).getTime() : Date.now();
   const t = Number.isFinite(ms) ? ms : Date.now();
-  return new Date(t).toISOString();
+  return Math.round(t);
 }
 
 function callerRoleForDiscordId(discordId) {
@@ -80,7 +81,7 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
     username: username || 'Unknown',
     ath_multiple: computeAthMultiple(tracked),
     source: 'user',
-    call_time: callTimeIsoFromTracked(tracked),
+    call_time: callTimeMsFromTracked(tracked),
     call_ca: contract,
     message_url:
       typeof opts.messageUrl === 'string' && opts.messageUrl.trim()

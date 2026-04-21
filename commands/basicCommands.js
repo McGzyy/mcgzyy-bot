@@ -59,6 +59,49 @@ function formatCompactUsd(value) {
   return `$${num.toFixed(0)}`;
 }
 
+function dexscreenerTokenUrl(contractAddress) {
+  if (!contractAddress) return null;
+  return `https://dexscreener.com/solana/${contractAddress}`;
+}
+
+function buildEliteCallLinkButtons(scan) {
+  const ca = typeof scan?.contractAddress === 'string' ? scan.contractAddress.trim() : '';
+  if (!ca) return null;
+
+  const buttons = [];
+  const dex = dexscreenerTokenUrl(ca);
+  if (dex) buttons.push(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Dex').setURL(dex));
+
+  buttons.push(
+    new ButtonBuilder()
+      .setStyle(ButtonStyle.Link)
+      .setLabel('Trade')
+      .setURL(`https://trade.padre.gg/trade/solana/${ca}`)
+  );
+  buttons.push(
+    new ButtonBuilder()
+      .setStyle(ButtonStyle.Link)
+      .setLabel('GMGN')
+      .setURL(`https://gmgn.ai/sol/token/${ca}`)
+  );
+
+  if (buttons.length === 0) return null;
+  return new ActionRowBuilder().addComponents(buttons.slice(0, 5));
+}
+
+function buildCallBadgesLine(scan) {
+  const badges = [];
+  if (scan?.callSourceType === 'bot_call') badges.push('🤖 BOT CALL');
+  else if (scan?.callSourceType === 'watch_only') badges.push('👀 WATCH');
+  else badges.push('👤 USER CALL');
+
+  if (scan?.excludedFromStats === true || scan?.excluded_from_stats === true || scan?.excluded_from_stats === true) {
+    badges.push('⛔ EXCLUDED');
+  }
+
+  return badges.length ? `**${badges.join(' · ')}**` : '';
+}
+
 function formatPercent(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
   return `${Number(value).toFixed(1)}%`;
@@ -800,46 +843,61 @@ function createTraderScanEmbed(scan, options = {}) {
     `• Status: ${formatValue(scan.status, 'N/A')} · Conviction: ${formatValue(scan.conviction, 'N/A')}`
   ];
 
-  const sections = [];
+  const ca = formatValue(scan.contractAddress, 'Unknown');
+  const overviewLine = [
+    `**MC** ${formatUsd(scan.marketCap)}`,
+    `**Liq** ${formatUsd(scan.liquidity)}`,
+    `**Vol 5m** ${formatUsd(scan.volume5m)}`,
+    `**Age** ${formatAgeMinutes(scan.ageMinutes)}`
+  ].join('  │  ');
 
-  sections.push(`💰 ${formatUsd(scan.marketCap)} MC`);
-  if (metaBlock.trim()) {
-    sections.push(metaBlock.trimEnd());
-  }
-
-  sections.push(`🧠 **Signal**\n${signalLines.join('\n')}`);
-  sections.push(`📊 **Market Snapshot**\n${snapshotLines.join('\n')}`);
-  sections.push(`📈 **Trade Strength**\n${tradeLines.join('\n')}`);
-  sections.push(`🎯 **Verdict**\n${verdictLines.join('\n')}`);
-
-  if ((scan.greenFlags && scan.greenFlags.length) || (scan.redFlags && scan.redFlags.length)) {
-    const flagLines = [];
-    if (scan.greenFlags?.length) flagLines.push(`🟢\n${formatReasonList(scan.greenFlags)}`);
-    if (scan.redFlags?.length) flagLines.push(`🔴\n${formatReasonList(scan.redFlags)}`);
-    sections.push(`⚠️ **Flags**\n${flagLines.join('\n\n')}`);
-  }
-
-  const links = buildLinksLine([
-    scan.website ? `[Website](${scan.website})` : null,
-    scan.twitter ? `[X / Twitter](${scan.twitter})` : null,
-    scan.telegram ? `[Telegram](${scan.telegram})` : null
-  ]);
-
-  const linkBlock = [`\`${formatValue(scan.contractAddress, 'Unknown')}\``];
-  if (links) linkBlock.push(links);
-  sections.push(`🔗 **Links / Trade**\n${linkBlock.join('\n')}`);
+  const badgeLine = buildCallBadgesLine(scan);
 
   const embed = new EmbedBuilder()
-    .setColor(0x00ff99)
+    .setColor(0x22d3ee)
     .setTitle(`🚀 ${tokenNameUpper} ($${tickerUpper})`)
-    .setDescription(sections.join('\n\n'))
-    .setFooter({ text: 'Crypto Scanner Bot • Trader Scan' })
+    .setDescription(
+      [
+        badgeLine ? `${badgeLine}\n` : null,
+        metaBlock.trim() ? metaBlock.trimEnd() : null,
+        overviewLine,
+        options.chartPending ? '_Chart: loading…_' : null
+      ].filter(Boolean).join('\n')
+    )
+    .addFields(
+      {
+        name: '🧠 Signal',
+        value: signalLines.join('\n'),
+        inline: true
+      },
+      {
+        name: '📊 Snapshot',
+        value: snapshotLines.join('\n'),
+        inline: true
+      },
+      {
+        name: '🎯 Verdict',
+        value: verdictLines.join('\n'),
+        inline: false
+      },
+      {
+        name: '🧾 Contract',
+        value: `\`${ca}\``,
+        inline: false
+      }
+    )
+    .setFooter({ text: 'McGBot • Call intel' })
     .setTimestamp();
 
   applyScanThumbnailToEmbed(embed, scan);
 
   if (options.chartImageUrl) {
     embed.setImage(options.chartImageUrl);
+  }
+
+  const buttons = buildEliteCallLinkButtons(scan);
+  if (buttons) {
+    embed._eliteButtons = buttons;
   }
 
   return embed;
@@ -904,17 +962,27 @@ async function hydrateCallWatchChartMessage(message, scan, embedOptions = {}) {
     });
 
     if (!buf) {
-      await message.edit({ embeds: [embed] });
+      const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
+      await message.edit({
+        embeds: [embed],
+        ...(eliteRow ? { components: [eliteRow] } : {})
+      });
       return;
     }
 
     const file = new AttachmentBuilder(buf, { name: 'chart.png' });
+    const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
     const editPayload = {
       embeds: [embed],
       files: [file]
     };
     if (usedOhlcvCandlestick) {
-      editPayload.components = buildOhlcvTimeframeRows(scan.contractAddress, '5m');
+      editPayload.components = [
+        ...(eliteRow ? [eliteRow] : []),
+        ...buildOhlcvTimeframeRows(scan.contractAddress, '5m')
+      ];
+    } else if (eliteRow) {
+      editPayload.components = [eliteRow];
     }
     await message.edit(editPayload);
   } catch (err) {
@@ -1509,9 +1577,11 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
         ? '📍 Upgraded — moved from watchlist to an official call.'
         : '🧠 This coin has already been called.';
 
+  const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
   const reply = await message.reply({
     content: replyContent,
-    embeds: [embed]
+    embeds: [embed],
+    ...(eliteRow ? { components: [eliteRow] } : {})
   });
 
   const freshTracked = getTrackedCall(contractAddress) || trackedCall;

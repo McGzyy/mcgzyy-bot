@@ -191,15 +191,23 @@ async function hydrateAutoCallChartMessage(message, scan, profileName) {
     });
 
     if (!buf) {
-      await message.edit({ embeds: [embed] });
+      const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
+      await message.edit({
+        embeds: [embed],
+        ...(eliteRow ? { components: [eliteRow] } : {})
+      });
       return;
     }
 
     const file = new AttachmentBuilder(buf, { name: 'chart.png' });
+    const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
     await message.edit({
       embeds: [embed],
       files: [file],
-      components: buildOhlcvTimeframeRows(scan.contractAddress, '5m')
+      components: [
+        ...(eliteRow ? [eliteRow] : []),
+        ...buildOhlcvTimeframeRows(scan.contractAddress, '5m')
+      ]
     });
   } catch (err) {
     console.error('[AutoCallChart]', scan.contractAddress, err.message);
@@ -209,7 +217,11 @@ async function hydrateAutoCallChartMessage(message, scan, profileName) {
 async function postBotCallScan(channel, scan, profileName) {
   enqueueAlert(async () => {
     const embed = createAutoCallEmbed(scan, profileName, { chartPending: true });
-    const sentMessage = await channel.send({ embeds: [embed] });
+    const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
+    const sentMessage = await channel.send({
+      embeds: [embed],
+      ...(eliteRow ? { components: [eliteRow] } : {})
+    });
 
     const tracked = trackAutoCall(scan);
     if (tracked && sentMessage?.id) {

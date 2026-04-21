@@ -31,6 +31,8 @@ This document defines the **database contract** used by the Next.js dashboard in
 |--------|------|----------|------|
 | `bio` | TEXT | YES | User editable. |
 | `banner_url` | TEXT | YES | User editable. |
+| `banner_crop_x` | SMALLINT | YES | Banner focal X percent (0..100). |
+| `banner_crop_y` | SMALLINT | YES | Banner focal Y percent (0..100). |
 | `x_handle` | TEXT | YES | Stored without leading `@`. |
 | `x_verified` | BOOLEAN | NO | Defaults false. |
 
@@ -72,6 +74,22 @@ Unique constraint/index: `(user_id, timeframe, period_start_ms)`
 
 ---
 
+## `public.user_milestone_trophies`
+
+Permanent profile trophies (e.g. “10× club”), **one row per user per `milestone_key`**.
+
+| Column | Type | Notes |
+|--------|------|------|
+| `user_id` | TEXT | Discord snowflake. |
+| `milestone_key` | TEXT | Stable id, e.g. `call_club_10x`, `call_club_25x`, `call_club_50x`. |
+| `call_performance_id` | UUID | Optional FK to the call that first unlocked the row. |
+| `created_at` | TIMESTAMPTZ | Insert time. |
+
+Unique constraint: `(user_id, milestone_key)`  
+**Award path:** repo root `utils/callPerformanceSync.js` upserts after eligible `call_performance` user-call inserts/ATH updates (`source = user`, not stats-excluded).
+
+---
+
 ## `public.user_badges`
 
 | Column | Type | Notes |
@@ -81,6 +99,81 @@ Unique constraint/index: `(user_id, timeframe, period_start_ms)`
 | `created_at` | TIMESTAMPTZ | Insert time. |
 
 Unique constraint: `(user_id, badge)`
+
+---
+
+## `public.user_inbox_notifications`
+
+Persistent notifications shown in the dashboard **TopBar bell** (distinct from ephemeral toast notifications).
+
+| Column | Type | Notes |
+|--------|------|------|
+| `id` | UUID | Primary key. |
+| `user_id` | TEXT | Discord snowflake (matches `users.discord_id`). |
+| `title` | TEXT | Short subject line. |
+| `body` | TEXT | Message body. |
+| `kind` | TEXT | Free-form discriminator (e.g. `bug_closed`). |
+| `created_at` | TIMESTAMPTZ | Insert time. |
+| `read_at` | TIMESTAMPTZ | Null = unread. |
+
+Indexes:
+- `(user_id, created_at desc)`
+- Partial unread index on `(user_id)` where `read_at is null`
+
+---
+
+## `public.user_profile_reports`
+
+Reports against a user profile (rugs, harassment, impersonation, etc). Reviewed by staff.
+
+| Column | Type | Notes |
+|--------|------|------|
+| `reporter_user_id` | TEXT | Discord snowflake for reporter. |
+| `target_user_id` | TEXT | Discord snowflake for the reported profile. |
+| `reason` | TEXT | Short reason code/label. |
+| `details` | TEXT | Optional free text. |
+| `evidence_urls` | JSONB | Optional array of URLs (one per line in UI). |
+| `status` | TEXT | `open` / `reviewing` / `resolved` / `rejected`. |
+| `staff_notes` | TEXT | Internal notes. |
+| `reviewed_by_discord_id` | TEXT | Staff Discord id (nullable). |
+| `reviewed_at` | TIMESTAMPTZ | Nullable. |
+
+---
+
+## `public.call_reports`
+
+Reports against a `call_performance` row (scam/rug/bundle). Reviewed by staff; may result in excluding the call from stats.
+
+| Column | Type | Notes |
+|--------|------|------|
+| `reporter_user_id` | TEXT | Reporter Discord id. |
+| `call_performance_id` | UUID | FK to `public.call_performance(id)` (cascade delete). |
+| `reason` | TEXT | Short reason code/label. |
+| `details` | TEXT | Optional free text. |
+| `evidence_urls` | JSONB | Optional array of URLs. |
+| `status` | TEXT | `open` / `reviewing` / `resolved` / `rejected`. |
+| `staff_notes` | TEXT | Internal notes. |
+| `reviewed_by_discord_id` | TEXT | Staff Discord id (nullable). |
+| `reviewed_at` | TIMESTAMPTZ | Nullable. |
+
+---
+
+## `public.bug_reports`
+
+User submitted bug reports. Closing a bug should send a `user_inbox_notifications` row to the reporter.
+
+| Column | Type | Notes |
+|--------|------|------|
+| `reporter_user_id` | TEXT | Reporter Discord id. |
+| `title` | TEXT | Short title. |
+| `description` | TEXT | Full description. |
+| `reproduction_steps` | TEXT | Optional. |
+| `page_url` | TEXT | Optional page where bug happened. |
+| `screenshot_urls` | JSONB | Optional array of URLs. |
+| `status` | TEXT | `open` / `triaged` / `closed`. |
+| `staff_notes` | TEXT | Internal notes. |
+| `closed_at` | TIMESTAMPTZ | Nullable. |
+| `closed_by_discord_id` | TEXT | Nullable. |
 
 ---
 

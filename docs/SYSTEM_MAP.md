@@ -48,8 +48,18 @@ User actions and runtime events map to handlers as below. Paths are repo-relativ
 | Follow/unfollow | `POST/DELETE /api/follow` | `mcgbot-dashboard/app/api/follow/route.ts` |
 | Fetch follow stats | `GET /api/follow?userId=...` | `mcgbot-dashboard/app/api/follow/route.ts` |
 | Fetch trophies | `GET /api/user/[id]/trophies` | `mcgbot-dashboard/app/api/user/[id]/trophies/route.ts` |
+| Fetch milestone trophies | `GET /api/user/[id]/milestone-trophies` | `mcgbot-dashboard/app/api/user/[id]/milestone-trophies/route.ts` |
 | Fetch badges (single) | `GET /api/user/[id]/badges` | `mcgbot-dashboard/app/api/user/[id]/badges/route.ts` |
 | Fetch badges (batch) | `POST /api/badges` | `mcgbot-dashboard/app/api/badges/route.ts` |
+| Load inbox (bell) | `GET /api/me/inbox` | `mcgbot-dashboard/app/api/me/inbox/route.ts` |
+| Mark inbox read | `PATCH /api/me/inbox` | `mcgbot-dashboard/app/api/me/inbox/route.ts` |
+| Submit profile report | `POST /api/report/profile` | `mcgbot-dashboard/app/api/report/profile/route.ts` |
+| Submit call report | `POST /api/report/call` | `mcgbot-dashboard/app/api/report/call/route.ts` |
+| Submit bug report | `POST /api/report/bug` | `mcgbot-dashboard/app/api/report/bug/route.ts` |
+| Staff review profile reports | `GET/PATCH /api/mod/reports/profile` | `mcgbot-dashboard/app/api/mod/reports/profile/route.ts`, `mcgbot-dashboard/app/moderation/page.tsx` |
+| Staff review call reports | `GET/PATCH /api/mod/reports/call` | `mcgbot-dashboard/app/api/mod/reports/call/route.ts`, `mcgbot-dashboard/app/moderation/page.tsx` |
+| Staff exclude call from stats | `PATCH /api/mod/calls/[id]/exclusion` | `mcgbot-dashboard/app/api/mod/calls/[id]/exclusion/route.ts` |
+| Admin review/close bugs | `GET/PATCH /api/admin/bugs` | `mcgbot-dashboard/app/api/admin/bugs/route.ts`, `mcgbot-dashboard/app/admin/bugs/page.tsx` |
 
 ---
 

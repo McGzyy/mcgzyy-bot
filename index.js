@@ -157,11 +157,28 @@ const client = new Client({
 const devEditSessions = new Map();
 const DEV_EDIT_SESSION_TTL_MS = 10 * 60 * 1000;
 
+// Human verification (server gate) — keep this fast and low-friction.
+const HUMAN_VERIFY_CHANNEL_NAME = 'verification';
+const HUMAN_VERIFIED_ROLE_ID = '1482446226027843757';
+const HUMAN_VERIFY_TTL_MS = 5 * 60 * 1000;
+const HUMAN_VERIFY_LOCK_MS = 60 * 1000;
+/** @type {Map<string, { a: number, b: number, answer: number, exp: number, attempts: number, lockedUntil: number }>} */
+const humanVerifyChallenges = new Map();
+
 const X_VERIFY_CHANNEL_NAME = 'verify-x';
 const X_VERIFY_CHANNEL_SLUGS = new Set(['verify-x', 'x-verify']);
 
 function isXVerifyChannelSlug(name) {
   return X_VERIFY_CHANNEL_SLUGS.has(String(name || ''));
+}
+
+function findHumanVerifyTextChannel(guild) {
+  if (!guild?.channels?.cache) return null;
+  return (
+    guild.channels.cache.find(
+      ch => ch.isTextBased && typeof ch.isTextBased === 'function' && ch.isTextBased() && ch.name === HUMAN_VERIFY_CHANNEL_NAME
+    ) || null
+  );
 }
 
 function findXVerifyTextChannel(guild) {
@@ -693,6 +710,31 @@ function buildVerifyXChannelButtons() {
       new ButtonBuilder()
         .setCustomId('xverify_start')
         .setLabel('Connect with X')
+        .setStyle(ButtonStyle.Primary)
+    )
+  ];
+}
+
+function buildHumanVerifyEmbed() {
+  return new EmbedBuilder()
+    .setColor(0x2563eb)
+    .setTitle('✅ Verify you’re human')
+    .setDescription(
+      [
+        'Click **Verify** to unlock the server.',
+        '',
+        'This is a quick one-time check to keep spam bots out — takes ~5 seconds.'
+      ].join('\n')
+    )
+    .setTimestamp();
+}
+
+function buildHumanVerifyButtons() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('human_verify_start')
+        .setLabel('Verify')
         .setStyle(ButtonStyle.Primary)
     )
   ];
@@ -1859,6 +1901,31 @@ async function ensureVerifyXPrompt(guild) {
   }
 }
 
+async function ensureHumanVerifyPrompt(guild) {
+  try {
+    if (!guild) return;
+    const verifyChannel = findHumanVerifyTextChannel(guild);
+    if (!verifyChannel) return;
+
+    const recentMessages = await verifyChannel.messages.fetch({ limit: 12 }).catch(() => null);
+    if (!recentMessages) return;
+
+    const existing = recentMessages.find(msg => {
+      if (msg.author?.id !== client.user.id) return false;
+      const t = msg.embeds?.[0]?.title || '';
+      return String(t).includes('Verify you’re human') || String(t).includes('Verify you');
+    });
+    if (existing) return;
+
+    await verifyChannel.send({
+      embeds: [buildHumanVerifyEmbed()],
+      components: buildHumanVerifyButtons()
+    });
+  } catch (error) {
+    console.error('[HumanVerify] Failed to ensure verify prompt:', error?.message || error);
+  }
+}
+
 client.once('clientReady', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
@@ -1903,6 +1970,7 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
 }
 
   await ensureVerifyXPrompt(firstGuild);
+  await ensureHumanVerifyPrompt(firstGuild);
   await ensureDevIntelPrompt(firstGuild);
 
   try {
@@ -1967,6 +2035,7 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
 client.on('guildMemberAdd', member => {
   Promise.resolve()
     .then(() => handleReferralGuildMemberAdd(member))
+    .then(() => ensureHumanVerifyPrompt(member?.guild))
     .catch(err => {
       console.error('[Referral] guildMemberAdd handler:', err?.message || err);
     });
@@ -1996,6 +2065,66 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       const parts = interaction.customId.split(':');
+
+      if (interaction.customId === 'human_verify_start') {
+        if (!interaction.guild) {
+          await interaction.reply({ content: '❌ Use this inside the server.', ephemeral: true });
+          return;
+        }
+
+        const member = interaction.member;
+        if (!member || !('roles' in member)) {
+          await interaction.reply({ content: '❌ Could not resolve your server member.', ephemeral: true });
+          return;
+        }
+
+        if (member.roles?.cache?.has?.(HUMAN_VERIFIED_ROLE_ID)) {
+          await interaction.reply({ content: '✅ You’re already verified.', ephemeral: true });
+          return;
+        }
+
+        const now = Date.now();
+        const existing = humanVerifyChallenges.get(interaction.user.id);
+        if (existing && existing.lockedUntil && existing.lockedUntil > now) {
+          const waitSec = Math.ceil((existing.lockedUntil - now) / 1000);
+          await interaction.reply({
+            content: `⏳ Too many tries — wait ${waitSec}s and press Verify again.`,
+            ephemeral: true
+          });
+          return;
+        }
+
+        const a = 2 + Math.floor(Math.random() * 8);
+        const b = 2 + Math.floor(Math.random() * 8);
+        humanVerifyChallenges.set(interaction.user.id, {
+          a,
+          b,
+          answer: a + b,
+          exp: now + HUMAN_VERIFY_TTL_MS,
+          attempts: existing?.attempts ? Math.max(0, existing.attempts) : 0,
+          lockedUntil: 0
+        });
+
+        const modal = new ModalBuilder()
+          .setCustomId('human_verify_modal')
+          .setTitle('Verification');
+
+        modal.addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('human_verify_answer')
+              .setLabel(`What is ${a} + ${b}?`)
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setMinLength(1)
+              .setMaxLength(4)
+              .setPlaceholder('Type the number')
+          )
+        );
+
+        await interaction.showModal(modal);
+        return;
+      }
 
       if (
         interaction.customId === 'xverify_start' ||
@@ -2341,6 +2470,83 @@ let updated = null;
 
     if (interaction.isModalSubmit()) {
       const parts = interaction.customId.split(':');
+
+      if (interaction.customId === 'human_verify_modal') {
+        if (!interaction.guild) {
+          await interaction.reply({ content: '❌ Use this inside the server.', ephemeral: true });
+          return;
+        }
+
+        const member = interaction.member;
+        if (!member || !('roles' in member)) {
+          await interaction.reply({ content: '❌ Could not resolve your server member.', ephemeral: true });
+          return;
+        }
+
+        if (member.roles?.cache?.has?.(HUMAN_VERIFIED_ROLE_ID)) {
+          await interaction.reply({ content: '✅ You’re already verified.', ephemeral: true });
+          return;
+        }
+
+        const now = Date.now();
+        const state = humanVerifyChallenges.get(interaction.user.id);
+        if (!state || state.exp < now) {
+          await interaction.reply({
+            content: '⏳ Verification expired. Press **Verify** again.',
+            ephemeral: true
+          });
+          return;
+        }
+
+        if (state.lockedUntil && state.lockedUntil > now) {
+          const waitSec = Math.ceil((state.lockedUntil - now) / 1000);
+          await interaction.reply({
+            content: `⏳ Too many tries — wait ${waitSec}s and press Verify again.`,
+            ephemeral: true
+          });
+          return;
+        }
+
+        const raw = interaction.fields.getTextInputValue('human_verify_answer');
+        const n = Number(String(raw || '').trim());
+        if (!Number.isFinite(n) || Math.floor(n) !== state.answer) {
+          const nextAttempts = (state.attempts || 0) + 1;
+          const lockedUntil = nextAttempts >= 3 ? now + HUMAN_VERIFY_LOCK_MS : 0;
+          humanVerifyChallenges.set(interaction.user.id, {
+            ...state,
+            attempts: nextAttempts,
+            lockedUntil
+          });
+          await interaction.reply({
+            content:
+              nextAttempts >= 3
+                ? '❌ Incorrect. Too many tries — wait a moment and press **Verify** again.'
+                : '❌ Incorrect. Try again (press **Verify**).',
+            ephemeral: true
+          });
+          return;
+        }
+
+        try {
+          await member.roles.add(HUMAN_VERIFIED_ROLE_ID);
+        } catch (e) {
+          console.error('[HumanVerify] roles.add failed:', e?.message || e);
+          await interaction.reply({
+            content:
+              '❌ I could not assign your access role. Please ping a moderator (bot may be missing permissions).',
+            ephemeral: true
+          });
+          return;
+        } finally {
+          humanVerifyChallenges.delete(interaction.user.id);
+        }
+
+        await interaction.reply({
+          content: '✅ Verified. Welcome in.',
+          ephemeral: true
+        });
+        return;
+      }
 
       if (interaction.customId === 'dev_submit_modal') {
         if (!interaction.guild) {

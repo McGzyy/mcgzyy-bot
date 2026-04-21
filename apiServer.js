@@ -273,7 +273,16 @@ function startReferralApiServer(discordClient = null, opts = {}) {
           ? reply.statsMirror
           : null;
 
-      res.json({ success: true, statsMirror });
+      const callMeta =
+        reply && typeof reply === 'object' && 'callMeta' in reply
+          ? reply.callMeta
+          : null;
+
+      res.json({
+        success: true,
+        statsMirror,
+        alreadyCalled: Boolean(callMeta && callMeta.alreadyCalled === true)
+      });
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'Call failed';
       console.error('[API] POST /internal/call', msg);

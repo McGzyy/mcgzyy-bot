@@ -57,6 +57,74 @@ function rowSourceFromTracked(tracked) {
   return tracked.callSourceType === 'bot_call' ? 'bot' : 'user';
 }
 
+/** Must match `mcgbot-dashboard/lib/milestoneTrophies.ts` CALL_CLUB_MILESTONE_KEYS + thresholds. */
+const CALL_CLUB_MILESTONES = [
+  { key: 'call_club_10x', minAth: 10 },
+  { key: 'call_club_25x', minAth: 25 },
+  { key: 'call_club_50x', minAth: 50 }
+];
+
+/**
+ * Grant permanent "club" rows when an eligible user call reaches ATH thresholds (once per user per club).
+ * @param {string} discordId
+ * @param {number} athMultiple
+ * @param {string | null} callPerformanceId
+ * @param {{ excludedFromStats?: boolean, source?: string }} gates
+ */
+async function grantCallClubMilestonesIfEligible(
+  discordId,
+  athMultiple,
+  callPerformanceId,
+  gates = {}
+) {
+  const sb = getSupabaseServiceRole();
+  if (!sb) return;
+
+  const did = String(discordId || '').trim();
+  if (!did || did.toUpperCase() === 'AUTO_BOT') return;
+
+  if (gates.excludedFromStats === true) return;
+  if (String(gates.source || 'user').trim() !== 'user') return;
+
+  const m = Number(athMultiple);
+  if (!Number.isFinite(m) || m < CALL_CLUB_MILESTONES[0].minAth) return;
+
+  const payloads = [];
+  for (const def of CALL_CLUB_MILESTONES) {
+    if (m >= def.minAth) {
+      payloads.push({
+        user_id: did,
+        milestone_key: def.key,
+        call_performance_id: callPerformanceId || null
+      });
+    }
+  }
+  if (!payloads.length) return;
+
+  const { error } = await sb.from('user_milestone_trophies').upsert(payloads, {
+    onConflict: 'user_id,milestone_key',
+    ignoreDuplicates: true
+  });
+
+  if (error) {
+    console.error(
+      '[CallPerformanceSync] milestone trophies upsert:',
+      error.message || error
+    );
+  }
+}
+
+function queueGrantCallClubMilestones(discordId, athMultiple, callPerformanceId, gates) {
+  grantCallClubMilestonesIfEligible(
+    discordId,
+    athMultiple,
+    callPerformanceId,
+    gates
+  ).catch(err => {
+    console.error('[CallPerformanceSync] milestone trophies async:', err?.message || err);
+  });
+}
+
 /**
  * Insert a dashboard leaderboard row for a fresh user call (same contract as
  * `call_performance` consumed by mcgbot-dashboard). Requires service role on the bot host.
@@ -130,6 +198,10 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
   const id = data && data.id ? String(data.id) : null;
   if (id) {
     updateTrackedCallData(contract, { callPerformanceId: id });
+    queueGrantCallClubMilestones(discordId, Number(row.ath_multiple), id, {
+      excludedFromStats: row.excluded_from_stats === true,
+      source: row.source
+    });
     return { ok: true, id };
   }
 
@@ -175,7 +247,16 @@ async function updateUserCallPerformanceAth(contractAddress) {
       contractAddress,
       error.message || error
     );
+    return;
   }
+
+  const callerId = String(
+    tracked.firstCallerDiscordId || tracked.firstCallerId || ''
+  ).trim();
+  queueGrantCallClubMilestones(callerId, mult, rowId, {
+    excludedFromStats: tracked.excludedFromStats === true,
+    source: 'user'
+  });
 }
 
 function queueUpdateUserCallPerformanceAth(contractAddress) {

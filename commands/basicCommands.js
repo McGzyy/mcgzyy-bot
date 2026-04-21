@@ -1500,8 +1500,17 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     chartPending: callChartPending
   });
 
+  const alreadyCalled = !wasNewCall && !wasReactivated && !wasUpgradedToUserCall;
+  const replyContent = wasNewCall
+    ? '🆕 First call — coin is now being tracked.'
+    : wasReactivated
+      ? '♻️ Reactivated — coin is being tracked again.'
+      : wasUpgradedToUserCall
+        ? '📍 Upgraded — moved from watchlist to an official call.'
+        : '🧠 This coin has already been called.';
+
   const reply = await message.reply({
-    content: '📍 Coin officially called and now being tracked.',
+    content: replyContent,
     embeds: [embed]
   });
 
@@ -1544,6 +1553,19 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     try {
       /** Shown in POST /internal/call JSON (must be JSON-serializable). */
       reply.statsMirror = statsMirrorResult;
+    } catch (_) {
+      /* ignore if message object rejects the property */
+    }
+  }
+
+  if (reply && typeof reply === 'object') {
+    try {
+      reply.callMeta = {
+        wasNewCall: Boolean(wasNewCall),
+        wasReactivated: Boolean(wasReactivated),
+        wasUpgradedToUserCall: Boolean(wasUpgradedToUserCall),
+        alreadyCalled
+      };
     } catch (_) {
       /* ignore if message object rejects the property */
     }

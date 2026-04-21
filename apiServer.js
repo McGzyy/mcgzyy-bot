@@ -262,13 +262,18 @@ function startReferralApiServer(discordClient = null, opts = {}) {
         process.env.DISCORD_USER_CALLS_WEBHOOK_URL || ''
       ).trim();
 
-      await handleCallFromDashboard(discordClient, {
+      const reply = await handleCallFromDashboard(discordClient, {
         userId,
         contractAddress: ca,
         webhookUrl: webhookUrl || null
       });
 
-      res.json({ success: true });
+      const statsMirror =
+        reply && typeof reply === 'object' && 'statsMirror' in reply
+          ? reply.statsMirror
+          : null;
+
+      res.json({ success: true, statsMirror });
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'Call failed';
       console.error('[API] POST /internal/call', msg);

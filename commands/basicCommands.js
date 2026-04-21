@@ -1423,7 +1423,8 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
   const realData = await runQuickCa(contractAddress);
   const scan = normalizeRealDataToScan(realData);
 
-  const { trackedCall, wasNewCall, wasReactivated } = await applyTrackedCallState(
+  const { trackedCall, wasNewCall, wasReactivated, wasUpgradedToUserCall } =
+    await applyTrackedCallState(
     contractAddress,
     message,
     scan.marketCap || 0,
@@ -1480,6 +1481,8 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     callerId.toUpperCase() !== 'AUTO_BOT' &&
     (wasNewCall || wasUpgradedToUserCall);
 
+  /** For dashboard / internal API: attach non-enumerable payload without breaking Discord.js return type. */
+  let statsMirrorResult = null;
   if (shouldMirrorStats) {
     try {
       const guildId = message.guild?.id || message.guildId;
@@ -1490,15 +1493,28 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
           ? `https://discord.com/channels/${guildId}/${channelId}/${replyId}`
           : null;
       const { insertUserCallPerformanceRow } = require('../utils/callPerformanceSync');
-      await insertUserCallPerformanceRow(freshTracked, { messageUrl });
+      statsMirrorResult = await insertUserCallPerformanceRow(freshTracked, { messageUrl });
+      if (!statsMirrorResult.ok) {
+        console.error('[CallPerformanceSync] mirror failed:', statsMirrorResult);
+      }
     } catch (err) {
       console.error('[CallPerformanceSync] mirror user call:', err?.message || err);
+      statsMirrorResult = { ok: false, error: err?.message || String(err) };
     }
   }
 
   hydrateCallWatchChartMessage(reply, embedScan, { showTrackedMeta: true }).catch(err => {
     console.error('[CallWatchChart]', embedScan?.contractAddress, err.message);
   });
+
+  if (reply && typeof reply === 'object' && statsMirrorResult != null) {
+    try {
+      /** Shown in POST /internal/call JSON (must be JSON-serializable). */
+      reply.statsMirror = statsMirrorResult;
+    } catch (_) {
+      /* ignore if message object rejects the property */
+    }
+  }
 
   return reply;
 }

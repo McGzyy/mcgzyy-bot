@@ -51,21 +51,21 @@ function callerRoleForDiscordId(discordId) {
 async function insertUserCallPerformanceRow(tracked, opts = {}) {
   const sb = getSupabaseServiceRole();
   if (!sb) {
-    console.warn(
-      '[CallPerformanceSync] skip insert: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set on bot host'
+    console.error(
+      '[CallPerformanceSync] STATS ROW NOT CREATED: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the bot host (same Supabase project as the dashboard).'
     );
-    return { ok: false, skipped: true };
+    return { ok: false, skipped: true, reason: 'missing_supabase_service_role' };
   }
 
   const discordId = String(
     tracked.firstCallerDiscordId || tracked.firstCallerId || ''
   ).trim();
   if (!discordId || discordId.toUpperCase() === 'AUTO_BOT') {
-    return { ok: false, skipped: true };
+    return { ok: false, skipped: true, reason: 'no_caller_discord_id' };
   }
 
   const contract = String(tracked.contractAddress || '').trim();
-  if (!contract) return { ok: false, skipped: true };
+  if (!contract) return { ok: false, skipped: true, reason: 'no_contract' };
 
   const username = String(
     tracked.firstCallerUsername ||
@@ -104,9 +104,13 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
   const id = data && data.id ? String(data.id) : null;
   if (id) {
     updateTrackedCallData(contract, { callPerformanceId: id });
+    return { ok: true, id };
   }
 
-  return { ok: true, id };
+  console.error(
+    '[CallPerformanceSync] insert returned no id (check call_performance policies / select after insert)'
+  );
+  return { ok: false, error: 'insert_missing_id' };
 }
 
 /**

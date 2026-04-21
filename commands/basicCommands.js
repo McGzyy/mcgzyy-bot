@@ -1001,6 +1001,7 @@ function getMilestoneLabel(current, firstCalled) {
 async function applyTrackedCallState(contractAddress, message, marketCap, liveScanData, options = {}) {
   let wasNewCall = false;
   let wasReactivated = false;
+  let wasUpgradedToUserCall = false;
 
   const existingCall = getTrackedCall(contractAddress);
 
@@ -1074,6 +1075,7 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
       );
       wasReactivated = true;
     } else if (existingCall.callSourceType === 'watch_only' && callSourceType === 'user_call') {
+      wasUpgradedToUserCall = true;
       saveTrackedCall(
         {
           contractAddress,
@@ -1468,6 +1470,31 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     content: '📍 Coin officially called and now being tracked.',
     embeds: [embed]
   });
+
+  const freshTracked = getTrackedCall(contractAddress) || trackedCall;
+  const callerId = String(freshTracked?.firstCallerDiscordId || '').trim();
+  const shouldMirrorStats =
+    freshTracked &&
+    freshTracked.callSourceType === 'user_call' &&
+    callerId &&
+    callerId.toUpperCase() !== 'AUTO_BOT' &&
+    (wasNewCall || wasUpgradedToUserCall);
+
+  if (shouldMirrorStats) {
+    try {
+      const guildId = message.guild?.id || message.guildId;
+      const channelId = message.channel?.id;
+      const replyId = reply?.id;
+      const messageUrl =
+        guildId && channelId && replyId
+          ? `https://discord.com/channels/${guildId}/${channelId}/${replyId}`
+          : null;
+      const { insertUserCallPerformanceRow } = require('../utils/callPerformanceSync');
+      await insertUserCallPerformanceRow(freshTracked, { messageUrl });
+    } catch (err) {
+      console.error('[CallPerformanceSync] mirror user call:', err?.message || err);
+    }
+  }
 
   hydrateCallWatchChartMessage(reply, embedScan, { showTrackedMeta: true }).catch(err => {
     console.error('[CallWatchChart]', embedScan?.contractAddress, err.message);

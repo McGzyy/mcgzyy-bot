@@ -797,6 +797,13 @@ if (lifecycleStatus === 'archived') {
     isActive: false
   });
 
+  try {
+    const { queueUpdateUserCallPerformanceAth } = require('./callPerformanceSync');
+    queueUpdateUserCallPerformanceAth(coin.contractAddress);
+  } catch (_) {
+    /* optional sync */
+  }
+
   console.log(
     `[Monitor] Archived ${coin.tokenName || coin.contractAddress} -> ${forceArchiveReason || 'Lifecycle archived'}`
   );
@@ -915,6 +922,13 @@ if (lifecycleStatus === 'archived') {
         lastPostedX: lastPostedXOut,
         priceHistory
       });
+
+      try {
+        const { queueUpdateUserCallPerformanceAth } = require('./callPerformanceSync');
+        queueUpdateUserCallPerformanceAth(coin.contractAddress);
+      } catch (_) {
+        /* optional sync */
+      }
 
     } catch (err) {
       console.error('[Monitor ERROR]');

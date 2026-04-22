@@ -39,6 +39,10 @@ let monitoringIntervalUser = null;
 let monitoringIntervalBot = null;
 let isRunning = false;
 
+/** When the main scanner is off, still push live MC / spot_multiple to Supabase for the dashboard. */
+let performanceMirrorInterval = null;
+let isPerformanceMirrorRunning = false;
+
 /**
  * =========================
  * CONFIG
@@ -966,6 +970,8 @@ if (lifecycleStatus === 'archived') {
 function startMonitoring(channel, intervalOrOpts = {}) {
   if (isRunning) return;
 
+  stopUserPerformanceSupabaseMirror();
+
   isRunning = true;
 
   let userMs = 30000;
@@ -1008,10 +1014,99 @@ function stopMonitoring() {
   }
 
   isRunning = false;
+  stopUserPerformanceSupabaseMirror();
+}
+
+/**
+ * Lightweight loop: refresh MC for active **user_call** rows that have a `call_performance` id,
+ * then mirror to Supabase. No Discord milestones / dumps.
+ * Use when `SCANNER_ENABLED` is false so dashboard live X still updates.
+ *
+ * @param {{ intervalMs?: number }} [opts]
+ */
+function startUserPerformanceSupabaseMirror(opts = {}) {
+  if (isPerformanceMirrorRunning) return;
+  const ms = Number(opts.intervalMs);
+  const intervalMs = Number.isFinite(ms) && ms >= 10_000 ? ms : 30_000;
+
+  isPerformanceMirrorRunning = true;
+  console.log(
+    `[PerformanceMirror] Starting Supabase stats mirror every ${intervalMs / 1000}s (scanner alerts may be off)`
+  );
+
+  const tick = async () => {
+    const tracked = getAllTrackedCalls();
+    const coins = tracked.filter(coin => {
+      if (!coin) return false;
+      if (coin.lifecycleStatus === 'archived' || coin.isActive === false) return false;
+      if (String(coin.callSourceType || 'user_call') !== 'user_call') return false;
+      if (String(coin.approvalStatus || '').toLowerCase() === 'denied') return false;
+      if (!String(coin.callPerformanceId || '').trim()) return false;
+      return true;
+    });
+
+    if (coins.length === 0) return;
+
+    let ok = 0;
+    for (const coin of coins) {
+      try {
+        const scan = await generateRealScan(coin.contractAddress);
+        if (!isSuccessfulMarketScan(scan)) continue;
+
+        const currentMc = Number(scan.marketCap);
+        const firstMc = coin.firstCalledMarketCap || currentMc;
+        const athMc = Math.max(coin.athMc || firstMc, currentMc);
+
+        const persisted = getTrackedCall(coin.contractAddress) || coin;
+        let priceHistory = Array.isArray(persisted?.priceHistory) ? [...persisted.priceHistory] : [];
+        priceHistory.push({ t: Date.now(), price: currentMc });
+        if (priceHistory.length > 500) {
+          priceHistory = priceHistory.slice(-500);
+        }
+
+        updateTrackedCallData(coin.contractAddress, {
+          latestMarketCap: currentMc,
+          athMc,
+          failedScans: 0,
+          lastUpdatedAt: new Date().toISOString(),
+          priceHistory
+        });
+
+        const { queueUpdateUserCallPerformanceAth } = require('./callPerformanceSync');
+        queueUpdateUserCallPerformanceAth(coin.contractAddress);
+        ok += 1;
+      } catch (err) {
+        console.error(
+          '[PerformanceMirror]',
+          coin.contractAddress,
+          err && err.message ? err.message : err
+        );
+      }
+    }
+
+    if (ok > 0) {
+      console.log(`[PerformanceMirror] Updated ${ok}/${coins.length} user call(s) → Supabase`);
+    }
+  };
+
+  void tick();
+  performanceMirrorInterval = setInterval(() => {
+    void tick();
+  }, intervalMs);
+}
+
+function stopUserPerformanceSupabaseMirror() {
+  if (performanceMirrorInterval) {
+    clearInterval(performanceMirrorInterval);
+    performanceMirrorInterval = null;
+  }
+  isPerformanceMirrorRunning = false;
 }
 
 module.exports = {
   startMonitoring,
   stopMonitoring,
-  checkTrackedCoins
+  checkTrackedCoins,
+  startUserPerformanceSupabaseMirror,
+  stopUserPerformanceSupabaseMirror
 };

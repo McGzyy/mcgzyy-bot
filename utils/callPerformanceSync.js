@@ -238,13 +238,24 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
  */
 async function updateUserCallPerformanceAth(contractAddress) {
   const sb = getSupabaseServiceRole();
-  if (!sb) return;
+  if (!sb) {
+    console.error(
+      '[CallPerformanceSync] update skipped: missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY on bot host'
+    );
+    return;
+  }
 
   const tracked = getTrackedCall(contractAddress);
   if (!tracked || tracked.callSourceType !== 'user_call') return;
 
   const rowId = tracked.callPerformanceId ? String(tracked.callPerformanceId).trim() : '';
-  if (!rowId) return;
+  if (!rowId) {
+    console.warn(
+      '[CallPerformanceSync] update skipped: tracked call has no callPerformanceId (stats row never linked?)',
+      contractAddress
+    );
+    return;
+  }
 
   const mult = computeAthMultiple(tracked);
   const tokenNameRaw = String(tracked.tokenName || '').trim();

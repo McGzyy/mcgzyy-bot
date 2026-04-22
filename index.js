@@ -28,7 +28,11 @@ const { handleGuideCommand } = require('./utils/guideCommand');
 const { handleInteractiveHelp } = require('./utils/interactiveHelp');
 const { handleHelpUiInteraction } = require('./utils/helpUi');
 const { handleFaqCommand } = require('./utils/faqCommand');
-const { startMonitoring, stopMonitoring } = require('./utils/monitoringEngine');
+const {
+  startMonitoring,
+  stopMonitoring,
+  startUserPerformanceSupabaseMirror
+} = require('./utils/monitoringEngine');
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
 const { createPost, getXBotUsernameForCopy } = require('./utils/xPoster');
 const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
@@ -555,6 +559,9 @@ async function applyScannerEnabledFromDashboard(enabled) {
   if (!client.isReady()) {
     stopMonitoring();
     stopAutoCallLoop();
+    if (!want) {
+      startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
+    }
     return { ok: true };
   }
 
@@ -567,6 +574,7 @@ async function applyScannerEnabledFromDashboard(enabled) {
   } else {
     stopMonitoring();
     stopAutoCallLoop();
+    startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
   }
   return { ok: true };
 }
@@ -1965,9 +1973,14 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
   console.log(`[DevTracker] Loaded ${trackedDevs.length} tracked dev(s).`);
 
   if (SCANNER_ENABLED) {
-  startMonitoring(botChannel, { userIntervalMs: 30000, botIntervalMs: 60000 });
-  startAutoCallLoop(botChannel);
-}
+    startMonitoring(botChannel, { userIntervalMs: 30000, botIntervalMs: 60000 });
+    startAutoCallLoop(botChannel);
+  } else {
+    console.log(
+      '[Monitor] Scanner disabled — running Supabase performance mirror only (dashboard live X / MC).'
+    );
+    startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
+  }
 
   await ensureVerifyXPrompt(firstGuild);
   await ensureHumanVerifyPrompt(firstGuild);
@@ -2868,7 +2881,10 @@ if (lowerContent === '!scanner off') {
     await replyText(message, '🔴 Scanner is already **OFF**.');
     return;
   }
-  await replyText(message, '🔴 Scanner **DISABLED** (all loops stopped).');
+  await replyText(
+    message,
+    '🔴 Scanner **DISABLED** (Discord alert loops stopped). Dashboard live MC / multiples still sync every ~30s.'
+  );
   return;
 }
       if (lowerContent === '!testx') {
@@ -3679,6 +3695,8 @@ if (lowerContent === '!resetmonitor') {
   saveBotSettings(BOT_SETTINGS);
 
   resetAllTrackedCalls();
+
+  startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
 
   await replyText(
     message,

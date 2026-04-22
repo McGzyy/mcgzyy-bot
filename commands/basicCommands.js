@@ -887,7 +887,7 @@ function createTraderScanEmbed(scan, options = {}) {
         inline: false
       }
     )
-    .setFooter({ text: 'McGBot • Call intel' })
+    .setFooter({ text: options.footerText || 'McGBot • Call intel' })
     .setTimestamp();
 
   applyScanThumbnailToEmbed(embed, scan);
@@ -1330,15 +1330,18 @@ async function sendUserCallsChannelPayloadAsMember(webhookUrl, member, channel, 
   const username = String(displayName).slice(0, 80);
 
   const hook = new WebhookClient({ url: webhookUrl.trim() });
-  const sent = await hook.send({
+  /** Omit undefined keys — some Discord.js / REST paths reject `files: undefined`. */
+  const sendOpts = {
     content: payload.content ?? undefined,
     embeds: payload.embeds ?? [],
-    components: payload.components,
-    files: payload.files,
     username,
     avatarURL,
     allowedMentions: { parse: [] }
-  });
+  };
+  if (payload.components) sendOpts.components = payload.components;
+  if (payload.files) sendOpts.files = payload.files;
+
+  const sent = await hook.send(sendOpts);
   const id = sent?.id ? String(sent.id) : '';
   if (!id) {
     try {
@@ -1353,11 +1356,9 @@ async function sendUserCallsChannelPayloadAsMember(webhookUrl, member, channel, 
     channel,
     guild: channel.guild ?? null,
     edit(editPayload) {
-      return hook.editMessage(id, {
-        ...editPayload,
-        username,
-        avatarURL
-      });
+      const patch = { ...editPayload, username, avatarURL };
+      if (patch.files === undefined) delete patch.files;
+      return hook.editMessage(id, patch);
     }
   };
 }
@@ -1413,6 +1414,12 @@ async function handleCallFromDashboard(client, opts) {
   }
 
   const useWebhook = Boolean(webhookUrl && isUserCallsWebhookUrl(webhookUrl));
+  if (webhookUrl && !useWebhook) {
+    console.warn(
+      '[handleCallFromDashboard] DISCORD_USER_CALLS_WEBHOOK_URL is set but failed URL validation — ' +
+        'expected https://discord.com/api/webhooks/{id}/{token}. Using bot channel.send.'
+    );
+  }
 
   const messageStub = {
     id: 'dashboard',
@@ -1494,6 +1501,11 @@ async function handleWatchFromDashboard(client, opts) {
   }
 
   const useWebhook = Boolean(webhookUrl && isUserCallsWebhookUrl(webhookUrl));
+  if (webhookUrl && !useWebhook) {
+    console.warn(
+      '[handleWatchFromDashboard] DISCORD_USER_CALLS_WEBHOOK_URL is set but failed URL validation — using bot send.'
+    );
+  }
 
   const messageStub = {
     id: 'dashboard-watch',
@@ -1568,9 +1580,15 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
 
   const callChartPending = wasNewCall || wasReactivated;
 
+  const dashboardFooter =
+    source === 'dashboard'
+      ? `${String(getPublicCaller(embedScan)).slice(0, 72)} · Call intel`
+      : undefined;
+
   const embed = createTraderScanEmbed(embedScan, {
     showTrackedMeta: true,
-    chartPending: callChartPending
+    chartPending: callChartPending,
+    ...(dashboardFooter ? { footerText: dashboardFooter } : {})
   });
 
   const alreadyCalled = !wasNewCall && !wasReactivated && !wasUpgradedToUserCall;
@@ -1620,7 +1638,10 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     }
   }
 
-  hydrateCallWatchChartMessage(reply, embedScan, { showTrackedMeta: true }).catch(err => {
+  hydrateCallWatchChartMessage(reply, embedScan, {
+    showTrackedMeta: true,
+    ...(dashboardFooter ? { footerText: dashboardFooter } : {})
+  }).catch(err => {
     console.error('[CallWatchChart]', embedScan?.contractAddress, err.message);
   });
 
@@ -1689,8 +1710,14 @@ async function handleWatchCommand(message, contractAddress, source = 'command') 
     isNewMilestone: false
   };
 
+  const dashboardFooter =
+    source === 'dashboard'
+      ? `${String(getPublicCaller(embedScan)).slice(0, 72)} · Watch intel`
+      : undefined;
+
   const embed = createTraderScanEmbed(embedScan, {
-    showTrackedMeta: true
+    showTrackedMeta: true,
+    ...(dashboardFooter ? { footerText: dashboardFooter } : {})
   });
 
   const reply = await message.reply({
@@ -1698,7 +1725,10 @@ async function handleWatchCommand(message, contractAddress, source = 'command') 
     embeds: [embed]
   });
 
-  hydrateCallWatchChartMessage(reply, embedScan, { showTrackedMeta: true }).catch(err => {
+  hydrateCallWatchChartMessage(reply, embedScan, {
+    showTrackedMeta: true,
+    ...(dashboardFooter ? { footerText: dashboardFooter } : {})
+  }).catch(err => {
     console.error('[CallWatchChart]', embedScan?.contractAddress, err.message);
   });
 
@@ -1985,5 +2015,6 @@ module.exports = {
   handleCallFromDashboard,
   handleWatchFromDashboard,
   handleWatchCommand,
-  isLikelySolanaCA
+  isLikelySolanaCA,
+  isUserCallsWebhookUrl
 };

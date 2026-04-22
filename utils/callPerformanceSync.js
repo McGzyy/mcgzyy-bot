@@ -23,6 +23,23 @@ function computeAthMultiple(tracked) {
   return Number(x.toFixed(4));
 }
 
+/** Current MC / MC at call — drives dashboard "live" X while ATH can still be 1x. */
+function computeSpotMultiple(tracked) {
+  const first = Number(
+    tracked.firstCalledMarketCap || tracked.latestMarketCap || 0
+  );
+  const cur = Number(
+    tracked.latestMarketCap ||
+      tracked.firstCalledMarketCap ||
+      first ||
+      0
+  );
+  if (!(first > 0) || !(cur > 0)) return 1;
+  const x = cur / first;
+  if (!Number.isFinite(x) || x <= 0) return 1;
+  return Number(x.toFixed(4));
+}
+
 /** DB `call_performance.call_time` is BIGINT (UTC epoch ms), not timestamptz. */
 function callTimeMsFromTracked(tracked) {
   const raw = tracked.firstCalledAt;
@@ -169,6 +186,10 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
     discord_id: discordId,
     username: username || 'Unknown',
     ath_multiple: computeAthMultiple(tracked),
+    spot_multiple: computeSpotMultiple(tracked),
+    live_market_cap_usd: Number.isFinite(Number(tracked.latestMarketCap))
+      ? Number(tracked.latestMarketCap)
+      : null,
     source: rowSourceFromTracked(tracked),
     call_time: callTimeMsFromTracked(tracked),
     call_ca: contract,
@@ -231,8 +252,11 @@ async function updateUserCallPerformanceAth(contractAddress) {
   const callMc = snapshotMcUsd(tracked);
   const tokenImageUrl = snapshotImageUrl(tracked);
 
+  const liveMc = Number(tracked.latestMarketCap);
   const patch = {
     ath_multiple: mult,
+    spot_multiple: computeSpotMultiple(tracked),
+    live_market_cap_usd: Number.isFinite(liveMc) && liveMc > 0 ? liveMc : null,
     token_name: tokenNameRaw ? tokenNameRaw.slice(0, 160) : null,
     token_ticker: tokenTickerRaw ? tokenTickerRaw.slice(0, 48) : null,
     call_market_cap_usd: callMc,

@@ -1,6 +1,9 @@
 'use strict';
 
 const path = require('path');
+/** Load `.env` here too so this module always sees keys even if loaded before `index.js` runs dotenv. */
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+
 const express = require('express');
 const cors = require('cors');
 const { PermissionFlagsBits } = require('discord.js');
@@ -8,7 +11,8 @@ const { readJson } = require('./utils/jsonStore');
 const { loadReferrals } = require('./utils/referralService');
 const {
   handleCallFromDashboard,
-  handleWatchFromDashboard
+  handleWatchFromDashboard,
+  isUserCallsWebhookUrl
 } = require('./commands/basicCommands');
 const {
   initTrackedCallsStore,
@@ -1186,6 +1190,20 @@ function startReferralApiServer(discordClient = null, opts = {}) {
     console.log(
       `[API] Health check: http://127.0.0.1:${PORT}/health (expect ok + endpoints.modQueueGet)`
     );
+    const whRaw = String(process.env.DISCORD_USER_CALLS_WEBHOOK_URL || '').trim();
+    if (whRaw) {
+      const ok = isUserCallsWebhookUrl(whRaw);
+      console.log(
+        `[API] DISCORD_USER_CALLS_WEBHOOK_URL is set (${whRaw.length} chars) — discordExecuteUrl=${ok}. ` +
+          (ok
+            ? 'Dashboard calls should post via webhook (caller name/avatar).'
+            : 'URL format rejected; dashboard calls will fall back to bot channel.send. Use https://discord.com/api/webhooks/{id}/{token} (channel → Integrations → Webhooks).')
+      );
+    } else {
+      console.log(
+        '[API] DISCORD_USER_CALLS_WEBHOOK_URL not set — dashboard calls post as the bot in #user-calls.'
+      );
+    }
   });
 
   referralHttpServerBinding = server;

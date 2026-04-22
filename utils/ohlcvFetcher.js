@@ -136,7 +136,7 @@ function ohlcvCandleDurationMs(interval) {
 
 function toNum(v) {
   const x = Number(v);
-  return Number.isFinite(x) ? x : 0;
+  return Number.isFinite(x) ? x : NaN;
 }
 
 /**
@@ -148,13 +148,27 @@ function normalizeGeckoRow(row) {
   if (!Array.isArray(row) || row.length < 6) return null;
   const t = toNum(row[0]);
   if (!Number.isFinite(t) || t <= 0) return null;
+  const open = toNum(row[1]);
+  const high = toNum(row[2]);
+  const low = toNum(row[3]);
+  const close = toNum(row[4]);
+  const volume = toNum(row[5]);
+  // If Gecko returns null/strings/invalid values, treat as missing (avoid rendering a “blank” 0 chart).
+  if (
+    !Number.isFinite(open) ||
+    !Number.isFinite(high) ||
+    !Number.isFinite(low) ||
+    !Number.isFinite(close)
+  ) {
+    return null;
+  }
   return {
     time: Math.floor(t * 1000),
-    open: toNum(row[1]),
-    high: toNum(row[2]),
-    low: toNum(row[3]),
-    close: toNum(row[4]),
-    volume: toNum(row[5])
+    open,
+    high,
+    low,
+    close,
+    volume: Number.isFinite(volume) ? volume : 0
   };
 }
 

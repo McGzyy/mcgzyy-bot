@@ -42,6 +42,42 @@ function shortenWallet(wallet) {
   return `${wallet.slice(0, 6)}...${wallet.slice(-6)}`;
 }
 
+function shortenCa(ca) {
+  const s = typeof ca === 'string' ? ca.trim() : String(ca || '').trim();
+  if (!s) return 'Unknown';
+  if (s.length <= 16) return s;
+  return `${s.slice(0, 6)}…${s.slice(-6)}`;
+}
+
+function toStatusToken(scan, isManual) {
+  if (isManual) return 'MANUAL';
+  if (scan?.callSourceType === 'watch_only') return 'WATCH';
+  if (scan?.callSourceType === 'bot_call') return 'AUTO';
+  return 'CALL';
+}
+
+function buildStatusStrip(scan, { isManual = false, profileName = 'balanced' } = {}) {
+  const bits = [];
+  bits.push(toStatusToken(scan, isManual));
+
+  const label = String(scan?.alertType || '').replace(/\*/g, '').trim();
+  if (label) bits.push(label.toUpperCase());
+
+  const momentum = String(scan?.momentum || '').trim();
+  if (momentum) bits.push(`MOMENTUM ${momentum.toUpperCase()}`);
+
+  const risk = String(scan?.riskLevel || '').trim();
+  if (risk) bits.push(`RISK ${risk.toUpperCase()}`);
+
+  const score = Number(scan?.entryScore);
+  if (Number.isFinite(score) && score > 0) bits.push(`SCORE ${Math.round(score)}`);
+
+  const profile = getProfileLabel(profileName);
+  if (profile) bits.push(profile.toUpperCase());
+
+  return bits.filter(Boolean).slice(0, 6).join('  •  ');
+}
+
 function formatX(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return 'N/A';
@@ -234,25 +270,19 @@ function createAutoCallEmbed(scan, profileName = 'balanced', options = {}) {
         trackedCall: { callSourceType: 'bot_call' },
         fallback: 'Anonymous'
       });
-  const alertLabel = scan.alertType || (isManual ? '👤 Manual Scan' : '📡 Auto Call');
+  const alertLabel = scan.alertType || (isManual ? 'Manual Scan' : 'Auto Call');
 
   const tokenNameUpper = formatValue(scan.tokenName, 'UNKNOWN TOKEN').toUpperCase();
   const tickerUpper = formatValue(scan.ticker, 'UNKNOWN').toUpperCase();
 
-  const header = [
-    isManual ? '📌 MANUAL' : '🤖 AUTO',
-    String(alertLabel || '').replace(/\*/g, ''),
-    `Profile: ${getProfileLabel(profileName)}`
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const statusStrip = buildStatusStrip(scan, { isManual, profileName });
 
   const overviewLine = [
     `**MC** ${formatUsd(scan.marketCap)}`,
     `**Liq** ${formatUsd(scan.liquidity)}`,
     `**Vol 5m** ${formatUsd(scan.volume5m)}`,
     `**Age** ${formatAgeMinutes(scan.ageMinutes)}`
-  ].join('  │  ');
+  ].join('  •  ');
 
   const ca = formatValue(scan.contractAddress, 'Unknown');
   const holdersText = (() => {
@@ -263,14 +293,14 @@ function createAutoCallEmbed(scan, profileName = 'balanced', options = {}) {
 
   const embed = new EmbedBuilder()
     .setColor(isManual ? 0x3b82f6 : 0x10b981)
-    .setTitle(`🚀 ${tokenNameUpper} ($${tickerUpper})`)
+    .setTitle(`🚀 ${tokenNameUpper} • $${tickerUpper}`)
     .setDescription(
       [
-        `**${header}**`,
+        statusStrip ? `**${statusStrip}**` : null,
         `Caller: **${formatValue(originalCaller, 'Auto Bot')}**`,
         '',
         overviewLine,
-        options.chartPending ? '_Chart: loading…_' : ''
+        options.chartPending ? '_Chart warming up…_' : ''
       ]
         .filter(Boolean)
         .join('\n')
@@ -287,7 +317,7 @@ function createAutoCallEmbed(scan, profileName = 'balanced', options = {}) {
         inline: true
       },
       {
-        name: '📊 Tape',
+        name: '📊 Snapshot',
         value: [
           `5m B/S: **${formatValue(scan.buySellRatio5m, '—')}**`,
           `1h B/S: **${formatValue(scan.buySellRatio1h, '—')}**`,
@@ -297,8 +327,17 @@ function createAutoCallEmbed(scan, profileName = 'balanced', options = {}) {
         inline: true
       },
       {
+        name: '🎯 Verdict',
+        value: [
+          `Grade: **${formatValue(scan.grade, '—')}**`,
+          `Status: **${formatValue(scan.status, '—')}**`,
+          `Conviction: **${formatValue(scan.conviction, '—')}**`
+        ].join('\n'),
+        inline: false
+      },
+      {
         name: '🧾 Contract',
-        value: `\`${ca}\``,
+        value: `\`${shortenCa(ca)}\`\nFull: \`${ca}\``,
         inline: false
       }
     )

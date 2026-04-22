@@ -152,6 +152,37 @@ function shortenCA(ca) {
   return `${ca.slice(0, 6)}...${ca.slice(-6)}`;
 }
 
+function buildStatusStrip(scan, profileName = null) {
+  const bits = [];
+
+  const status = scan?.isNewCall
+    ? 'FIRST CALLED'
+    : scan?.isReactivated
+      ? 'REACTIVATED'
+      : scan?.callSourceType === 'watch_only'
+        ? 'WATCH'
+        : scan?.callSourceType === 'bot_call'
+          ? 'AUTO'
+          : 'TRACKED';
+  bits.push(status);
+
+  const label = String(scan?.alertType || '').replace(/\*/g, '').trim();
+  if (label) bits.push(label.toUpperCase());
+
+  const momentum = getDisplayMomentum(scan);
+  if (momentum) bits.push(`MOMENTUM ${String(momentum).toUpperCase()}`);
+
+  const risk = String(scan?.riskLevel || '').trim();
+  if (risk) bits.push(`RISK ${risk.toUpperCase()}`);
+
+  const score = Number(scan?.entryScore);
+  if (Number.isFinite(score) && score > 0) bits.push(`SCORE ${Math.round(score)}`);
+
+  if (profileName) bits.push(String(profileName).toUpperCase());
+
+  return bits.filter(Boolean).slice(0, 6).join('  •  ');
+}
+
 function buildActionButtons(contractAddress) {
   return [
     new ActionRowBuilder().addComponents(
@@ -850,19 +881,29 @@ function createTraderScanEmbed(scan, options = {}) {
     `**Liq** ${formatUsd(scan.liquidity)}`,
     `**Vol 5m** ${formatUsd(scan.volume5m)}`,
     `**Age** ${formatAgeMinutes(scan.ageMinutes)}`
-  ].join('  │  ');
+  ].join('  •  ');
 
   const badgeLine = buildCallBadgesLine(scan);
+  const statusStrip = buildStatusStrip(scan, options.profileName || null);
+  const color =
+    scan.callSourceType === 'watch_only'
+      ? 0x64748b
+      : scan.callSourceType === 'bot_call'
+        ? 0x10b981
+        : scan.isNewCall
+          ? 0x22c55e
+          : 0x22d3ee;
 
   const embed = new EmbedBuilder()
-    .setColor(0x22d3ee)
-    .setTitle(`🚀 ${tokenNameUpper} ($${tickerUpper})`)
+    .setColor(color)
+    .setTitle(`🚀 ${tokenNameUpper} • $${tickerUpper}`)
     .setDescription(
       [
         badgeLine ? `${badgeLine}\n` : null,
+        statusStrip ? `**${statusStrip}**` : null,
         metaBlock.trim() ? metaBlock.trimEnd() : null,
         overviewLine,
-        options.chartPending ? '_Chart: loading…_' : null
+        options.chartPending ? '_Chart warming up…_' : null
       ].filter(Boolean).join('\n')
     )
     .addFields(
@@ -883,7 +924,7 @@ function createTraderScanEmbed(scan, options = {}) {
       },
       {
         name: '🧾 Contract',
-        value: `\`${ca}\``,
+        value: `\`${shortenCA(ca)}\`\nFull: \`${ca}\``,
         inline: false
       }
     )

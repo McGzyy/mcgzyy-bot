@@ -1162,7 +1162,9 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
       },
       message.author.id,
       message.author.username,
-      message.member?.displayName || message.author.globalName || message.author.username,
+      message.author.globalName ||
+        message.member?.displayName ||
+        message.author.username,
       { callSourceType }
     );
     wasNewCall = true;
@@ -1203,7 +1205,9 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
         },
         message.author.id,
         message.author.username,
-        message.member?.displayName || message.author.globalName || message.author.username,
+        message.author.globalName ||
+          message.member?.displayName ||
+          message.author.username,
         { callSourceType }
       );
       wasReactivated = true;
@@ -1235,7 +1239,9 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
         },
         message.author.id,
         message.author.username,
-        message.member?.displayName || message.author.globalName || message.author.username,
+        message.author.globalName ||
+          message.member?.displayName ||
+          message.author.username,
         { callSourceType: 'user_call' }
       );
     } else {
@@ -1669,7 +1675,21 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
           ? `https://discord.com/channels/${guildId}/${channelId}/${replyId}`
           : null;
       const { insertUserCallPerformanceRow } = require('../utils/callPerformanceSync');
-      statsMirrorResult = await insertUserCallPerformanceRow(freshTracked, { messageUrl });
+      let callerAvatarUrl;
+      try {
+        if (message.author && typeof message.author.displayAvatarURL === 'function') {
+          callerAvatarUrl = message.author.displayAvatarURL({
+            extension: 'png',
+            size: 128
+          });
+        }
+      } catch (_) {
+        callerAvatarUrl = undefined;
+      }
+      statsMirrorResult = await insertUserCallPerformanceRow(freshTracked, {
+        messageUrl,
+        ...(callerAvatarUrl ? { callerAvatarUrl } : {})
+      });
       if (!statsMirrorResult.ok) {
         console.error('[CallPerformanceSync] mirror failed:', statsMirrorResult);
       }

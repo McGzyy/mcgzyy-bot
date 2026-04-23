@@ -143,6 +143,47 @@ function queueGrantCallClubMilestones(discordId, athMultiple, callPerformanceId,
 }
 
 /**
+ * Best-effort: sync `public.users.discord_display_name` / `discord_avatar_url` from the
+ * tracked call + optional Discord avatar URL so the web dashboard can show identity without
+ * requiring that user to sign in via NextAuth first. PostgREST leaves unspecified columns
+ * unchanged on conflict update.
+ */
+async function upsertUserDiscordIdentityFromTracked(sb, tracked, opts = {}) {
+  const discordId = String(
+    tracked.firstCallerDiscordId || tracked.firstCallerId || ''
+  ).trim();
+  if (!discordId || discordId.toUpperCase() === 'AUTO_BOT') return;
+
+  const displayName = String(
+    tracked.firstCallerDisplayName ||
+      tracked.firstCallerPublicName ||
+      tracked.firstCallerUsername ||
+      ''
+  )
+    .trim()
+    .slice(0, 100);
+
+  const callerAvatarRaw =
+    typeof opts.callerAvatarUrl === 'string'
+      ? opts.callerAvatarUrl.trim().slice(0, 800)
+      : '';
+
+  const payload = { discord_id: discordId };
+  if (displayName) payload.discord_display_name = displayName;
+  if (callerAvatarRaw) payload.discord_avatar_url = callerAvatarRaw;
+
+  if (!payload.discord_display_name && !payload.discord_avatar_url) return;
+
+  const { error } = await sb.from('users').upsert(payload, { onConflict: 'discord_id' });
+  if (error) {
+    console.error(
+      '[CallPerformanceSync] users identity upsert:',
+      error.message || error
+    );
+  }
+}
+
+/**
  * Insert a dashboard leaderboard row for a fresh user call (same contract as
  * `call_performance` consumed by mcgbot-dashboard). Requires service role on the bot host.
  *
@@ -181,6 +222,8 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
   const tokenTickerRaw = String(tracked.ticker || '').trim();
   const callMc = snapshotMcUsd(tracked);
   const tokenImageUrl = snapshotImageUrl(tracked);
+
+  await upsertUserDiscordIdentityFromTracked(sb, tracked, opts);
 
   const row = {
     discord_id: discordId,

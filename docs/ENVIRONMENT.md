@@ -185,6 +185,19 @@ Loaded via **`dotenv`** from **`.env`** in the project root (unless the host inj
 
 If any are missing, `createPost` throws **“Missing X API credentials”** when invoked. Discord flows that do not call X still run.
 
+**Optional — X copy & digest (`utils/buildXPostText.js`, `utils/xLeaderboardDigest.js`, `utils/monitoringEngine.js`):**
+
+| Variable | Purpose |
+|----------|---------|
+| **`X_TWEET_MAX_CHARS`** | Default `280`; raise if the X account supports long-form posts. |
+| **`X_POST_INCLUDE_GMGN`** | `1` / `true` — append GMGN link (uses more characters). |
+| **`X_AUTO_APPROVE_USER_CALLS`** | `1` / `true` — **user_call** rows skip `#mod-approvals` for X and go straight to `xApproved` (bot_call still needs mod approve). |
+| **`X_LEADERBOARD_DIGEST_ENABLED`** | `1` / `true` — enable scheduled digest tweets (off by default). |
+| **`X_LEADERBOARD_DIGEST_UTC_HOUR`** | Hour `0–23` to post (default `16`). |
+| **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the weekly snapshot (default on when digest is enabled). |
+| **`X_LEADERBOARD_WEEKLY_UTC_WEEKDAY`** | `0` (Sun) … `6` (Sat); default `1` (Monday). |
+| **`DASHBOARD_PUBLIC_URL`** | Shown at the bottom of digest tweets (any of `NEXT_PUBLIC_APP_URL` / `MCBOT_DASHBOARD_URL` also work). |
+
 ### 7.4 Optional — Supabase (Discord bot, repo root)
 
 Used only when referral rows are mirrored to Postgres (`utils/referralService.js`). If unset, referral **file** tracking still works; Supabase insert is skipped when `getSupabase()` is never reached, or will error only if code paths call it without env.

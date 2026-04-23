@@ -1,15 +1,20 @@
 'use strict';
 
 /**
- * Build approved-call X post body. Attribution line:
- * - Bot calls: always @McGBot
- * - User calls: @user when Supabase prefs allow tagging and multiple >= threshold; else generic credit
+ * Premium X (Twitter) copy for McGBot Terminal — milestones, approvals, and manual posts.
+ * Attribution:
+ * - Bot calls: @McGBot
+ * - User calls: @handle when Supabase prefs allow tagging and multiple >= threshold; else generic credit
  */
+
+const DEFAULT_MAX = Math.min(4000, Math.max(100, Number(process.env.X_TWEET_MAX_CHARS || 280) || 280));
 
 function formatUsd(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 'N/A';
-  return `$${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
+  if (num >= 1000) return `$${(num / 1000).toFixed(2)}k`;
+  return `$${num.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 function stripAt(handle) {
@@ -53,16 +58,16 @@ async function fetchUserXPostingPrefs(discordId) {
 
 async function buildAttributionLine(trackedCall, multipleX) {
   if (!trackedCall) {
-    return 'Called by: @McGBot';
+    return 'Credit · @McGBot';
   }
 
   if (trackedCall.callSourceType === 'bot_call') {
-    return 'Called by: @McGBot';
+    return 'Credit · @McGBot (auto)';
   }
 
   const discordId = trackedCall.firstCallerDiscordId || trackedCall.firstCallerId;
   if (!discordId || String(discordId).toUpperCase() === 'AUTO_BOT') {
-    return 'Credit: community call (McGBot Terminal)';
+    return 'Credit · McGBot Terminal community';
   }
 
   const prefs = await fetchUserXPostingPrefs(discordId);
@@ -73,14 +78,39 @@ async function buildAttributionLine(trackedCall, multipleX) {
   const mult = Number(multipleX) || 0;
 
   if (verified && handle && enabled && mult >= minM) {
-    return `Called by: @${handle}`;
+    return `Credit · @${handle}`;
   }
 
-  return 'Credit: community call (McGBot Terminal)';
+  return 'Credit · McGBot Terminal community';
 }
 
-async function buildXPostText(trackedCall) {
-  const ticker = trackedCall.ticker || 'UNKNOWN';
+function includeGmgnLink() {
+  const raw = String(process.env.X_POST_INCLUDE_GMGN || '0').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+/**
+ * @param {string} text
+ * @param {number} max
+ */
+function fitTweet(text, max) {
+  const s = String(text || '').trim();
+  if (s.length <= max) return s;
+  const marker = '\n…';
+  const cut = max - marker.length;
+  return `${s.slice(0, Math.max(0, cut)).trimEnd()}${marker}`;
+}
+
+/**
+ * @param {object} trackedCall
+ * @param {{ milestoneX?: number, isReply?: boolean, maxChars?: number }} [opts]
+ */
+async function buildXPostText(trackedCall, opts = {}) {
+  const maxChars = Number(opts.maxChars) > 0 ? Number(opts.maxChars) : DEFAULT_MAX;
+  const milestoneX = Number(opts.milestoneX) > 0 ? Number(opts.milestoneX) : 0;
+  const isReply = opts.isReply === true;
+
+  const ticker = (trackedCall.ticker || 'UNKNOWN').toUpperCase();
   const ca = trackedCall.contractAddress || '';
   const firstCalledMc = Number(trackedCall.firstCalledMarketCap || 0);
   const latestMc = Number(
@@ -88,11 +118,7 @@ async function buildXPostText(trackedCall) {
       trackedCall.firstCalledMarketCap ||
       0
   );
-  const displayX =
-    firstCalledMc > 0 ? Number((latestMc / firstCalledMc).toFixed(2)) : 0;
-
-  const initialMcStr = formatUsd(firstCalledMc);
-  const athMcStr = formatUsd(
+  const athVal = Number(
     trackedCall.ath ||
       trackedCall.athMc ||
       trackedCall.athMarketCap ||
@@ -101,22 +127,59 @@ async function buildXPostText(trackedCall) {
       0
   );
 
-  const attribution = await buildAttributionLine(trackedCall, displayX);
+  const spotX =
+    firstCalledMc > 0 ? Number((latestMc / firstCalledMc).toFixed(2)) : 0;
+  const athX =
+    firstCalledMc > 0 ? Number((athVal / firstCalledMc).toFixed(2)) : 0;
+  const displayXForAttribution = athX > 0 ? athX : spotX;
 
-  return [
-    `🚀 $${ticker} — ${displayX.toFixed(2)}x from call`,
-    ``,
+  const initialMcStr = formatUsd(firstCalledMc);
+  const athMcStr = formatUsd(athVal);
+
+  const attribution = await buildAttributionLine(trackedCall, displayXForAttribution);
+
+  const headline =
+    milestoneX > 0
+      ? isReply
+        ? `↳ ${milestoneX}× milestone`
+        : `◆ ${milestoneX}× · first print`
+      : '◆ Live call';
+
+  const brand = 'McGBot Terminal';
+  const sub =
+    athX > 0
+      ? `$${ticker} · ${athX.toFixed(2)}× ATH  ·  spot ${spotX.toFixed(2)}×`
+      : `$${ticker} · ${spotX.toFixed(2)}×`;
+
+  const lines = [
+    `▲ ${brand}`,
+    headline,
+    '────────',
+    sub,
+    '────────',
     attribution,
-    ``,
-    `Initial MC: ${initialMcStr}`,
-    `ATH MC: ${athMcStr}`,
-    ``,
-    `CA:`,
+    '',
+    `Entry ${initialMcStr}  →  Peak ${athMcStr}`,
+    '',
+    'CA',
     `\`${ca}\``,
-    ``,
-    `📊 DexScreener: https://dexscreener.com/solana/${ca}`,
-    `📊 GMGN: https://gmgn.ai/sol/token/${ca}`
-  ].join('\n');
+    '',
+    `Chart · https://dexscreener.com/solana/${ca}`
+  ];
+
+  if (includeGmgnLink() && ca) {
+    lines.push(`GMGN · https://gmgn.ai/sol/token/${ca}`);
+  }
+
+  let body = lines.join('\n');
+  body = fitTweet(body, maxChars);
+
+  return body;
 }
 
-module.exports = { buildXPostText, buildAttributionLine };
+/** Short line for leaderboard / system posts (same voice). */
+function xBrandKicker() {
+  return '▲ McGBot Terminal';
+}
+
+module.exports = { buildXPostText, buildAttributionLine, xBrandKicker, fitTweet };

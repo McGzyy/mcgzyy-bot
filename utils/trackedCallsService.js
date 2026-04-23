@@ -789,6 +789,35 @@ function clearApprovalRequest(contractAddress) {
   });
 }
 
+/**
+ * Skip mod-approvals for X: mark user_call as approved + xApproved so milestones can post automatically.
+ * @param {string} contractAddress
+ * @param {number} triggerX ladder rung that triggered the gate
+ */
+function applyUserCallAutoXApproval(contractAddress, triggerX = 0) {
+  const tracked = getTrackedCall(contractAddress);
+  if (!tracked) return null;
+
+  const triggered = Array.isArray(tracked.approvalMilestonesTriggered)
+    ? [...new Set([...tracked.approvalMilestonesTriggered, Number(triggerX || 0)])]
+    : [Number(triggerX || 0)];
+
+  return updateTrackedCallData(contractAddress, {
+    approvalStatus: 'approved',
+    approvalRequestedAt: new Date().toISOString(),
+    approvalExpiresAt: null,
+    approvalMessageId: null,
+    approvalChannelId: null,
+    approvalGuildId: null,
+    lastApprovalTriggerX: Number(triggerX || 0),
+    approvalMilestonesTriggered: triggered,
+    moderatedAt: new Date().toISOString(),
+    moderatedById: null,
+    moderatedByUsername: 'terminal-auto-x',
+    xApproved: true
+  });
+}
+
 function setApprovalStatus(
   contractAddress,
   status = 'pending',
@@ -983,6 +1012,7 @@ module.exports = {
   markApprovalRequested,
   setApprovalMessageMeta,
   clearApprovalRequest,
+  applyUserCallAutoXApproval,
   setApprovalStatus,
 
   setXPostState,

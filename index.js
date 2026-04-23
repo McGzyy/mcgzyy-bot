@@ -35,6 +35,8 @@ const {
 } = require('./utils/monitoringEngine');
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
 const { createPost, getXBotUsernameForCopy } = require('./utils/xPoster');
+const { fitTweet, xBrandKicker } = require('./utils/buildXPostText');
+const { startXLeaderboardDigestScheduler } = require('./utils/xLeaderboardDigest');
 const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
 const { publishApprovedCoinToX } = require('./utils/publishApprovedCoinToX');
 const {
@@ -1999,6 +2001,12 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
     });
   }, 60 * 1000);
 
+  try {
+    startXLeaderboardDigestScheduler();
+  } catch (e) {
+    console.error('[XLeaderboardDigest] scheduler failed to start:', e?.message || e);
+  }
+
   const dmPollRaw = String(process.env.X_DM_VERIFICATION_POLL_MS ?? '').trim().toLowerCase();
   if (dmPollRaw !== '0' && dmPollRaw !== 'false' && dmPollRaw !== 'off') {
     try {
@@ -2892,7 +2900,17 @@ if (lowerContent === '!scanner off') {
           return message.reply('❌ You do not have permission to use this command.');
         }
 
-        const result = await createPost('Test post from McGBot 🚀');
+        const result = await createPost(
+          fitTweet(
+            [
+              xBrandKicker(),
+              '◆ Connection test',
+              '────────',
+              'McGBot · X posting verified.'
+            ].join('\n'),
+            280
+          )
+        );
 
         if (result.success) {
           await replyText(message, `✅ Posted to X\nPost ID: ${result.id}`);

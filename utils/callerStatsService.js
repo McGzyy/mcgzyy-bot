@@ -321,6 +321,62 @@ function getCallerLeaderboard(limit = 10) {
 }
 
 /**
+ * Same shape as getCallerLeaderboard but only calls inside the rolling window.
+ * @param {number} days
+ * @param {number} [limit]
+ */
+function getCallerLeaderboardInTimeframe(days, limit = 5) {
+  const calls = getAllTrackedCalls()
+    .filter(isHumanUserCall)
+    .filter(isValid)
+    .filter(call => isWithinTimeframeDays(call, days));
+
+  const map = new Map();
+
+  for (const call of calls) {
+    const key =
+      call.firstCallerDiscordId ||
+      call.firstCallerId ||
+      normalize(call.firstCallerUsername) ||
+      normalize(call.firstCallerDisplayName) ||
+      normalize(call.firstCallerPublicName);
+
+    if (!key) continue;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        calls: [],
+        totalX: 0,
+        totalAth: 0
+      });
+    }
+
+    const entry = map.get(key);
+
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+
+    entry.calls.push(call);
+    entry.totalX += x;
+    entry.totalAth += ath;
+  }
+
+  return [...map.values()]
+    .map(entry => {
+      const totalCalls = entry.calls.length;
+
+      return {
+        username: resolveBestName(entry.calls),
+        totalCalls,
+        avgX: totalCalls ? entry.totalX / totalCalls : 0,
+        avgAth: totalCalls ? entry.totalAth / totalCalls : 0
+      };
+    })
+    .sort((a, b) => b.avgX - a.avgX)
+    .slice(0, limit);
+}
+
+/**
  * =========================
  * TIMEFRAME STATS (same filters as getCallerLeaderboard / getBotStats)
  * =========================
@@ -530,6 +586,7 @@ module.exports = {
   getCallerStats,
   getCallerStatsRaw,
   getCallerLeaderboard,
+  getCallerLeaderboardInTimeframe,
   getBotStats,
   getBotStatsRaw,
   getBestCallInTimeframe,

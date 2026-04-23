@@ -5,7 +5,8 @@ const {
   getTrackedCall,
   clearApprovalRequest,
   setApprovalStatus,
-  setXPostState
+  setXPostState,
+  applyUserCallAutoXApproval
 } = require('./trackedCallsService');
 const {
   getApprovalTriggerX,
@@ -230,7 +231,10 @@ async function maybePublishApprovedMilestoneToX(trackedCall, latestScan = null) 
 
     const hasOriginal = !!trackedCall.xOriginalPostId;
 
-    const postText = await buildXPostText(trackedCall);
+    const postText = await buildXPostText(trackedCall, {
+      milestoneX,
+      isReply: hasOriginal
+    });
 
     let chartBuf = null;
     if (!hasOriginal) {
@@ -878,7 +882,20 @@ if (lifecycleStatus === 'archived') {
       const approvalCheck = shouldCreateApprovalRequest(refreshedTrackedCall, athX);
 
       if (approvalCheck.shouldSend) {
-        queueApprovalReview(channel, refreshedTrackedCall, scan, approvalCheck.triggerX);
+        const src = String(refreshedTrackedCall.callSourceType || '');
+        const envAuto = String(process.env.X_AUTO_APPROVE_USER_CALLS || '')
+          .trim()
+          .toLowerCase();
+        const autoUserX = envAuto === '1' || envAuto === 'true' || envAuto === 'yes';
+
+        if (autoUserX && src === 'user_call') {
+          applyUserCallAutoXApproval(
+            refreshedTrackedCall.contractAddress,
+            approvalCheck.triggerX
+          );
+        } else {
+          queueApprovalReview(channel, refreshedTrackedCall, scan, approvalCheck.triggerX);
+        }
       }
 
       /**

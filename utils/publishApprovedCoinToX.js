@@ -1,61 +1,16 @@
 'use strict';
 
 const { createPost } = require('./xPoster');
-const {
-  buildOhlcvCandlestickBufferForTrackedCall
-} = require('./ohlcvCandlestickBuffer');
+const { buildOhlcvCandlestickBufferForTrackedCall } = require('./ohlcvCandlestickBuffer');
 const {
   getHighestEligibleApprovalMilestone,
   computeApprovalAthX
 } = require('./approvalMilestoneService');
 const { getTrackedCall, setXPostState } = require('./trackedCallsService');
-
-function formatUsd(value) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return 'N/A';
-  return `$${num.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-}
-
-function buildXPostText(trackedCall) {
-  const ticker = trackedCall.ticker || 'UNKNOWN';
-  const ca = trackedCall.contractAddress || '';
-  const firstCalledMc = Number(trackedCall.firstCalledMarketCap || 0);
-  const latestMc = Number(
-    trackedCall.latestMarketCap ||
-      trackedCall.firstCalledMarketCap ||
-      0
-  );
-  const displayX =
-    firstCalledMc > 0 ? Number((latestMc / firstCalledMc).toFixed(2)) : 0;
-
-  const initialMcStr = formatUsd(firstCalledMc);
-  const athMcStr = formatUsd(
-    trackedCall.ath ||
-      trackedCall.athMc ||
-      trackedCall.athMarketCap ||
-      trackedCall.latestMarketCap ||
-      trackedCall.firstCalledMarketCap ||
-      0
-  );
-
-  return [
-    `🚀 $${ticker} — ${displayX.toFixed(2)}x from call`,
-    ``,
-    `Called by: @McGBot`,
-    ``,
-    `Initial MC: ${initialMcStr}`,
-    `ATH MC: ${athMcStr}`,
-    ``,
-    `CA:`,
-    `\`${ca}\``,
-    ``,
-    `📊 DexScreener: https://dexscreener.com/solana/${ca}`,
-    `📊 GMGN: https://gmgn.ai/sol/token/${ca}`
-  ].join('\n');
-}
+const { buildXPostText } = require('./buildXPostText');
 
 /**
- * Post / reply on X for an approved coin when milestones qualify (same logic as bot index).
+ * Post / reply on X for an approved coin when milestones qualify (same logic as monitoringEngine).
  * @param {string} contractAddress
  * @returns {Promise<{ success: boolean, reason?: string, error?: string | null, milestoneX?: number, reply?: boolean, postId?: string }>}
  */
@@ -80,7 +35,10 @@ async function publishApprovedCoinToX(contractAddress) {
 
   const hasOriginal = !!trackedCall.xOriginalPostId;
 
-  const postText = buildXPostText(trackedCall);
+  const postText = await buildXPostText(trackedCall, {
+    milestoneX,
+    isReply: hasOriginal
+  });
 
   let chartBuf = null;
   if (!hasOriginal) {
@@ -125,6 +83,5 @@ async function publishApprovedCoinToX(contractAddress) {
 }
 
 module.exports = {
-  publishApprovedCoinToX,
-  buildXPostText
+  publishApprovedCoinToX
 };

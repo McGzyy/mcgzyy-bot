@@ -1,0 +1,3 @@
+[submodule "mcgbot-dashboard"]
+	path = mcgbot-dashboard
+	url = https://github.com/McGzyy/mcgbot-dashboard

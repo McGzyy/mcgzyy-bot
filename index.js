@@ -171,12 +171,7 @@ const HUMAN_VERIFY_LOCK_MS = 60 * 1000;
 /** @type {Map<string, { a: number, b: number, answer: number, exp: number, attempts: number, lockedUntil: number }>} */
 const humanVerifyChallenges = new Map();
 
-const X_VERIFY_CHANNEL_NAME = 'verify-x';
-const X_VERIFY_CHANNEL_SLUGS = new Set(['verify-x', 'x-verify']);
-
-function isXVerifyChannelSlug(name) {
-  return X_VERIFY_CHANNEL_SLUGS.has(String(name || ''));
-}
+// X linking is dashboard-first (OAuth). Discord verify channel removed.
 
 function findHumanVerifyTextChannel(guild) {
   if (!guild?.channels?.cache) return null;
@@ -187,26 +182,7 @@ function findHumanVerifyTextChannel(guild) {
   );
 }
 
-function findXVerifyTextChannel(guild) {
-  if (!guild?.channels?.cache) return null;
-  return (
-    guild.channels.cache.find(
-      ch => ch.isTextBased() && isXVerifyChannelSlug(ch.name)
-    ) || null
-  );
-}
-
 const DEV_INTEL_PROMPT_TITLE = '📋 Submit a Dev';
-const DEV_INTEL_CHANNEL_SLUGS = new Set(['dev-intel']);
-
-function findDevIntelTextChannel(guild) {
-  if (!guild?.channels?.cache) return null;
-  return (
-    guild.channels.cache.find(
-      ch => ch.isTextBased() && DEV_INTEL_CHANNEL_SLUGS.has(ch.name)
-    ) || null
-  );
-}
 
 function getModApprovalsChannel(guild) {
   if (!guild?.channels?.cache) return null;
@@ -436,7 +412,7 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!profile\` / \`!myprofile\` — Your caller profile (+ **Connect X**)\n` +
     `• \`!credit anonymous\` / \`discord\` / \`xtag\` — Public credit label on calls\n` +
     `• \`!resetstats\` — Reset your tracked stat flags (mods: \`!resetstats @user\`)\n` +
-    `• **X linking:** **#verify-x**, **!profile → Connect X**, or the **web dashboard** (OAuth; no mod approval)\n` +
+    `• **X linking:** **!profile → Connect X** or the **web dashboard** (OAuth; no mod approval)\n` +
     `• \`!bestcall24h\` / \`!bestcallweek\` / \`!bestcallmonth\` — Best user call windows\n` +
     `• \`!topcaller24h\` / \`!topcallerweek\` / \`!topcallermonth\` — Top caller windows\n` +
     `• \`!bestbot24h\` / \`!bestbotweek\` / \`!bestbotmonth\` — Best bot call windows\n` +
@@ -1587,44 +1563,12 @@ async function handleDevSessionReply(message) {
 }
 
 async function handleXVerificationReply(message) {
-  const channelName = message.channel?.name || '';
-  if (!isXVerifyChannelSlug(channelName)) return false;
-
-  if (message.author.bot) return true;
-
-  upsertUserProfile({
-    discordUserId: message.author.id,
-    username: message.author.username,
-    displayName: message.member?.displayName || message.author.globalName || message.author.username
-  });
-
+  // Discord verify channel removed; X linking happens via dashboard OAuth.
   return false;
 }
 
-async function ensureDevIntelPrompt(guild) {
-  try {
-    if (!guild) return;
-
-    const intelChannel = findDevIntelTextChannel(guild);
-    if (!intelChannel) return;
-
-    const recentMessages = await intelChannel.messages.fetch({ limit: 10 }).catch(() => null);
-    if (!recentMessages) return;
-
-    const existingBotPrompt = recentMessages.find(
-      msg =>
-        msg.author?.id === client.user.id && msg.embeds?.[0]?.title === DEV_INTEL_PROMPT_TITLE
-    );
-
-    if (existingBotPrompt) return;
-
-    await intelChannel.send({
-      embeds: [buildDevIntelChannelEmbed()],
-      components: buildDevIntelChannelButtons()
-    });
-  } catch (error) {
-    console.error('[DevIntel] Failed to ensure dev-intel prompt:', error.message);
-  }
+async function ensureDevIntelPrompt() {
+  // Dedicated dev-intel channel removed; no-op.
 }
 
 async function handleDevSubmissionApprove(interaction, submissionId) {
@@ -1884,31 +1828,8 @@ async function handleDevSubmissionDeny(interaction, submissionId) {
   await interaction.message.edit({ embeds: [deniedEmbed], components: [] });
 }
 
-async function ensureVerifyXPrompt(guild) {
-  try {
-    if (!guild) return;
-
-    const verifyChannel = findXVerifyTextChannel(guild);
-    if (!verifyChannel) return;
-
-    const recentMessages = await verifyChannel.messages.fetch({ limit: 10 }).catch(() => null);
-    if (!recentMessages) return;
-
-    const existingBotPrompt = recentMessages.find(msg => {
-      if (msg.author?.id !== client.user.id) return false;
-      const t = msg.embeds?.[0]?.title || '';
-      return t.includes('Connect Your X') || t.includes('Verify Your X Handle');
-    });
-
-    if (existingBotPrompt) return;
-
-    await verifyChannel.send({
-      embeds: [buildVerifyXChannelEmbed()],
-      components: buildVerifyXChannelButtons()
-    });
-  } catch (error) {
-    console.error('[VerifyX] Failed to ensure verify prompt:', error.message);
-  }
+async function ensureVerifyXPrompt() {
+  // Dedicated verify-x channel removed; no-op.
 }
 
 async function ensureHumanVerifyPrompt(guild) {
@@ -1984,7 +1905,6 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
     startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
   }
 
-  await ensureVerifyXPrompt(firstGuild);
   await ensureHumanVerifyPrompt(firstGuild);
   await ensureDevIntelPrompt(firstGuild);
 
@@ -2020,12 +1940,7 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
               await assignXVerifiedRole(member);
             }
 
-            const verifyChannel = findXVerifyTextChannel(guild);
-            if (verifyChannel) {
-              await verifyChannel
-                .send(`✅ <@${discordUserId}> has been verified as **@${handle}** (X DM)`)
-                .catch(() => {});
-            }
+            // verify-x channel removed; DM + profile is the UX.
           }
 
           try {
@@ -2181,7 +2096,7 @@ client.on('interactionCreate', async (interaction) => {
             '',
             `Open X and send your verification code in a **DM to @${xName}** from **@${submitted}** (the account you are verifying).`,
             '',
-            'If this button is from an old message, you can ignore it — use **Connect X** on `!profile`, **#verify-x**, or the **web dashboard** (OAuth).'
+            'If this button is from an old message, you can ignore it — use **Connect X** on `!profile` or the **web dashboard** (OAuth).'
           ].join('\n'),
           ephemeral: true
         });
@@ -2213,7 +2128,7 @@ client.on('interactionCreate', async (interaction) => {
       if (parts[0] === 'xverify_accept' || parts[0] === 'xverify_deny') {
         await interaction.reply({
           content:
-            '❌ That X verification message used the **old** flow.\nUsers now link X with **OAuth** (**Connect X** on `!profile`, **#verify-x**, or the **web dashboard**).',
+            '❌ That X verification message used the **old** flow.\nUsers now link X with **OAuth** (**Connect X** on `!profile` or the **web dashboard**).',
           ephemeral: true
         });
         return;
@@ -2978,7 +2893,7 @@ if (lowerContent === '!scanner off') {
         if (mode === 'verified_x_tag' && !profile.isXVerified) {
           await replyText(
             message,
-            `❌ You do not have a linked X handle yet.\nUse **#${X_VERIFY_CHANNEL_NAME}**, **!myprofile → Connect X**, or the web dashboard.`
+            `❌ You do not have a linked X handle yet.\nUse **!myprofile → Connect X** or the web dashboard.`
           );
           return;
         }

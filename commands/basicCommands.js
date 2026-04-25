@@ -552,7 +552,7 @@ function createCommandsEmbed(message) {
         '`!tracked` / `!tracked [CA]` — summary or detail\n' +
         '`!caller [name]` or `!caller @user` — caller stats\n' +
         '`!callerboard` / `!botstats` — leaderboards & McGBot stats\n' +
-        '`!profile` / `!myprofile` — profile + **Connect X** (or **#verify-x** / dashboard)\n' +
+        '`!profile` / `!myprofile` — profile + **Connect X** (dashboard OAuth)\n' +
         '`!credit` anonymous|discord|xtag — public credit label',
       inline: false
     },

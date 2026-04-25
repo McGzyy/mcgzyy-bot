@@ -62,7 +62,7 @@ Use a **known-good contract** you are allowed to test with (not financial advice
 
 | # | Action | Commands / UI | Verify |
 |---|--------|----------------|--------|
-| 4.1 | Start OAuth | `#verify-x` and/or profile **Connect X** | Ephemeral reply with **Connect with X** link; env `X_OAUTH2_*` set on bot host. |
+| 4.1 | Start OAuth | profile **Connect X** and/or web dashboard | Ephemeral reply with **Connect with X** link; env `X_OAUTH2_*` set on bot host. |
 | 4.2 | Finish on X | User approves in browser | After redirect, dashboard calls `POST /internal/x-oauth/complete`; profile shows verified handle; **X Verified** role if configured. |
 
 ---

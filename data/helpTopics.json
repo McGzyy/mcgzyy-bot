@@ -143,14 +143,13 @@
     {
       "title": "X account linking",
       "faq": true,
-      "faqSummary": "Link X with **OAuth** from **`#verify-x`**, **`!profile` → Connect X**, or the **web dashboard** — no bio code, tweet, or mod approval.",
+      "faqSummary": "Link X with **OAuth** from **`!profile` → Connect X** or the **web dashboard** — no bio code, tweet, or mod approval.",
       "category": "Account",
       "keywords": [
         "x",
         "twitter",
         "verify",
         "verification",
-        "verify-x",
         "handle",
         "link x"
       ],
@@ -160,7 +159,7 @@
         "x handle verify",
         "blue check x"
       ],
-      "content": "Linking **X (Twitter)** proves which handle is yours so the bot can show a **consistent public identity** on calls (when you choose that credit mode).\n\nUse **#verify-x**, **`!profile` → Connect X**, or your **web dashboard**: you sign in with X (**OAuth 2.0**). The bot stores your **@handle** when X confirms the login.\n\nThere is **no** verification code in your bio, **no** tweet requirement, and **no** mod approval step for X.",
+      "content": "Linking **X (Twitter)** proves which handle is yours so the bot can show a **consistent public identity** on calls (when you choose that credit mode).\n\nUse **`!profile` → Connect X** or your **web dashboard**: you sign in with X (**OAuth 2.0**). The bot stores your **@handle** when X confirms the login.\n\nThere is **no** verification code in your bio, **no** tweet requirement, and **no** mod approval step for X.",
       "relatedCommands": ["!profile", "!myprofile", "!credit"]
     },
     {

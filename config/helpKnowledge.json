@@ -95,7 +95,7 @@
       "id": "profile_x",
       "category": "profile",
       "keywords": ["profile", "!profile", "!myprofile", "verify", "x", "twitter", "credit", "!credit", "xtag", "anonymous"],
-      "helpText": "**`!profile`** / **`!myprofile`** opens your caller profile (with **Connect X** when it is your own profile).\n\nUse **`!credit anonymous`**, **`!credit discord`**, or **`!credit xtag`** to choose how your name shows on calls.\n\nLink X via **OAuth** from **#verify-x**, the profile button, or the **web dashboard** — no bio code, tweet, or mod approval.",
+      "helpText": "**`!profile`** / **`!myprofile`** opens your caller profile (with **Connect X** when it is your own profile).\n\nUse **`!credit anonymous`**, **`!credit discord`**, or **`!credit xtag`** to choose how your name shows on calls.\n\nLink X via **OAuth** from the profile button or the **web dashboard** — no bio code, tweet, or mod approval.",
       "relatedCommands": ["!profile", "!myprofile", "!credit"]
     },
     {

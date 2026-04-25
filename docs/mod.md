@@ -154,7 +154,7 @@ This creates a review card in `#mod-approvals`.
 
 Linking **X** lets members use a **verified @handle** on calls when they choose that credit mode.
 
-* Members complete **OAuth 2.0** via **Connect X** on `!profile`, **#verify-x**, or the **web dashboard** (same bot API).
+* Members complete **OAuth 2.0** via **Connect X** on `!profile` or the **web dashboard** (same bot API).
 * **No** bio codes, **no** tweets, and **no** moderator approval step for X.
 * Ensure the **X Verified** role exists if your server assigns it after linking.
 

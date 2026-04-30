@@ -1899,6 +1899,22 @@ async function ensureHumanVerifyPrompt(guild) {
 client.once('clientReady', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
+  const primaryGuildForJoin = String(process.env.DISCORD_GUILD_ID ?? '').trim();
+  if (UNVERIFIED_ROLE_ID) {
+    console.log(
+      `[MemberJoin] Unverified on join: ON — role ${UNVERIFIED_ROLE_ID}${
+        primaryGuildForJoin
+          ? ` (only guild ${primaryGuildForJoin})`
+          : ' (any guild this bot is in)'
+      }`
+    );
+  } else {
+    console.log(
+      '[MemberJoin] Unverified on join: OFF — DISCORD_UNVERIFIED_ROLE_ID is empty. ' +
+        'Set it in the .env on the computer that runs this bot file (not the website / Vercel).'
+    );
+  }
+
   setImmediate(() => {
     try {
       startAdminReports(client);

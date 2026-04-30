@@ -164,8 +164,21 @@ const devEditSessions = new Map();
 const DEV_EDIT_SESSION_TTL_MS = 10 * 60 * 1000;
 
 // Human verification (server gate) — keep this fast and low-friction.
-const HUMAN_VERIFY_CHANNEL_NAME = 'verification';
-const HUMAN_VERIFIED_ROLE_ID = '1482446226027843757';
+//
+// Intended flow:
+// 1) New member joins → `assignUnverifiedRoleOnJoin` adds DISCORD_UNVERIFIED_ROLE_ID (optional env).
+// 2) They use #verification (name configurable) → Verify button → simple math modal.
+// 3) Correct answer → add HUMAN_VERIFIED_ROLE_ID (default snowflake below), then remove unverified if set.
+const HUMAN_VERIFY_CHANNEL_NAME = (() => {
+  const t = String(process.env.HUMAN_VERIFY_CHANNEL_NAME ?? '').trim();
+  return t || 'verification';
+})();
+const HUMAN_VERIFIED_ROLE_ID = (() => {
+  const t = String(process.env.HUMAN_VERIFIED_ROLE_ID ?? '').trim();
+  return t || '1482446226027843757';
+})();
+/** Snowflake; optional — assign to new non-bot members on join (see `assignUnverifiedRoleOnJoin`). */
+const UNVERIFIED_ROLE_ID = String(process.env.DISCORD_UNVERIFIED_ROLE_ID ?? '').trim();
 const HUMAN_VERIFY_TTL_MS = 5 * 60 * 1000;
 const HUMAN_VERIFY_LOCK_MS = 60 * 1000;
 /** @type {Map<string, { a: number, b: number, answer: number, exp: number, attempts: number, lockedUntil: number }>} */
@@ -175,11 +188,37 @@ const humanVerifyChallenges = new Map();
 
 function findHumanVerifyTextChannel(guild) {
   if (!guild?.channels?.cache) return null;
+  const want = HUMAN_VERIFY_CHANNEL_NAME.toLowerCase();
   return (
     guild.channels.cache.find(
-      ch => ch.isTextBased && typeof ch.isTextBased === 'function' && ch.isTextBased() && ch.name === HUMAN_VERIFY_CHANNEL_NAME
+      ch =>
+        ch.isTextBased &&
+        typeof ch.isTextBased === 'function' &&
+        ch.isTextBased() &&
+        String(ch.name || '').toLowerCase() === want
     ) || null
   );
+}
+
+/**
+ * @param {import('discord.js').GuildMember} member
+ * @returns {Promise<void>}
+ */
+async function assignUnverifiedRoleOnJoin(member) {
+  try {
+    if (!member?.guild || member.user?.bot) return;
+    if (!UNVERIFIED_ROLE_ID) return;
+
+    const primaryGuild = String(process.env.DISCORD_GUILD_ID ?? '').trim();
+    if (primaryGuild && member.guild.id !== primaryGuild) return;
+
+    if (member.roles.cache.has(UNVERIFIED_ROLE_ID)) return;
+    if (member.roles.cache.has(HUMAN_VERIFIED_ROLE_ID)) return;
+
+    await member.roles.add(UNVERIFIED_ROLE_ID, 'New member — default unverified');
+  } catch (e) {
+    console.error('[MemberJoin] assign unverified role:', /** @type {Error} */ (e).message || e);
+  }
 }
 
 const DEV_INTEL_PROMPT_TITLE = '📋 Submit a Dev';
@@ -1970,10 +2009,11 @@ console.log(`📡 Alerts will post in: #${botChannel.name}`);
 
 client.on('guildMemberAdd', member => {
   Promise.resolve()
+    .then(() => assignUnverifiedRoleOnJoin(member))
     .then(() => handleReferralGuildMemberAdd(member))
     .then(() => ensureHumanVerifyPrompt(member?.guild))
     .catch(err => {
-      console.error('[Referral] guildMemberAdd handler:', err?.message || err);
+      console.error('[guildMemberAdd] handler:', err?.message || err);
     });
 });
 
@@ -2475,6 +2515,14 @@ let updated = null;
           return;
         } finally {
           humanVerifyChallenges.delete(interaction.user.id);
+        }
+
+        if (UNVERIFIED_ROLE_ID) {
+          await member.roles
+            .remove(UNVERIFIED_ROLE_ID, 'Human verification passed')
+            .catch(err => {
+              console.error('[HumanVerify] remove unverified role:', err?.message || err);
+            });
         }
 
         await interaction.reply({

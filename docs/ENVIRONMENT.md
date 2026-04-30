@@ -168,6 +168,16 @@ Loaded via **`dotenv`** from **`.env`** in the project root (unless the host inj
 |----------|---------|---------|
 | **`DISCORD_TOKEN`** | `index.js` | `client.login` — bot cannot start without it. |
 
+**Optional — member join & human verify (`index.js`):**
+
+| Variable | Purpose |
+|----------|---------|
+| **`DISCORD_UNVERIFIED_ROLE_ID`** | Discord role snowflake assigned automatically to **non-bot** members on `guildMemberAdd`. Skipped if the member already has this role or the verified role. If **`DISCORD_GUILD_ID`** is set, assignment only runs in that guild. Requires the bot role **above** this role in Server Settings → Roles and **Manage Roles** permission. |
+| **`HUMAN_VERIFIED_ROLE_ID`** | Snowflake added when the user passes the **Verify** math check in the verification channel (default `1482446226027843757` if unset). |
+| **`HUMAN_VERIFY_CHANNEL_NAME`** | Text channel **name** where the bot posts the verify embed (default `verification`). Must match your channel name exactly. |
+
+After a successful verify, the bot adds **`HUMAN_VERIFIED_ROLE_ID`** and removes **`DISCORD_UNVERIFIED_ROLE_ID`** when that env is set, so members do not keep both roles.
+
 ### 7.2 Required for owner-only commands
 
 | Variable | Used in | Purpose |

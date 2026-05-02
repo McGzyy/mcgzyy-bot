@@ -50,7 +50,7 @@ const autoCallConfig = {
     // FaSol-inspired bot-call quality gates (only enforce when data is available)
     minAgeMinutes: 5,
     requireMigrated: true,
-    minVolume5m: 25000,
+    minVolume5m: 15000,
     minVolume24h: 40000,
     minTrades24h: 1500,
     minBuys24h: 250,
@@ -107,7 +107,7 @@ const autoCallConfig = {
     balanced: {
       minScore: 52,
       minLiquidity: 15000,
-      minVolume5m: 25000,
+      minVolume5m: 15000,
       minBuySellRatio5m: 1.01, // loosened further
       maxAgeMinutes: 240,
       maxCallsPerHour: 8

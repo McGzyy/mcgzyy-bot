@@ -117,7 +117,7 @@ const CALL_CLUB_MILESTONES = [
  * @param {string} discordId
  * @param {number} athMultiple
  * @param {string | null} callPerformanceId
- * @param {{ excludedFromStats?: boolean, source?: string }} gates
+ * @param {{ excludedFromStats?: boolean, hiddenFromDashboard?: boolean, source?: string }} gates
  */
 async function grantCallClubMilestonesIfEligible(
   discordId,
@@ -132,6 +132,7 @@ async function grantCallClubMilestonesIfEligible(
   if (!did || did.toUpperCase() === 'AUTO_BOT') return;
 
   if (gates.excludedFromStats === true) return;
+  if (gates.hiddenFromDashboard === true) return;
   if (String(gates.source || 'user').trim() !== 'user') return;
 
   const m = Number(athMultiple);
@@ -290,7 +291,8 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
         ? opts.messageUrl.trim().slice(0, 500)
         : null,
     role: callerRoleForDiscordId(discordId),
-    excluded_from_stats: tracked.excludedFromStats === true
+    excluded_from_stats: tracked.excludedFromStats === true,
+    hidden_from_dashboard: tracked.hiddenFromDashboard === true
   };
 
   const { data, error } = await sb
@@ -310,6 +312,7 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
     if (row.source === 'user') {
       queueGrantCallClubMilestones(discordId, Number(row.ath_multiple), id, {
         excludedFromStats: row.excluded_from_stats === true,
+        hiddenFromDashboard: row.hidden_from_dashboard === true,
         source: row.source
       });
     }
@@ -363,7 +366,9 @@ async function updateUserCallPerformanceAth(contractAddress) {
     token_name: tokenNameRaw ? tokenNameRaw.slice(0, 160) : null,
     token_ticker: tokenTickerRaw ? tokenTickerRaw.slice(0, 48) : null,
     call_market_cap_usd: callMc,
-    token_image_url: tokenImageUrl
+    token_image_url: tokenImageUrl,
+    excluded_from_stats: tracked.excludedFromStats === true,
+    hidden_from_dashboard: tracked.hiddenFromDashboard === true
   };
 
   const { error } = await sb.from('call_performance').update(patch).eq('id', rowId);
@@ -384,6 +389,7 @@ async function updateUserCallPerformanceAth(contractAddress) {
   if (rowSource === 'user' && callerId && callerId.toUpperCase() !== 'AUTO_BOT') {
     queueGrantCallClubMilestones(callerId, mult, rowId, {
       excludedFromStats: tracked.excludedFromStats === true,
+      hiddenFromDashboard: tracked.hiddenFromDashboard === true,
       source: 'user'
     });
   }

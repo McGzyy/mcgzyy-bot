@@ -17,10 +17,12 @@ const {
 const {
   initTrackedCallsStore,
   getAllTrackedCalls,
-  getPendingApprovals
+  getPendingApprovals,
+  getTrackedCall,
+  setTrackedCallDashboardHidden
 } = require('./utils/trackedCallsService');
 const { listDevSubmissionsPostedToModApprovals } = require('./utils/devSubmissionService');
-const { isModOrAdminDiscordUserId } = require('./utils/modStaffGate');
+const { isModOrAdminDiscordUserId, isAdminDiscordUserId } = require('./utils/modStaffGate');
 const { getModActionStatsSummary } = require('./utils/modActionsService');
 const { applyDashboardCallDecision } = require('./utils/dashboardCallApproval');
 const {
@@ -690,6 +692,93 @@ function startReferralApiServer(discordClient = null, opts = {}) {
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'mod-stats failed';
       console.error('[API] GET /internal/mod-stats', msg);
+      res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+  });
+
+  app.post('/internal/admin/call-dashboard-visibility', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error: 'CALL_INTERNAL_SECRET is not set on the bot host.'
+        });
+        return;
+      }
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+      const userId = String(
+        req.headers['x-discord-user-id'] || req.headers['X-Discord-User-Id'] || ''
+      ).trim();
+      if (!userId) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing X-Discord-User-Id header.'
+        });
+        return;
+      }
+      if (!isAdminDiscordUserId(userId)) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden — requires DISCORD_ADMIN_IDS.'
+        });
+        return;
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const contractAddress = String(body.contractAddress || body.callCa || '').trim();
+      const hiddenFlag = body.hidden;
+      if (!contractAddress || (hiddenFlag !== true && hiddenFlag !== false)) {
+        res.status(400).json({
+          success: false,
+          error: 'JSON body must include string "contractAddress" and boolean "hidden" (true to hide, false to restore).'
+        });
+        return;
+      }
+      const hidden = hiddenFlag === true;
+
+      const before = getTrackedCall(contractAddress);
+      if (!before) {
+        res.status(404).json({ success: false, error: 'Tracked call not found for contract.' });
+        return;
+      }
+
+      const reason =
+        typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim().slice(0, 500) : null;
+      const actorUsername = String(
+        req.headers['x-discord-username'] || req.headers['X-Discord-Username'] || ''
+      ).trim();
+
+      const result = setTrackedCallDashboardHidden(contractAddress, hidden, {
+        byDiscordId: userId,
+        byUsername: actorUsername || null,
+        ...(reason ? { reason } : {})
+      });
+
+      if (!result.success) {
+        res.status(400).json({ success: false, error: result.error || 'update_failed' });
+        return;
+      }
+
+      res.json({
+        success: true,
+        contractAddress,
+        hiddenFromDashboard: Boolean(hidden),
+        call: {
+          contractAddress: result.call?.contractAddress,
+          tokenName: result.call?.tokenName,
+          ticker: result.call?.ticker,
+          callSourceType: result.call?.callSourceType,
+          hiddenFromDashboard: result.call?.hiddenFromDashboard === true
+        }
+      });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'call-dashboard-visibility failed';
+      console.error('[API] POST /internal/admin/call-dashboard-visibility', msg);
       res.status(500).json({ success: false, error: 'Internal Server Error' });
     }
   });

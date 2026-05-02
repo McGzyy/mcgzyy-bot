@@ -31,7 +31,12 @@ function isModOrAdminDiscordUserId(discordUserId) {
   return r === 'mod' || r === 'admin';
 }
 
+function isAdminDiscordUserId(discordUserId) {
+  return resolveStaffRole(discordUserId) === 'admin';
+}
+
 module.exports = {
   resolveStaffRole,
-  isModOrAdminDiscordUserId
+  isModOrAdminDiscordUserId,
+  isAdminDiscordUserId
 };

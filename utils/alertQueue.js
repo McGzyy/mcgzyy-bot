@@ -242,7 +242,14 @@ async function processQueue() {
           `[AlertQueue] Sent ${item.meta.type || 'alert'} for ${item.meta.contractAddress || 'unknown'}`
         );
       } catch (err) {
-        console.error('[AlertQueue] Failed to send alert:', err.message);
+        const meta = item.meta || {};
+        console.error(
+          '[AlertQueue] Failed to send alert:',
+          meta.type || 'alert',
+          meta.contractAddress || '',
+          err && err.message ? err.message : err,
+          err && err.stack ? '\n' + err.stack : ''
+        );
       }
     }
   } finally {

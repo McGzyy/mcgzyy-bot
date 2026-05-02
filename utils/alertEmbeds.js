@@ -470,9 +470,6 @@ function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent, real
 
   applyScanThumbnailToEmbed(embed, thumbnailPayload);
 
-  const buttons = buildEliteCallLinkButtons(thumbnailPayload);
-  if (buttons) embed._eliteButtons = buttons;
-
   return embed;
 }
 
@@ -527,9 +524,6 @@ function createDumpEmbed(coin, scan, dumpKey, drawdownPercent) {
   }
 
   applyScanThumbnailToEmbed(embed, thumbnailPayload);
-
-  const buttons = buildEliteCallLinkButtons(thumbnailPayload);
-  if (buttons) embed._eliteButtons = buttons;
 
   return embed;
 }

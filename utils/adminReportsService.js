@@ -122,6 +122,7 @@ function computePerformanceStats() {
   let nBot5x = 0;
 
   for (const c of calls) {
+    if (c.hiddenFromDashboard === true) continue;
     const src = String(c.callSourceType || '').toLowerCase();
 
     if (src === 'bot_call') {

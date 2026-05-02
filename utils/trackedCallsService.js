@@ -99,6 +99,15 @@ function normalizeTrackedCall(call = {}) {
 
     approvalStatus: call.approvalStatus || 'none',
     excludedFromStats: call.excludedFromStats === true,
+    hiddenFromDashboard: call.hiddenFromDashboard === true,
+    dashboardHiddenAt: call.dashboardHiddenAt || null,
+    dashboardHiddenByDiscordId: call.dashboardHiddenByDiscordId || null,
+    dashboardHiddenByUsername: call.dashboardHiddenByUsername || null,
+    dashboardHiddenReason:
+      typeof call.dashboardHiddenReason === 'string' ? call.dashboardHiddenReason : '',
+    dashboardVisibilityHistory: Array.isArray(call.dashboardVisibilityHistory)
+      ? call.dashboardVisibilityHistory
+      : [],
     moderationTags: Array.isArray(call.moderationTags) ? call.moderationTags : [],
     moderationNotes: typeof call.moderationNotes === 'string' ? call.moderationNotes : '',
     moderatedById: call.moderatedById || null,
@@ -138,11 +147,16 @@ function getAllTrackedCalls() {
   return loadTrackedCalls();
 }
 
+function isCallVisibleOnDashboard(call) {
+  return call && call.hiddenFromDashboard !== true;
+}
+
 function getRecentBotCalls(limit = 10) {
   const tracked = getAllTrackedCalls();
 
   return tracked
     .filter(call => call.callSourceType === 'bot_call')
+    .filter(isCallVisibleOnDashboard)
     .sort((a, b) => {
       const aTime = new Date(a.calledAt || a.createdAt || 0).getTime();
       const bTime = new Date(b.calledAt || b.createdAt || 0).getTime();
@@ -499,6 +513,15 @@ function saveTrackedCall(
 
       approvalStatus: existing.approvalStatus || 'none',
       excludedFromStats: existing.excludedFromStats === true,
+      hiddenFromDashboard: existing.hiddenFromDashboard === true,
+      dashboardHiddenAt: existing.dashboardHiddenAt || null,
+      dashboardHiddenByDiscordId: existing.dashboardHiddenByDiscordId || null,
+      dashboardHiddenByUsername: existing.dashboardHiddenByUsername || null,
+      dashboardHiddenReason:
+        typeof existing.dashboardHiddenReason === 'string' ? existing.dashboardHiddenReason : '',
+      dashboardVisibilityHistory: Array.isArray(existing.dashboardVisibilityHistory)
+        ? existing.dashboardVisibilityHistory
+        : [],
       moderationTags: Array.isArray(existing.moderationTags) ? existing.moderationTags : [],
       moderationNotes: typeof existing.moderationNotes === 'string' ? existing.moderationNotes : '',
       moderatedById: existing.moderatedById || null,
@@ -573,6 +596,12 @@ function saveTrackedCall(
 
     approvalStatus: 'none',
     excludedFromStats: false,
+    hiddenFromDashboard: false,
+    dashboardHiddenAt: null,
+    dashboardHiddenByDiscordId: null,
+    dashboardHiddenByUsername: null,
+    dashboardHiddenReason: '',
+    dashboardVisibilityHistory: [],
     moderationTags: [],
     moderationNotes: '',
     moderatedById: null,
@@ -881,6 +910,61 @@ function setXPostState(contractAddress, updates = {}) {
     xLastPostedAt: updates.xLastPostedAt ?? undefined
   });
 }
+
+/**
+ * Admin: hide or restore a call on the web dashboard. Tracked row stays (duplicate-call / monitor unchanged).
+ * @param {string} contractAddress
+ * @param {boolean} hidden
+ * @param {{ byDiscordId?: string|null, byUsername?: string|null, reason?: string|null }} [meta]
+ */
+function setTrackedCallDashboardHidden(contractAddress, hidden, meta = {}) {
+  const ca = String(contractAddress || '').trim();
+  if (!ca) return { success: false, error: 'missing_contract' };
+
+  const calls = loadTrackedCalls();
+  const idx = calls.findIndex(c => String(c.contractAddress || '').trim() === ca);
+  if (idx === -1) return { success: false, error: 'not_found' };
+
+  const existing = normalizeTrackedCall(calls[idx]);
+  const history = Array.isArray(existing.dashboardVisibilityHistory)
+    ? [...existing.dashboardVisibilityHistory]
+    : [];
+
+  history.push({
+    at: new Date().toISOString(),
+    hidden: Boolean(hidden),
+    byDiscordId: meta.byDiscordId || null,
+    byUsername: meta.byUsername || null,
+    reason:
+      typeof meta.reason === 'string' && meta.reason.trim()
+        ? meta.reason.trim().slice(0, 500)
+        : null
+  });
+
+  const updated = normalizeTrackedCall({
+    ...existing,
+    hiddenFromDashboard: Boolean(hidden),
+    dashboardHiddenAt: hidden ? new Date().toISOString() : null,
+    dashboardHiddenByDiscordId: hidden ? meta.byDiscordId || null : null,
+    dashboardHiddenByUsername: hidden ? meta.byUsername || null : null,
+    dashboardHiddenReason:
+      hidden && typeof meta.reason === 'string' ? meta.reason.trim().slice(0, 500) : '',
+    dashboardVisibilityHistory: history.slice(-30)
+  });
+
+  calls[idx] = refreshPublicCallerName(updated);
+  saveTrackedCalls(calls);
+
+  try {
+    const { queueUpdateUserCallPerformanceAth } = require('./callPerformanceSync');
+    queueUpdateUserCallPerformanceAth(ca);
+  } catch (_) {
+    /* optional mirror */
+  }
+
+  return { success: true, call: calls[idx] };
+}
+
 /**
  * =========================
  * STATS RESET HELPERS
@@ -997,6 +1081,7 @@ module.exports = {
   saveTrackedCalls,
   getTrackedCall,
   getAllTrackedCalls,
+  isCallVisibleOnDashboard,
   getRecentBotCalls,
   getApprovalStats,
   getPendingApprovals,
@@ -1019,5 +1104,6 @@ module.exports = {
 
   excludeTrackedCallsFromStatsByCaller,
   excludeTrackedBotCallsFromStats,
+  setTrackedCallDashboardHidden,
   resetAllTrackedCalls,
 };

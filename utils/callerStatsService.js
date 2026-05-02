@@ -64,6 +64,7 @@ function isHumanUserCall(call) {
     call &&
     call.callSourceType === 'user_call' &&
     !call.excludedFromStats &&
+    call.hiddenFromDashboard !== true &&
     !['denied', 'excluded', 'expired'].includes(String(call.approvalStatus || '').toLowerCase())
   );
 }
@@ -73,6 +74,7 @@ function isBotCall(call) {
     call &&
     call.callSourceType === 'bot_call' &&
     !call.excludedFromStats &&
+    call.hiddenFromDashboard !== true &&
     !['denied', 'excluded', 'expired'].includes(String(call.approvalStatus || '').toLowerCase())
   );
 }
@@ -222,6 +224,7 @@ function getCallerStatsRaw(input) {
     .filter(call =>
       call &&
       call.callSourceType === 'user_call' &&
+      call.hiddenFromDashboard !== true &&
       !['denied', 'excluded', 'expired'].includes(String(call.approvalStatus || '').toLowerCase())
     );
 
@@ -542,6 +545,7 @@ function getBotStatsRaw() {
     .filter(call =>
       call &&
       call.callSourceType === 'bot_call' &&
+      call.hiddenFromDashboard !== true &&
       !['denied', 'excluded', 'expired'].includes(String(call.approvalStatus || '').toLowerCase())
     )
     .filter(isValid);

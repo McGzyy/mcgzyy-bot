@@ -661,13 +661,29 @@ function buildReplyOptions(coin, channel) {
  * =========================
  */
 
+const MILESTONE_CHART_TIMEOUT_MS = 15_000;
+
+/**
+ * Never block the alert queue on OHLCV/chart work (slow providers / canvas hangs).
+ * @param {object} params same shape as `buildOhlcvCandlestickBuffer` options
+ * @returns {Promise<Buffer|null>}
+ */
+function buildOhlcvCandlestickBufferWithTimeout(params) {
+  return Promise.race([
+    buildOhlcvCandlestickBuffer(params),
+    new Promise(resolve => {
+      setTimeout(() => resolve(null), MILESTONE_CHART_TIMEOUT_MS);
+    })
+  ]);
+}
+
 function queueMilestone(channel, coin, scan, key, perf, realXFromCall) {
   enqueueAlert(async () => {
     const replyOptions = buildReplyOptions(coin, channel);
 
     const pair = resolveOhlcvPairAddress(coin, scan);
     const overlay = getCandlestickOverlayProps(coin, scan);
-    const chartBuf = await buildOhlcvCandlestickBuffer({
+    const chartBuf = await buildOhlcvCandlestickBufferWithTimeout({
       pairAddress: pair,
       contractAddress: coin.contractAddress,
       title: scan?.ticker || coin?.ticker || 'OHLC',
@@ -675,7 +691,6 @@ function queueMilestone(channel, coin, scan, key, perf, realXFromCall) {
     });
 
     const embed = createMilestoneEmbed(coin, scan, key, perf, realXFromCall);
-    const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
     const payload = {
       embeds: [embed],
       ...replyOptions
@@ -684,10 +699,7 @@ function queueMilestone(channel, coin, scan, key, perf, realXFromCall) {
     if (chartBuf) {
       embed.setImage('attachment://chart.png');
       payload.files = [new AttachmentBuilder(chartBuf, { name: 'chart.png' })];
-      const tfRows = buildOhlcvTimeframeRows(coin.contractAddress, '5m');
-      payload.components = [...(eliteRow ? [eliteRow] : []), ...tfRows];
-    } else if (eliteRow) {
-      payload.components = [eliteRow];
+      payload.components = buildOhlcvTimeframeRows(coin.contractAddress, '5m');
     }
 
     await channel.send(payload);
@@ -703,10 +715,8 @@ function queueDump(channel, coin, scan, key, drawdown) {
     const replyOptions = buildReplyOptions(coin, channel);
 
     const dumpEmbed = createDumpEmbed(coin, scan, key, drawdown);
-    const eliteRow = dumpEmbed && dumpEmbed._eliteButtons ? dumpEmbed._eliteButtons : null;
     await channel.send({
       embeds: [dumpEmbed],
-      ...(eliteRow ? { components: [eliteRow] } : {}),
       ...replyOptions
     });
   }, {

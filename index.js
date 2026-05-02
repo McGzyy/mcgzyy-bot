@@ -119,9 +119,12 @@ const {
   setModerationNotes,
   excludeTrackedCallsFromStatsByCaller,
   excludeTrackedBotCallsFromStats,
+  setTrackedCallDashboardHidden,
   setXPostState,
   resetAllTrackedCalls,
 } = require('./utils/trackedCallsService');
+
+const { resolveStaffRole } = require('./utils/modStaffGate');
 
 const {
   loadScannerSettings,
@@ -475,6 +478,13 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
       `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
       `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
       `• \`!truebotstats\` — Bot stats including reset/excluded calls\n\n`;
+  }
+
+  if (resolveStaffRole(message.author.id) === 'admin') {
+    contentOut +=
+      `🪪 **Dashboard admins** (\`DISCORD_ADMIN_IDS\`)\n` +
+      `• \`!hidecall <ca> [reason]\` — Hide call from web dashboard + public stats (still tracked)\n` +
+      `• \`!unhidecall <ca>\` — Restore dashboard visibility\n\n`;
   }
 
   if (canSeeOwnerHelp) {
@@ -3684,6 +3694,56 @@ if (lowerContent === '!recentcalls') {
       lines.join('\n'),
     allowedMentions: { repliedUser: false }
   });
+
+  return;
+}
+
+if (lowerContent.startsWith('!hidecall') || lowerContent.startsWith('!unhidecall')) {
+  if (resolveStaffRole(message.author.id) !== 'admin') {
+    await replyText(
+      message,
+      '❌ Only **DISCORD_ADMIN_IDS** accounts can hide or restore dashboard calls.'
+    );
+    return;
+  }
+
+  const parts = message.content.trim().split(/\s+/);
+  const hidden = lowerContent.startsWith('!hidecall');
+  if (parts.length < 2) {
+    await replyText(
+      message,
+      'Usage: `!hidecall <contract> [reason]` or `!unhidecall <contract>`\n' +
+        'The mint stays tracked (no re-call); it disappears from the web dashboard and public stats embeds.'
+    );
+    return;
+  }
+
+  const ca = parts[1].trim();
+  const existing = getTrackedCall(ca);
+  if (!existing) {
+    await replyText(message, `❌ No tracked call found for \`${ca}\`.`);
+    return;
+  }
+
+  const reasonText = parts.slice(2).join(' ').trim();
+  const res = setTrackedCallDashboardHidden(ca, hidden, {
+    byDiscordId: message.author.id,
+    byUsername: message.author.username,
+    ...(reasonText ? { reason: reasonText } : {})
+  });
+
+  if (!res.success) {
+    await replyText(message, `❌ ${res.error || 'Failed'}.`);
+    return;
+  }
+
+  const short = ca.length > 10 ? `${ca.slice(0, 6)}…${ca.slice(-4)}` : ca;
+  await replyText(
+    message,
+    hidden
+      ? `✅ Hidden **${existing.tokenName || 'Token'}** (\`${short}\`) from the dashboard. Still tracked.`
+      : `✅ Restored **${existing.tokenName || 'Token'}** (\`${short}\`) on the dashboard.`
+  );
 
   return;
 }

@@ -124,7 +124,7 @@ const {
   resetAllTrackedCalls,
 } = require('./utils/trackedCallsService');
 
-const { resolveStaffRole } = require('./utils/modStaffGate');
+const { resolveStaffRole, isModOrAdminDiscordUserId } = require('./utils/modStaffGate');
 
 const {
   loadScannerSettings,
@@ -3699,10 +3699,10 @@ if (lowerContent === '!recentcalls') {
 }
 
 if (lowerContent.startsWith('!hidecall') || lowerContent.startsWith('!unhidecall')) {
-  if (resolveStaffRole(message.author.id) !== 'admin') {
+  if (!isModOrAdminDiscordUserId(message.author.id)) {
     await replyText(
       message,
-      '❌ Only **DISCORD_ADMIN_IDS** accounts can hide or restore dashboard calls.'
+      '❌ Only **DISCORD_MOD_IDS** / **DISCORD_ADMIN_IDS** accounts can hide or restore dashboard calls.'
     );
     return;
   }

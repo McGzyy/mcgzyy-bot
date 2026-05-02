@@ -22,7 +22,7 @@ const {
   setTrackedCallDashboardHidden
 } = require('./utils/trackedCallsService');
 const { listDevSubmissionsPostedToModApprovals } = require('./utils/devSubmissionService');
-const { isModOrAdminDiscordUserId, isAdminDiscordUserId } = require('./utils/modStaffGate');
+const { isModOrAdminDiscordUserId } = require('./utils/modStaffGate');
 const { getModActionStatsSummary } = require('./utils/modActionsService');
 const { applyDashboardCallDecision } = require('./utils/dashboardCallApproval');
 const {
@@ -721,10 +721,10 @@ function startReferralApiServer(discordClient = null, opts = {}) {
         });
         return;
       }
-      if (!isAdminDiscordUserId(userId)) {
+      if (!isModOrAdminDiscordUserId(userId)) {
         res.status(403).json({
           success: false,
-          error: 'Forbidden — requires DISCORD_ADMIN_IDS.'
+          error: 'Forbidden — requires DISCORD_MOD_IDS or DISCORD_ADMIN_IDS.'
         });
         return;
       }

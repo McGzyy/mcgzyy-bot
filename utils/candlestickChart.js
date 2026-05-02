@@ -355,6 +355,26 @@ function hasUsableVolume(normalized) {
 }
 
 /**
+ * Reject ATH token-USD values that are orders of magnitude off the OHLC envelope (wrong MC/field mixups),
+ * which would pin the Y scale and make candles invisible.
+ * @param {number} ath
+ * @param {Array<{ l: number, h: number }>} normalized
+ * @returns {boolean}
+ */
+function athPricePlausibleForCandles(ath, normalized) {
+  if (!Number.isFinite(ath) || ath <= 0 || !Array.isArray(normalized) || normalized.length < 1) {
+    return false;
+  }
+  const lo = Math.min(...normalized.map(c => c.l));
+  const hi = Math.max(...normalized.map(c => c.h));
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return false;
+  const hiClamp = Math.max(hi, Math.abs(lo) * 1e-6, 1e-18);
+  if (ath > hiClamp * 1e6) return false;
+  if (lo > 0 && ath < lo / 1e6) return false;
+  return true;
+}
+
+/**
  * @param {unknown} raw
  * @returns {Array<{ t: number, p: number }>}
  */
@@ -457,7 +477,9 @@ async function renderCandlestickChart(candles, options = {}) {
     athRaw !== undefined && athRaw !== null && String(athRaw).trim() !== ''
       ? toNum(athRaw)
       : NaN;
-  const hasAthOverlay = Number.isFinite(athPriceNum);
+  const hasAthOverlay =
+    Number.isFinite(athPriceNum) &&
+    athPricePlausibleForCandles(athPriceNum, normalized);
 
   const migratedAtMs =
     options.migratedAt !== undefined && options.migratedAt !== null
@@ -521,6 +543,9 @@ async function renderCandlestickChart(candles, options = {}) {
       datasets: [
         {
           label,
+          // Must mirror chartjs-chart-financial controller: raw points stay `_parsed` (o/h/l/c + x ms).
+          // If this is omitted and defaults merge fails, Chart parses {x,y} only and strips OHLC → blank chart.
+          parsing: false,
           // Financial plugin expects `x` as epoch **ms number**; `Date` objects parse as NaN → blank plot.
           data: normalized,
           // chartjs-chart-financial: close < open uses `.up`, close > open uses `.down`

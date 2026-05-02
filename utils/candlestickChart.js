@@ -410,6 +410,26 @@ async function renderCandlestickChart(candles, options = {}) {
   const normalized = normalizeCandles(candles);
   if (normalized.length < minCandles) return null;
 
+  /** Zero-height candles (flat pool) are invisible at chart scale — nudge OHLC slightly. */
+  for (let i = 0; i < normalized.length; i++) {
+    const c = normalized[i];
+    const mid = (c.h + c.l) / 2;
+    if (!Number.isFinite(mid) || mid <= 0) continue;
+    const span = Math.abs(c.h - c.l);
+    const rel = span / mid;
+    if (!Number.isFinite(rel) || rel < 1e-14) {
+      const eps = Math.max(mid * 0.004, 1e-18);
+      normalized[i] = {
+        x: c.x,
+        o: Math.min(Math.max(c.o, mid - eps), mid + eps),
+        h: mid + eps,
+        l: Math.max(mid - eps, 1e-18),
+        c: Math.min(Math.max(c.c, mid - eps), mid + eps),
+        ...(Number.isFinite(c.v) && c.v >= 0 ? { v: c.v } : {})
+      };
+    }
+  }
+
   const width = Math.max(
     200,
     Math.min(4096, Number(options.width) || DEFAULT_WIDTH)

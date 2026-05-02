@@ -41,20 +41,36 @@ function pickNonEmptyUrl(...candidates) {
 }
 
 /**
- * DexScreener image first, then GeckoTerminal token metadata, then bot avatar (if set).
+ * Public CDN icon when Dex/Gecko omit `imageUrl` (common on fresh pump pairs).
+ * @param {string} contractAddress
+ * @returns {string}
+ */
+function dexScreenerSolTokenIconUrl(contractAddress) {
+  const ca = String(contractAddress || '').trim();
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,48}$/.test(ca)) return '';
+  return `https://dd.dexscreener.com/ds-data/tokens/solana/${ca}.png`;
+}
+
+/**
+ * DexScreener image first, then GeckoTerminal token metadata, then Dex CDN by mint,
+ * then bot avatar (if set).
  * @param {unknown} scan
  * @returns {string}
  */
 function resolveScanThumbnailUrl(scan) {
-  const token =
-    scan && typeof scan === 'object' ? /** @type {{ token?: unknown }} */ (scan).token : undefined;
+  const s = scan && typeof scan === 'object' ? /** @type {Record<string, unknown>} */ (scan) : null;
+  const token = s?.token;
   const t =
     token && typeof token === 'object'
       ? /** @type {{ imageUrl?: unknown, geckoImageUrl?: unknown }} */ (token)
       : null;
+  const ca = s ? String(s.contractAddress || s.ca || '').trim() : '';
   return pickNonEmptyUrl(
     t?.imageUrl,
     t?.geckoImageUrl,
+    s?.tokenImageUrl,
+    s?.geckoTokenImageUrl,
+    ca ? dexScreenerSolTokenIconUrl(ca) : '',
     getBotEmbedThumbnailFallbackUrl()
   );
 }
@@ -77,6 +93,7 @@ function applyScanThumbnailToEmbed(embed, scan) {
 module.exports = {
   setBotEmbedThumbnailFallbackUrl,
   getBotEmbedThumbnailFallbackUrl,
+  dexScreenerSolTokenIconUrl,
   resolveScanThumbnailUrl,
   applyScanThumbnailToEmbed
 };

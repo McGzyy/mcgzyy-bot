@@ -464,7 +464,14 @@ function buildScanObject(base) {
         t.geckoImageUrl = String(base.geckoTokenImageUrl).trim();
       }
       return Object.keys(t).length ? { token: t } : {};
-    })()
+    })(),
+
+    ...(base.tokenImageUrl && String(base.tokenImageUrl).trim()
+      ? { tokenImageUrl: String(base.tokenImageUrl).trim() }
+      : {}),
+    ...(base.geckoTokenImageUrl && String(base.geckoTokenImageUrl).trim()
+      ? { geckoTokenImageUrl: String(base.geckoTokenImageUrl).trim() }
+      : {})
   };
 }
 

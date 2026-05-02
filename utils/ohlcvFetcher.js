@@ -146,8 +146,19 @@ function toNum(v) {
  */
 function normalizeGeckoRow(row) {
   if (!Array.isArray(row) || row.length < 6) return null;
-  const t = toNum(row[0]);
+  const rawT = row[0];
+  let t = toNum(rawT);
+  if (!Number.isFinite(t) || t <= 0) {
+    if (typeof rawT === 'string' && rawT.trim()) {
+      const parsed = Date.parse(rawT);
+      if (Number.isFinite(parsed)) {
+        t = parsed / 1000;
+      }
+    }
+  }
   if (!Number.isFinite(t) || t <= 0) return null;
+  /** Gecko docs: unix **seconds**; some proxies return ms — normalize to ms for charts. */
+  const timeMs = t > 1e12 ? Math.round(t) : Math.round(t * 1000);
   const open = toNum(row[1]);
   const high = toNum(row[2]);
   const low = toNum(row[3]);
@@ -163,7 +174,7 @@ function normalizeGeckoRow(row) {
     return null;
   }
   return {
-    time: Math.floor(t * 1000),
+    time: timeMs,
     open,
     high,
     low,
@@ -194,7 +205,9 @@ async function geckoTerminalFetch(p) {
   const res = await axios.get(url, {
     params: {
       aggregate: p.aggregate,
-      limit
+      limit,
+      /** Default pool view can be quote-token priced; force USD OHLC so axes match overlays. */
+      currency: 'usd'
     },
     timeout: DEFAULT_TIMEOUT_MS,
     validateStatus: () => true,

@@ -184,7 +184,25 @@ async function buildOhlcvCandlestickBuffer(options = {}) {
   }
 
   try {
-    const bars = await fetchOhlcv({ chain, pairAddress, interval, limit });
+    let bars = await fetchOhlcv({ chain, pairAddress, interval, limit });
+    /** New pools often have no 5m history yet; 1m fills in sooner. */
+    if (
+      (!Array.isArray(bars) || bars.length < 2) &&
+      interval === DEFAULT_OHLCV_INTERVAL &&
+      !rangeKey
+    ) {
+      const altLimit = Math.min(200, OHLCV_MAX_LIMIT);
+      const retry = await fetchOhlcv({
+        chain,
+        pairAddress,
+        interval: '1m',
+        limit: altLimit
+      });
+      if (Array.isArray(retry) && retry.length >= 2) {
+        bars = retry;
+      }
+    }
+
     if (!Array.isArray(bars) || bars.length < 2) {
       logOhlcvBufferIssue({
         pairAddress,

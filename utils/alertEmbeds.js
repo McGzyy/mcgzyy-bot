@@ -208,6 +208,29 @@ function getSafeAth(coin, scan) {
 }
 
 /**
+ * Shallow-merge tracked call + latest scan so thumbnail resolution sees CA, pair, and token/image fields.
+ * @param {object|null|undefined} coin
+ * @param {object|null|undefined} scan
+ * @returns {Record<string, unknown>}
+ */
+function mergeCoinAndScanForThumbnail(coin, scan) {
+  const base = {};
+  if (coin && typeof coin === 'object') Object.assign(base, coin);
+  if (scan && typeof scan === 'object') Object.assign(base, scan);
+  if (scan?.token && typeof scan.token === 'object') {
+    base.token = scan.token;
+  } else if (!base.token && coin?.token && typeof coin.token === 'object') {
+    base.token = coin.token;
+  }
+  const ca =
+    (typeof base.contractAddress === 'string' && base.contractAddress.trim()) ||
+    (typeof coin?.contractAddress === 'string' && coin.contractAddress.trim()) ||
+    '';
+  if (ca) base.contractAddress = ca;
+  return base;
+}
+
+/**
  * =========================
  * PUBLIC CALLER RESOLUTION
  * =========================
@@ -245,10 +268,6 @@ function getOriginalCallerLabel(coin, fallback = 'Auto Bot') {
   });
 
   return formatValue(resolved, fallback);
-}
-
-function buildCoinHeader(name, ticker) {
-  return `# ${formatValue(name, 'Unknown Token')} ($${formatValue(ticker, 'UNKNOWN')})`;
 }
 
 function formatReasonList(reasons) {
@@ -373,70 +392,51 @@ function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent, real
   const quickTradeLinks = buildQuickTradeLinksLine(contractAddress, pairAddress);
   const socialLinks = buildSocialLinksLine(scan);
 
-  const milestoneText = getMilestoneTitle(milestoneKey).toUpperCase();
+  const milestoneLabel = getMilestoneTitle(milestoneKey);
+  const headlineParts = [`**${milestoneLabel}**`];
+  if (realXFromCall != null && Number.isFinite(Number(realXFromCall))) {
+    headlineParts.push(`${Number(realXFromCall).toFixed(2)}x from call`);
+  }
+  const headline = headlineParts.join(' · ');
 
-  const descriptionParts = [
-    buildCoinHeader(tokenName, ticker),
-    '',
-    `# 🔥 ${milestoneText} 🔥`,
-    '',
-    `## ${formatUsd(currentMc)} MC`,
-    `🚀 **Milestone**`,
-    ...(realXFromCall != null && Number.isFinite(Number(realXFromCall))
-      ? [`📈 ${Number(realXFromCall).toFixed(2)}x from call`]
-      : [])
-  ];
+  const metaLine = [
+    `Caller **${originalCaller}**`,
+    `Since first call **${formatPercent(performancePercent)}**`,
+    alertedAgo ? `First call **${alertedAgo}** ago` : null
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
-  if (quickTradeLinks) descriptionParts.push('', quickTradeLinks);
+  const rangeLine = `From ${formatUsd(firstCalledMc)} → ${formatUsd(currentMc)}`;
 
-  descriptionParts.push(
-    '',
-    `**Original Caller:** ${originalCaller}`,
-    `**Since First Call:** ${formatPercent(performancePercent)}`,
-    alertedAgo ? `**Alerted:** ${alertedAgo} ago` : ''
-  );
+  const marketLine = [
+    `MC ${formatUsd(currentMc)}`,
+    `Liq ${formatUsd(scan?.liquidity)}`,
+    `5m ${formatUsd(scan?.volume5m)}`,
+    `1h ${formatUsd(scan?.volume1h)}`,
+    `Age ${formatAgeMinutes(scan?.ageMinutes)}`
+  ].join(' · ');
+
+  const descBody = [headline, rangeLine, metaLine, quickTradeLinks, marketLine].filter(Boolean).join('\n\n');
+  const ca = formatValue(contractAddress, 'Unknown');
+  const thumbnailPayload = mergeCoinAndScanForThumbnail(coin, scan);
 
   const embed = new EmbedBuilder()
-    .setColor(0xffcc33)
-    .setTitle(' ')
-    .setDescription(descriptionParts.join('\n'))
-    .addFields(
-      {
-        name: 'CA',
-        value: `\`${formatValue(contractAddress, 'Unknown')}\``,
-        inline: false
-      },
-      {
-        name: '📈 Performance',
-        value:
-          `**First Called MC:** ${formatUsd(firstCalledMc)}\n` +
-          `**Current MC:** ${formatUsd(currentMc)}\n` +
-          `**Milestone:** ${formatValue(milestoneKey, 'N/A')}` +
-          (realXFromCall != null && Number.isFinite(Number(realXFromCall))
-            ? `\n**From call:** ${Number(realXFromCall).toFixed(2)}x`
-            : ''),
-        inline: true
-      },
-      {
-        name: '📊 Current Setup',
-        value:
-          `**Liquidity:** ${formatUsd(scan?.liquidity)}\n` +
-          `**Vol (5m):** ${formatUsd(scan?.volume5m)}\n` +
-          `**Vol (1h):** ${formatUsd(scan?.volume1h)}\n` +
-          `**Age:** ${formatAgeMinutes(scan?.ageMinutes)}`,
-        inline: true
-      }
-    )
-    .setFooter({ text: 'Crypto Scanner Bot • Milestone Alert' })
+    .setColor(0xf59e0b)
+    .setTitle(`${tokenName} (${ticker})`)
+    .setDescription(descBody)
+    .addFields({ name: 'Contract', value: `\`${ca}\``, inline: false })
+    .setFooter({ text: 'McGBot · Milestone' })
     .setTimestamp();
 
   if (socialLinks) {
-    embed.addFields({
-      name: '🔗 Project Links',
-      value: socialLinks,
-      inline: false
-    });
+    embed.addFields({ name: 'Links', value: socialLinks, inline: false });
   }
+
+  applyScanThumbnailToEmbed(embed, thumbnailPayload);
+
+  const buttons = buildEliteCallLinkButtons(thumbnailPayload);
+  if (buttons) embed._eliteButtons = buttons;
 
   return embed;
 }
@@ -453,64 +453,48 @@ function createDumpEmbed(coin, scan, dumpKey, drawdownPercent) {
   const quickTradeLinks = buildQuickTradeLinksLine(contractAddress, pairAddress);
   const socialLinks = buildSocialLinksLine(scan);
 
-  const dumpText = getDumpTitle(dumpKey).toUpperCase();
+  const dumpLabel = getDumpTitle(dumpKey);
+  const headline = `**${dumpLabel}**`;
 
-  const descriptionParts = [
-    buildCoinHeader(tokenName, ticker),
-    '',
-    `# 💀 ${dumpText} 💀`,
-    '',
-    `## ${formatUsd(currentMc)} MC`,
-    `📉 **Dump Alert**`
-  ];
+  const statsLine = [
+    `Trigger **${formatValue(dumpKey, '—')}**`,
+    `From peak **${formatPercent(drawdownPercent)}**`,
+    scan?.momentum ? `${formatValue(scan.momentum)} momentum` : null,
+    scan?.tradePressure ? `${formatValue(scan.tradePressure)} pressure` : null
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
-  if (quickTradeLinks) descriptionParts.push('', quickTradeLinks);
+  const rangeLine = `ATH ${formatUsd(athMc)} → ${formatUsd(currentMc)}`;
 
-  descriptionParts.push(
-    '',
-    `**Drawdown:** ${formatPercent(drawdownPercent)}`,
-    `**Momentum:** ${formatValue(scan?.momentum)}`,
-    `**Pressure:** ${formatValue(scan?.tradePressure)}`
-  );
+  const marketLine = [
+    `MC ${formatUsd(currentMc)}`,
+    `Liq ${formatUsd(scan?.liquidity)}`,
+    `5m ${formatUsd(scan?.volume5m)}`,
+    `1h ${formatUsd(scan?.volume1h)}`,
+    `Age ${formatAgeMinutes(scan?.ageMinutes)}`
+  ].join(' · ');
+
+  const descBody = [headline, statsLine, rangeLine, quickTradeLinks, marketLine].filter(Boolean).join('\n\n');
+  const ca = formatValue(contractAddress, 'Unknown');
+  const thumbnailPayload = mergeCoinAndScanForThumbnail(coin, scan);
 
   const embed = new EmbedBuilder()
-    .setColor(0xff4444)
-    .setTitle(' ')
-    .setDescription(descriptionParts.join('\n'))
-    .addFields(
-      {
-        name: 'CA',
-        value: `\`${formatValue(contractAddress, 'Unknown')}\``,
-        inline: false
-      },
-      {
-        name: '📉 Drawdown Stats',
-        value:
-          `**ATH MC:** ${formatUsd(athMc)}\n` +
-          `**Current MC:** ${formatUsd(currentMc)}\n` +
-          `**Drop Trigger:** ${formatValue(dumpKey, 'N/A')}`,
-        inline: true
-      },
-      {
-        name: '📊 Current Setup',
-        value:
-          `**Liquidity:** ${formatUsd(scan?.liquidity)}\n` +
-          `**Vol (5m):** ${formatUsd(scan?.volume5m)}\n` +
-          `**Vol (1h):** ${formatUsd(scan?.volume1h)}\n` +
-          `**Age:** ${formatAgeMinutes(scan?.ageMinutes)}`,
-        inline: true
-      }
-    )
-    .setFooter({ text: 'Crypto Scanner Bot • Drawdown Alert' })
+    .setColor(0xdc2626)
+    .setTitle(`${tokenName} (${ticker})`)
+    .setDescription(descBody)
+    .addFields({ name: 'Contract', value: `\`${ca}\``, inline: false })
+    .setFooter({ text: 'McGBot · Drawdown' })
     .setTimestamp();
 
   if (socialLinks) {
-    embed.addFields({
-      name: '🔗 Project Links',
-      value: socialLinks,
-      inline: false
-    });
+    embed.addFields({ name: 'Links', value: socialLinks, inline: false });
   }
+
+  applyScanThumbnailToEmbed(embed, thumbnailPayload);
+
+  const buttons = buildEliteCallLinkButtons(thumbnailPayload);
+  if (buttons) embed._eliteButtons = buttons;
 
   return embed;
 }

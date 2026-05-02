@@ -675,6 +675,7 @@ function queueMilestone(channel, coin, scan, key, perf, realXFromCall) {
     });
 
     const embed = createMilestoneEmbed(coin, scan, key, perf, realXFromCall);
+    const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
     const payload = {
       embeds: [embed],
       ...replyOptions
@@ -683,7 +684,10 @@ function queueMilestone(channel, coin, scan, key, perf, realXFromCall) {
     if (chartBuf) {
       embed.setImage('attachment://chart.png');
       payload.files = [new AttachmentBuilder(chartBuf, { name: 'chart.png' })];
-      payload.components = buildOhlcvTimeframeRows(coin.contractAddress, '5m');
+      const tfRows = buildOhlcvTimeframeRows(coin.contractAddress, '5m');
+      payload.components = [...(eliteRow ? [eliteRow] : []), ...tfRows];
+    } else if (eliteRow) {
+      payload.components = [eliteRow];
     }
 
     await channel.send(payload);
@@ -698,8 +702,11 @@ function queueDump(channel, coin, scan, key, drawdown) {
   enqueueAlert(async () => {
     const replyOptions = buildReplyOptions(coin, channel);
 
+    const dumpEmbed = createDumpEmbed(coin, scan, key, drawdown);
+    const eliteRow = dumpEmbed && dumpEmbed._eliteButtons ? dumpEmbed._eliteButtons : null;
     await channel.send({
-      embeds: [createDumpEmbed(coin, scan, key, drawdown)],
+      embeds: [dumpEmbed],
+      ...(eliteRow ? { components: [eliteRow] } : {}),
       ...replyOptions
     });
   }, {

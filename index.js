@@ -522,6 +522,29 @@ function getBotCallsChannel(guild) {
   ) || null;
 }
 
+/** Same resolution as dashboard / `!call` — milestones for user + watch_only calls post here. */
+function getUserCallsChannel(guild) {
+  if (!guild?.channels?.cache) return null;
+
+  const preferred = String(process.env.USER_CALLS_CHANNEL_NAME || 'user-calls')
+    .trim()
+    .toLowerCase();
+  const namesToTry = [...new Set([preferred, 'user-calls', 'token-calls'])];
+
+  for (const name of namesToTry) {
+    const ch = guild.channels.cache.find(
+      c =>
+        c &&
+        c.isTextBased &&
+        typeof c.isTextBased === 'function' &&
+        c.isTextBased() &&
+        String(c.name || '').toLowerCase() === name
+    );
+    if (ch) return ch;
+  }
+  return null;
+}
+
 /**
  * Single-guild bots behave as before. Multi-guild: DISCORD_GUILD_ID, else guild with #bot-calls (stable id order), else stable fallback.
  * Does not use guilds.cache.first().
@@ -584,9 +607,21 @@ async function applyScannerEnabledFromDashboard(enabled) {
 
   const firstGuild = getPrimaryGuildForBotAlerts(client);
   const botChannel = firstGuild ? getBotCallsChannel(firstGuild) : null;
+  const userChannel =
+    firstGuild && botChannel
+      ? getUserCallsChannel(firstGuild) || botChannel
+      : null;
 
   if (want) {
-    startMonitoring(botChannel, { userIntervalMs: 30000, botIntervalMs: 60000 });
+    if (userChannel && botChannel && userChannel.id === botChannel.id) {
+      console.warn(
+        '[Monitor] No #user-calls (or USER_CALLS_CHANNEL_NAME) — user/watch milestones use #bot-calls until a user-calls channel exists.'
+      );
+    }
+    startMonitoring(
+      userChannel && botChannel ? { userChannel, botChannel } : botChannel,
+      { userIntervalMs: 30000, botIntervalMs: 60000 }
+    );
     startAutoCallLoop(botChannel);
   } else {
     stopMonitoring();
@@ -1939,19 +1974,27 @@ client.once('clientReady', async () => {
   }
 
   const botChannel = getBotCallsChannel(firstGuild);
+  const userChannel = getUserCallsChannel(firstGuild) || botChannel;
 
 if (!botChannel) {
   console.log('❌ Could not find #bot-calls channel.');
   return;
 }
 
-console.log(`📡 Alerts will post in: #${botChannel.name}`);
+if (userChannel.id === botChannel.id) {
+  console.warn(
+    '[Monitor] No #user-calls (or USER_CALLS_CHANNEL_NAME) — user/watch milestones will use #bot-calls. Add #user-calls to split channels.'
+  );
+}
+console.log(
+  `📡 Monitor: user/watch alerts → #${userChannel.name}; bot auto-calls + bot milestones → #${botChannel.name}`
+);
 
   const trackedDevs = getAllTrackedDevs();
   console.log(`[DevTracker] Loaded ${trackedDevs.length} tracked dev(s).`);
 
   if (SCANNER_ENABLED) {
-    startMonitoring(botChannel, { userIntervalMs: 30000, botIntervalMs: 60000 });
+    startMonitoring({ userChannel, botChannel }, { userIntervalMs: 30000, botIntervalMs: 60000 });
     startAutoCallLoop(botChannel);
   } else {
     console.log(

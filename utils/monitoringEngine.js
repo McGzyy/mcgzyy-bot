@@ -987,16 +987,40 @@ if (lifecycleStatus === 'archived') {
  */
 
 /**
- * @param {import('discord.js').TextChannel} channel
+ * @param {import('discord.js').TextChannel | { userChannel: import('discord.js').TextChannel, botChannel?: import('discord.js').TextChannel | null }} channelsOrChannel
+ *        Pass `{ userChannel, botChannel }` so user/watch milestones & dumps go to #user-calls (or
+ *        equivalent) while bot_call alerts stay on #bot-calls. Legacy: one channel = both buckets
+ *        (not recommended — user alerts would post in the bot channel).
  * @param {number | { userIntervalMs?: number; botIntervalMs?: number }} [intervalOrOpts]
  *        Legacy: single number = both buckets use same interval (old behavior).
  */
-function startMonitoring(channel, intervalOrOpts = {}) {
+function startMonitoring(channelsOrChannel, intervalOrOpts = {}) {
   if (isRunning) return;
 
   stopUserPerformanceSupabaseMirror();
 
   isRunning = true;
+
+  let userChannel;
+  let botChannel;
+  if (
+    channelsOrChannel &&
+    typeof channelsOrChannel === 'object' &&
+    'userChannel' in channelsOrChannel &&
+    channelsOrChannel.userChannel
+  ) {
+    userChannel = channelsOrChannel.userChannel;
+    botChannel = channelsOrChannel.botChannel || channelsOrChannel.userChannel;
+  } else {
+    userChannel = channelsOrChannel;
+    botChannel = channelsOrChannel;
+  }
+
+  if (!userChannel || !botChannel) {
+    console.error('[Monitor] startMonitoring: missing userChannel and/or botChannel');
+    isRunning = false;
+    return;
+  }
 
   let userMs = 30000;
   let botMs = 60000;
@@ -1011,19 +1035,21 @@ function startMonitoring(channel, intervalOrOpts = {}) {
     if (Number.isFinite(b) && b >= 5000) botMs = b;
   }
 
+  const userName = userChannel && userChannel.name ? `#${userChannel.name}` : '(user channel)';
+  const botName = botChannel && botChannel.name ? `#${botChannel.name}` : '(bot channel)';
   console.log(
-    `[Monitor] User/watch bucket every ${userMs / 1000}s, bot bucket every ${botMs / 1000}s`
+    `[Monitor] User/watch → ${userName} every ${userMs / 1000}s; bot → ${botName} every ${botMs / 1000}s`
   );
 
-  void checkTrackedCoins(channel, 'user');
-  void checkTrackedCoins(channel, 'bot');
+  void checkTrackedCoins(userChannel, 'user');
+  void checkTrackedCoins(botChannel, 'bot');
 
   monitoringIntervalUser = setInterval(() => {
-    void checkTrackedCoins(channel, 'user');
+    void checkTrackedCoins(userChannel, 'user');
   }, userMs);
 
   monitoringIntervalBot = setInterval(() => {
-    void checkTrackedCoins(channel, 'bot');
+    void checkTrackedCoins(botChannel, 'bot');
   }, botMs);
 }
 

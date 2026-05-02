@@ -19,6 +19,32 @@ function formatValue(value, fallback = 'Unknown') {
   return String(value);
 }
 
+/** Discord rejects embed titles over 256 chars (throws in discord.js). */
+function truncateEmbedTitle(text, maxLen = 256) {
+  const s = String(text ?? '').trim() || '—';
+  if (s.length <= maxLen) return s;
+  return `${s.slice(0, Math.max(1, maxLen - 1))}…`;
+}
+
+/** Discord embed description max 4096. */
+function truncateEmbedDescription(text, maxLen = 4096) {
+  const s = String(text ?? '');
+  if (s.length <= maxLen) return s;
+  return `${s.slice(0, Math.max(1, maxLen - 1))}…`;
+}
+
+function isHttpOrHttpsUrl(raw) {
+  if (typeof raw !== 'string') return false;
+  const t = raw.trim();
+  if (!t) return false;
+  try {
+    const u = new URL(t);
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 function formatAgo(isoOrDateLike) {
   if (!isoOrDateLike) return null;
   const ts = new Date(isoOrDateLike).getTime();
@@ -118,41 +144,50 @@ function dexscreenerTokenUrl(contractAddress) {
 }
 
 function buildEliteCallLinkButtons(scan) {
-  const ca = typeof scan?.contractAddress === 'string' ? scan.contractAddress.trim() : '';
-  if (!ca) return null;
+  try {
+    const ca = typeof scan?.contractAddress === 'string' ? scan.contractAddress.trim() : '';
+    if (!ca) return null;
 
-  const buttons = [];
-  const dex = dexscreenerTokenUrl(ca);
-  if (dex) buttons.push(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Dex').setURL(dex));
+    const buttons = [];
+    const dex = dexscreenerTokenUrl(ca);
+    if (dex) buttons.push(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Dex').setURL(dex));
 
-  buttons.push(
-    new ButtonBuilder()
-      .setStyle(ButtonStyle.Link)
-      .setLabel('Trade')
-      .setURL(`https://trade.padre.gg/trade/solana/${ca}`)
-  );
-  buttons.push(
-    new ButtonBuilder()
-      .setStyle(ButtonStyle.Link)
-      .setLabel('GMGN')
-      .setURL(`https://gmgn.ai/sol/token/${ca}`)
-  );
+    buttons.push(
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel('Trade')
+        .setURL(`https://trade.padre.gg/trade/solana/${ca}`)
+    );
+    buttons.push(
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Link)
+        .setLabel('GMGN')
+        .setURL(`https://gmgn.ai/sol/token/${ca}`)
+    );
 
-  const socials = [
-    { label: 'Website', url: scan?.website },
-    { label: 'X', url: scan?.twitter },
-    { label: 'Telegram', url: scan?.telegram }
-  ]
-    .map((x) => ({ label: x.label, url: typeof x.url === 'string' ? x.url.trim() : '' }))
-    .filter((x) => x.url);
+    const socials = [
+      { label: 'Website', url: scan?.website },
+      { label: 'X', url: scan?.twitter },
+      { label: 'Telegram', url: scan?.telegram }
+    ]
+      .map((x) => ({ label: x.label, url: typeof x.url === 'string' ? x.url.trim() : '' }))
+      .filter((x) => x.url && isHttpOrHttpsUrl(x.url));
 
-  for (const s of socials) {
-    if (buttons.length >= 5) break;
-    buttons.push(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(s.label).setURL(s.url));
+    for (const s of socials) {
+      if (buttons.length >= 5) break;
+      try {
+        buttons.push(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel(s.label).setURL(s.url));
+      } catch {
+        /* skip invalid button URL */
+      }
+    }
+
+    if (buttons.length === 0) return null;
+    return new ActionRowBuilder().addComponents(buttons.slice(0, 5));
+  } catch (err) {
+    console.warn('[alertEmbeds] buildEliteCallLinkButtons:', err && err.message ? err.message : err);
+    return null;
   }
-
-  if (buttons.length === 0) return null;
-  return new ActionRowBuilder().addComponents(buttons.slice(0, 5));
 }
 
 function getProfileLabel(profileName = 'balanced') {
@@ -423,8 +458,8 @@ function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent, real
 
   const embed = new EmbedBuilder()
     .setColor(0xf59e0b)
-    .setTitle(`${tokenName} (${ticker})`)
-    .setDescription(descBody)
+    .setTitle(truncateEmbedTitle(`${tokenName} (${ticker})`))
+    .setDescription(truncateEmbedDescription(descBody))
     .addFields({ name: 'Contract', value: `\`${ca}\``, inline: false })
     .setFooter({ text: 'McGBot · Milestone' })
     .setTimestamp();
@@ -481,8 +516,8 @@ function createDumpEmbed(coin, scan, dumpKey, drawdownPercent) {
 
   const embed = new EmbedBuilder()
     .setColor(0xdc2626)
-    .setTitle(`${tokenName} (${ticker})`)
-    .setDescription(descBody)
+    .setTitle(truncateEmbedTitle(`${tokenName} (${ticker})`))
+    .setDescription(truncateEmbedDescription(descBody))
     .addFields({ name: 'Contract', value: `\`${ca}\``, inline: false })
     .setFooter({ text: 'McGBot · Drawdown' })
     .setTimestamp();

@@ -74,6 +74,37 @@ function rowSourceFromTracked(tracked) {
   return tracked.callSourceType === 'bot_call' ? 'bot' : 'user';
 }
 
+/**
+ * Snowflake used for `call_performance.discord_id` on bot-issued calls (AUTO_BOT is not a real user).
+ * Prefer the live client id from Discord.js; else env (application id === bot user id).
+ */
+function resolveBotCallStatsDiscordId(tracked, opts = {}) {
+  const fromOpts = String(opts.statsDiscordId || '').trim();
+  if (fromOpts) return fromOpts;
+
+  const isBot =
+    tracked.callSourceType === 'bot_call' ||
+    String(tracked.firstCallerDiscordId || tracked.firstCallerId || '')
+      .toUpperCase()
+      .trim() === 'AUTO_BOT';
+  if (!isBot) return '';
+
+  return String(
+    process.env.MCGBOT_STATS_DISCORD_ID ||
+      process.env.DISCORD_CLIENT_ID ||
+      process.env.CLIENT_ID ||
+      ''
+  ).trim();
+}
+
+function resolveStatsDiscordIdForInsert(tracked, opts = {}) {
+  let id = String(tracked.firstCallerDiscordId || tracked.firstCallerId || '').trim();
+  if (id.toUpperCase() === 'AUTO_BOT') {
+    id = resolveBotCallStatsDiscordId(tracked, opts);
+  }
+  return id;
+}
+
 /** Must match `mcgbot-dashboard/lib/milestoneTrophies.ts` CALL_CLUB_MILESTONE_KEYS + thresholds. */
 const CALL_CLUB_MILESTONES = [
   { key: 'call_club_10x', minAth: 10 },
@@ -200,11 +231,17 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
     return { ok: false, skipped: true, reason: 'missing_supabase_service_role' };
   }
 
-  const discordId = String(
-    tracked.firstCallerDiscordId || tracked.firstCallerId || ''
-  ).trim();
-  if (!discordId || discordId.toUpperCase() === 'AUTO_BOT') {
-    return { ok: false, skipped: true, reason: 'no_caller_discord_id' };
+  const discordId = resolveStatsDiscordIdForInsert(tracked, opts);
+  if (!discordId) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: 'no_caller_discord_id',
+      hint:
+        tracked.callSourceType === 'bot_call'
+          ? 'Bot calls need a real snowflake: pass statsDiscordId from client.user.id, or set MCGBOT_STATS_DISCORD_ID / DISCORD_CLIENT_ID.'
+          : undefined
+    };
   }
 
   const contract = String(tracked.contractAddress || '').trim();
@@ -223,7 +260,15 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
   const callMc = snapshotMcUsd(tracked);
   const tokenImageUrl = snapshotImageUrl(tracked);
 
-  await upsertUserDiscordIdentityFromTracked(sb, tracked, opts);
+  const trackedForIdentity =
+    tracked.callSourceType === 'bot_call'
+      ? {
+          ...tracked,
+          firstCallerDiscordId: discordId,
+          firstCallerId: discordId
+        }
+      : tracked;
+  await upsertUserDiscordIdentityFromTracked(sb, trackedForIdentity, opts);
 
   const row = {
     discord_id: discordId,
@@ -262,10 +307,12 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
   const id = data && data.id ? String(data.id) : null;
   if (id) {
     updateTrackedCallData(contract, { callPerformanceId: id });
-    queueGrantCallClubMilestones(discordId, Number(row.ath_multiple), id, {
-      excludedFromStats: row.excluded_from_stats === true,
-      source: row.source
-    });
+    if (row.source === 'user') {
+      queueGrantCallClubMilestones(discordId, Number(row.ath_multiple), id, {
+        excludedFromStats: row.excluded_from_stats === true,
+        source: row.source
+      });
+    }
     return { ok: true, id };
   }
 
@@ -289,7 +336,9 @@ async function updateUserCallPerformanceAth(contractAddress) {
   }
 
   const tracked = getTrackedCall(contractAddress);
-  if (!tracked || tracked.callSourceType !== 'user_call') return;
+  if (!tracked) return;
+  const src = String(tracked.callSourceType || 'user_call');
+  if (src !== 'user_call' && src !== 'bot_call') return;
 
   const rowId = tracked.callPerformanceId ? String(tracked.callPerformanceId).trim() : '';
   if (!rowId) {
@@ -331,10 +380,13 @@ async function updateUserCallPerformanceAth(contractAddress) {
   const callerId = String(
     tracked.firstCallerDiscordId || tracked.firstCallerId || ''
   ).trim();
-  queueGrantCallClubMilestones(callerId, mult, rowId, {
-    excludedFromStats: tracked.excludedFromStats === true,
-    source: 'user'
-  });
+  const rowSource = rowSourceFromTracked(tracked);
+  if (rowSource === 'user' && callerId && callerId.toUpperCase() !== 'AUTO_BOT') {
+    queueGrantCallClubMilestones(callerId, mult, rowId, {
+      excludedFromStats: tracked.excludedFromStats === true,
+      source: 'user'
+    });
+  }
 }
 
 function queueUpdateUserCallPerformanceAth(contractAddress) {

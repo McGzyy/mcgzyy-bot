@@ -4,7 +4,7 @@ const scanFilterConfig = {
       minMarketCap: 15000,
       maxMarketCap: 350000,
       minLiquidity: 15000,
-      minVolume5m: 15000,
+      minVolume5m: 10000,
       minVolume1h: 4000,
       minBuySellRatio5m: 1.02, // loosened further
       maxAgeMinutes: 240,

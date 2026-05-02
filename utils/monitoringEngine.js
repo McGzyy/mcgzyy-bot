@@ -1063,7 +1063,8 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
     const coins = tracked.filter(coin => {
       if (!coin) return false;
       if (coin.lifecycleStatus === 'archived' || coin.isActive === false) return false;
-      if (String(coin.callSourceType || 'user_call') !== 'user_call') return false;
+      const ct = String(coin.callSourceType || 'user_call');
+      if (ct !== 'user_call' && ct !== 'bot_call') return false;
       if (String(coin.approvalStatus || '').toLowerCase() === 'denied') return false;
       if (!String(coin.callPerformanceId || '').trim()) return false;
       return true;
@@ -1109,7 +1110,7 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
     }
 
     if (ok > 0) {
-      console.log(`[PerformanceMirror] Updated ${ok}/${coins.length} user call(s) → Supabase`);
+      console.log(`[PerformanceMirror] Updated ${ok}/${coins.length} mirrored call(s) → Supabase`);
     }
   };
 

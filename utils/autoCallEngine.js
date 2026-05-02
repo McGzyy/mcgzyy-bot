@@ -232,6 +232,37 @@ async function postBotCallScan(channel, scan, profileName) {
       });
     }
 
+    if (tracked) {
+      try {
+        const guildId = sentMessage.guildId || sentMessage.guild?.id;
+        const channelId = sentMessage.channel?.id;
+        const replyId = sentMessage.id;
+        const messageUrl =
+          guildId && channelId && replyId
+            ? `https://discord.com/channels/${guildId}/${channelId}/${replyId}`
+            : null;
+        const statsDiscordId = sentMessage.client?.user?.id
+          ? String(sentMessage.client.user.id).trim()
+          : '';
+        const { insertUserCallPerformanceRow } = require('./callPerformanceSync');
+        const freshTracked = getTrackedCall(scan.contractAddress) || tracked;
+        const mirror = await insertUserCallPerformanceRow(freshTracked, {
+          messageUrl,
+          statsDiscordId
+        });
+        if (!mirror.ok && !mirror.skipped) {
+          console.error('[CallPerformanceSync] bot call mirror failed:', mirror);
+        } else if (mirror.skipped && mirror.reason === 'no_caller_discord_id') {
+          console.error(
+            '[CallPerformanceSync] bot call not mirrored (no bot snowflake):',
+            mirror.hint || mirror.reason
+          );
+        }
+      } catch (err) {
+        console.error('[CallPerformanceSync] bot call mirror:', err?.message || err);
+      }
+    }
+
     hydrateAutoCallChartMessage(sentMessage, scan, profileName).catch(err => {
       console.error('[AutoCallChart]', scan?.contractAddress, err.message);
     });

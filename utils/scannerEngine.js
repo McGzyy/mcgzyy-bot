@@ -1,5 +1,6 @@
 const { randomUUID } = require('crypto');
 const { fetchRealTokenData } = require('../providers/realTokenProvider');
+const { computeMigrated } = require('./solanaPoolMigrated');
 
 /**
  * =========================
@@ -344,6 +345,16 @@ function mergeRealDataWithCandidate(realData, candidate, contractAddress) {
     if (!existing) merged.token.geckoImageUrl = geckoImg;
   }
 
+  merged.meta = merged.meta || {};
+  merged.meta.migrated = computeMigrated({
+    dexId: merged.token?.launchPlatform,
+    geckoDexName: candidate.dexId,
+    liquidityUsd: toNumber(merged.market?.liquidity),
+    marketCapUsd: toNumber(merged.market?.marketCap),
+    ageMinutes: toNumber(merged.market?.ageMinutes),
+    volume24h: toNumber(merged.market?.volume24h)
+  });
+
   return merged;
 }
 
@@ -576,6 +587,11 @@ async function generateRealScan(contractAddress, geckoCandidate = null) {
     }
 
     const marketCap = toNumber(realData.market?.marketCap);
+    // DexScreener/network errors use `buildFallbackErrorObject` (meta.source === 'error', mc 0).
+    // Do not return a normal scan for that path — monitoring treats mc<=0 as "bad coin" strikes.
+    if (String(realData.meta?.source || '') === 'error' && (!Number.isFinite(marketCap) || marketCap <= 0)) {
+      return { __monitorProviderSkip: true };
+    }
     const liquidity = toNumber(realData.market?.liquidity);
     const volume5m = toNumber(realData.market?.volume5m);
     const volume1h = toNumber(realData.market?.volume1h);

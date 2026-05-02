@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { computeMigrated } = require('../utils/solanaPoolMigrated');
 
 function toNumber(value, fallback = 0) {
   const num = Number(value);
@@ -259,7 +260,14 @@ async function fetchDexScreenerTokenData(contractAddress) {
     meta: {
       source: 'dexscreener',
       pairCount: pairs.length,
-      migrated: String(bestPair?.dexId || '').toLowerCase().includes('raydium')
+      migrated: computeMigrated({
+        dexId: bestPair?.dexId,
+        geckoDexName: null,
+        liquidityUsd: toNumber(bestPair?.liquidity?.usd),
+        marketCapUsd: toNumber(bestPair?.marketCap),
+        ageMinutes: getAgeMinutes(bestPair?.pairCreatedAt),
+        volume24h: toNumber(bestPair?.volume?.h24)
+      })
     }
   };
 }

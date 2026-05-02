@@ -759,6 +759,13 @@ async function checkTrackedCoins(channel, sourceBucket = 'all') {
 
       const scan = await generateRealScan(coin.contractAddress);
 
+      if (scan && typeof scan === 'object' && scan.__monitorProviderSkip === true) {
+        console.log(
+          `[Monitor] ${coin.tokenName || coin.contractAddress} -> quote provider unavailable (not counting toward failed scans)`
+        );
+        continue;
+      }
+
       if (!isSuccessfulMarketScan(scan)) {
         const failedScans = Number(coin.failedScans || 0) + 1;
 

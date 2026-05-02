@@ -298,7 +298,77 @@ async function fetchGeckoSolanaTokenImageUrl(contractAddress) {
   return null;
 }
 
+/**
+ * Top pool address for a mint (Gecko pool id can differ from DexScreener `pairAddress` on new pairs).
+ * @param {string} contractAddress
+ * @returns {Promise<string | null>}
+ */
+async function fetchGeckoTopPoolAddressForSolanaToken(contractAddress) {
+  const ca =
+    contractAddress != null && String(contractAddress).trim()
+      ? String(contractAddress).trim()
+      : '';
+  if (!ca) return null;
+  try {
+    const url = `${GECKO_BASE}/networks/solana/tokens/${encodeURIComponent(ca)}/pools`;
+    const res = await axios.get(url, {
+      params: { page: 1 },
+      headers: { Accept: 'application/json' },
+      timeout: 12_000,
+      validateStatus: () => true
+    });
+    if (res.status < 200 || res.status >= 300) return null;
+    const rows = res.data?.data;
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const sorted = [...rows].sort((a, b) => {
+      const ra = Number(
+        a?.attributes?.reserve_in_usd ?? a?.attributes?.volume_usd?.h24 ?? 0
+      );
+      const rb = Number(
+        b?.attributes?.reserve_in_usd ?? b?.attributes?.volume_usd?.h24 ?? 0
+      );
+      return rb - ra;
+    });
+    const addr = sorted[0]?.attributes?.address;
+    return typeof addr === 'string' && addr.trim() ? addr.trim() : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Pump.fun bonding-curve metadata (icon often only here, not on Dex `info`).
+ * @param {string} contractAddress
+ * @returns {Promise<string | null>}
+ */
+async function fetchPumpFunTokenImageUrl(contractAddress) {
+  const mint =
+    contractAddress != null && String(contractAddress).trim()
+      ? String(contractAddress).trim()
+      : '';
+  if (!mint.toLowerCase().endsWith('pump')) return null;
+  try {
+    const res = await axios.get(
+      `https://frontend-api.pump.fun/coins/${encodeURIComponent(mint)}`,
+      {
+        timeout: 7000,
+        validateStatus: () => true,
+        headers: { Accept: 'application/json' }
+      }
+    );
+    if (res.status < 200 || res.status >= 300) return null;
+    const d = res.data;
+    const pick = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+    const raw = pick(d?.image_uri) || pick(d?.image) || pick(d?.metadata?.image);
+    return raw || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 module.exports = {
   fetchGeckoTerminalCandidatePools,
-  fetchGeckoSolanaTokenImageUrl
+  fetchGeckoSolanaTokenImageUrl,
+  fetchGeckoTopPoolAddressForSolanaToken,
+  fetchPumpFunTokenImageUrl
 };

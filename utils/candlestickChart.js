@@ -430,6 +430,13 @@ async function renderCandlestickChart(candles, options = {}) {
     }
   }
 
+  for (let i = 0; i < normalized.length; i++) {
+    const c = normalized[i];
+    if (typeof c.x === 'number' && Number.isFinite(c.x)) {
+      normalized[i] = { ...c, x: new Date(c.x) };
+    }
+  }
+
   const width = Math.max(
     200,
     Math.min(4096, Number(options.width) || DEFAULT_WIDTH)

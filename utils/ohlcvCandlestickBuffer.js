@@ -127,6 +127,7 @@ function resolveOhlcvPairAddress(coin, scan) {
  *   migratedAt?: number|string|Date,
  *   dexPaidEvents?: Array<{ time: number|string|Date, price: number }>,
  *   devSoldEvents?: Array<{ time: number|string|Date, price: number }>
+ *   contractAddress?: string|null — Solana mint; when Dex `pairAddress` has no Gecko OHLCV yet, we try Gecko’s top pool for this mint.
  * }} [options] — `interval` defaults to `5m`, `limit` to 96 when not specified.
  *     Optional `range` (`24h`, `7d`, `30d`, `all`) sets `limit` from the interval (e.g. 288 @ 5m for `24h`), capped at the API max; when `range` is omitted, `limit` behavior is unchanged.
  *     Use `1m` / `5m` / `15m` / `1h` / `4h` / `1d` only; others fall back in `ohlcvFetcher` with a warning.
@@ -136,6 +137,7 @@ async function buildOhlcvCandlestickBuffer(options = {}) {
   const pairAddress = String(options.pairAddress || '').trim();
   if (!pairAddress) return null;
 
+  const mint = String(options.contractAddress || '').trim();
   const chain = options.chain || 'solana';
   const interval = normalizeOhlcvInterval(options.interval);
   const rangeKey = normalizeOhlcvRange(options.range);
@@ -184,28 +186,46 @@ async function buildOhlcvCandlestickBuffer(options = {}) {
   }
 
   try {
-    let bars = await fetchOhlcv({ chain, pairAddress, interval, limit });
-    /** New pools often have no 5m history yet; 1m fills in sooner. */
+    const fetchBars = async (pair, iv, lim) =>
+      fetchOhlcv({ chain, pairAddress: pair, interval: iv, limit: lim });
+
+    let activePair = pairAddress;
+    let bars = await fetchBars(activePair, interval, limit);
+
+    const tryOneMinute = async (pair) => {
+      if (interval !== DEFAULT_OHLCV_INTERVAL || rangeKey) return;
+      const altLimit = Math.min(200, OHLCV_MAX_LIMIT);
+      const retry = await fetchBars(pair, '1m', altLimit);
+      if (Array.isArray(retry) && retry.length >= 2) return retry;
+      return null;
+    };
+
+    if (!Array.isArray(bars) || bars.length < 2) {
+      const r1 = await tryOneMinute(activePair);
+      if (r1) bars = r1;
+    }
+
     if (
       (!Array.isArray(bars) || bars.length < 2) &&
-      interval === DEFAULT_OHLCV_INTERVAL &&
+      mint &&
+      chain === 'solana' &&
       !rangeKey
     ) {
-      const altLimit = Math.min(200, OHLCV_MAX_LIMIT);
-      const retry = await fetchOhlcv({
-        chain,
-        pairAddress,
-        interval: '1m',
-        limit: altLimit
-      });
-      if (Array.isArray(retry) && retry.length >= 2) {
-        bars = retry;
+      const { fetchGeckoTopPoolAddressForSolanaToken } = require('../providers/geckoTerminalProvider');
+      const altPool = await fetchGeckoTopPoolAddressForSolanaToken(mint);
+      if (altPool && altPool !== activePair) {
+        activePair = altPool;
+        bars = await fetchBars(activePair, interval, limit);
+        if (!Array.isArray(bars) || bars.length < 2) {
+          const r2 = await tryOneMinute(activePair);
+          if (r2) bars = r2;
+        }
       }
     }
 
     if (!Array.isArray(bars) || bars.length < 2) {
       logOhlcvBufferIssue({
-        pairAddress,
+        pairAddress: `${pairAddress}${activePair !== pairAddress ? ` (tried ${activePair})` : ''}`,
         interval,
         range: rangeForLog,
         error: !Array.isArray(bars)
@@ -331,6 +351,7 @@ async function buildOhlcvCandlestickBufferForTrackedCall(
 
   return buildOhlcvCandlestickBuffer({
     pairAddress: pair,
+    contractAddress: trackedCall.contractAddress || null,
     title: trackedCall.ticker || trackedCall.tokenName || 'OHLC',
     ...overlay,
     ...fetchOverrides

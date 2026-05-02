@@ -175,6 +175,7 @@ async function hydrateAutoCallChartMessage(message, scan, profileName) {
       const overlay = getCandlestickOverlayProps(trackedForChart, scan);
       buf = await buildOhlcvCandlestickBuffer({
         pairAddress: scan.pairAddress,
+        contractAddress: scan.contractAddress,
         chain: 'solana',
         interval: '5m',
         limit: 96,

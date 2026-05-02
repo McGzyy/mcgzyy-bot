@@ -1019,6 +1019,7 @@ async function hydrateCallWatchChartMessage(message, scan, embedOptions = {}) {
       const overlay = getCandlestickOverlayProps(trackedForChart, scan);
       buf = await buildOhlcvCandlestickBuffer({
         pairAddress: scan.pairAddress,
+        contractAddress: scan.contractAddress,
         chain: 'solana',
         interval: '5m',
         limit: 96,

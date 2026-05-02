@@ -41,6 +41,23 @@ function pickNonEmptyUrl(...candidates) {
 }
 
 /**
+ * Discord thumbnails require https; `ipfs://` and plain `http://` often fail to load.
+ * @param {string} raw
+ * @returns {string}
+ */
+function discordSafeImageUrl(raw) {
+  let u = safeTrimmedUrl(raw);
+  if (!u) return '';
+  if (/^ipfs:\/\//i.test(u)) {
+    const rest = u.slice(7).replace(/^ipfs\//i, '');
+    u = `https://cloudflare-ipfs.com/ipfs/${rest}`;
+  } else if (u.startsWith('http://')) {
+    u = `https://${u.slice('http://'.length)}`;
+  }
+  return u;
+}
+
+/**
  * Public CDN icon when Dex/Gecko omit `imageUrl` (common on fresh pump pairs).
  * @param {string} contractAddress
  * @returns {string}
@@ -65,7 +82,7 @@ function resolveScanThumbnailUrl(scan) {
       ? /** @type {{ imageUrl?: unknown, geckoImageUrl?: unknown }} */ (token)
       : null;
   const ca = s ? String(s.contractAddress || s.ca || '').trim() : '';
-  return pickNonEmptyUrl(
+  const picked = pickNonEmptyUrl(
     t?.imageUrl,
     t?.geckoImageUrl,
     s?.tokenImageUrl,
@@ -73,6 +90,8 @@ function resolveScanThumbnailUrl(scan) {
     ca ? dexScreenerSolTokenIconUrl(ca) : '',
     getBotEmbedThumbnailFallbackUrl()
   );
+  const safe = discordSafeImageUrl(picked);
+  return safe || picked;
 }
 
 /**
@@ -94,6 +113,7 @@ module.exports = {
   setBotEmbedThumbnailFallbackUrl,
   getBotEmbedThumbnailFallbackUrl,
   dexScreenerSolTokenIconUrl,
+  discordSafeImageUrl,
   resolveScanThumbnailUrl,
   applyScanThumbnailToEmbed
 };

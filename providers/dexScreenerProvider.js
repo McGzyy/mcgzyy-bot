@@ -210,7 +210,11 @@ async function fetchDexScreenerTokenData(contractAddress) {
       twitter: extractSocialLink(socials, 'twitter'),
       telegram: extractSocialLink(socials, 'telegram'),
       launchPlatform: bestPair?.dexId || 'Unknown',
-      imageUrl: bestPair?.info?.imageUrl || null
+      imageUrl:
+        bestPair?.info?.imageUrl ||
+        safeString(bestPair?.baseToken?.imageUrl, null) ||
+        safeString(bestPair?.baseToken?.logoURI, null) ||
+        null
     },
 
     market: {

@@ -669,6 +669,7 @@ function queueMilestone(channel, coin, scan, key, perf, realXFromCall) {
     const overlay = getCandlestickOverlayProps(coin, scan);
     const chartBuf = await buildOhlcvCandlestickBuffer({
       pairAddress: pair,
+      contractAddress: coin.contractAddress,
       title: scan?.ticker || coin?.ticker || 'OHLC',
       ...overlay
     });

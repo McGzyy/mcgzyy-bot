@@ -430,13 +430,6 @@ async function renderCandlestickChart(candles, options = {}) {
     }
   }
 
-  for (let i = 0; i < normalized.length; i++) {
-    const c = normalized[i];
-    if (typeof c.x === 'number' && Number.isFinite(c.x)) {
-      normalized[i] = { ...c, x: new Date(c.x) };
-    }
-  }
-
   const width = Math.max(
     200,
     Math.min(4096, Number(options.width) || DEFAULT_WIDTH)
@@ -528,6 +521,7 @@ async function renderCandlestickChart(candles, options = {}) {
       datasets: [
         {
           label,
+          // Financial plugin expects `x` as epoch **ms number**; `Date` objects parse as NaN → blank plot.
           data: normalized,
           // chartjs-chart-financial: close < open uses `.up`, close > open uses `.down`
           borderColors: {

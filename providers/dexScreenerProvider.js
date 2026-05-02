@@ -114,6 +114,7 @@ function normalizeCandidatePair(pair) {
   return {
     tokenName: pair?.baseToken?.name || 'Unknown Token',
     ticker: pair?.baseToken?.symbol || 'UNKNOWN',
+    poolName: pair?.baseToken?.name || null,
     contractAddress: pair?.baseToken?.address || null,
     pairAddress: pair?.pairAddress || null,
     dexId: pair?.dexId || null,

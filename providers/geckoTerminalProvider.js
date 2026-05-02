@@ -22,12 +22,12 @@ function getAgeMinutes(createdAt) {
  * =========================
  */
 
-const SEARCH_TERMS = ['sol', 'ai', 'meme'];
+const SEARCH_TERMS = ['sol', 'ai', 'meme', 'bonk'];
 
 /** 0 .. SEARCH_TERMS.length - 1 only — never out of range */
 let searchTermIndex = 0;
 let currentPage = 1;
-const MAX_PAGE = 4;
+const MAX_PAGE = 5;
 
 /**
  * =========================
@@ -266,7 +266,7 @@ async function fetchGeckoTerminalCandidatePools() {
 
     console.log(`[GeckoTerminal] Returned ${filtered.length} candidates`);
 
-    return filtered.slice(0, 40);
+    return filtered.slice(0, 48);
   } catch (error) {
     console.error('[GeckoTerminal] Candidate fetch failed:', error.message);
     return [];

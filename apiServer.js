@@ -203,7 +203,14 @@ function startReferralApiServer(discordClient = null, opts = {}) {
         modQueueGet: true,
         modStatsGet: true,
         scannerState: true,
-        internalPost: ['call', 'watch', 'x-oauth/start', 'x-oauth/complete', 'x-oauth/unlink'],
+        internalPost: [
+          'call',
+          'watch',
+          'x-oauth/start',
+          'x-oauth/complete',
+          'x-oauth/unlink',
+          'admin/ca-analyze'
+        ],
         xOAuthConfigured: isXOAuthConfigured(),
         xOAuth2: xOauth
       },
@@ -796,6 +803,59 @@ function startReferralApiServer(discordClient = null, opts = {}) {
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'scanner-state POST failed';
       console.error('[API] POST /internal/scanner-state', msg);
+      res.status(500).json({ success: false, error: 'Internal Server Error' });
+    }
+  });
+
+  app.post('/internal/admin/ca-analyze', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({ success: false, error: 'CALL_INTERNAL_SECRET is not set on the bot host.' });
+        return;
+      }
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+      const userId = String(
+        req.headers['x-discord-user-id'] || req.headers['X-Discord-User-Id'] || ''
+      ).trim();
+      if (!userId) {
+        res.status(400).json({ success: false, error: 'Missing X-Discord-User-Id header.' });
+        return;
+      }
+      if (!(await discordUserMayToggleScanner(userId))) {
+        res.status(403).json({ success: false, error: 'Forbidden' });
+        return;
+      }
+      const body =
+        req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+      const rawCa = body.contractAddress != null ? String(body.contractAddress) : '';
+      const rawProfile = body.profileName != null ? String(body.profileName) : '';
+
+      const { analyzeContractForAdmin } = require('./utils/caAnalyzeService');
+      const out = await analyzeContractForAdmin(rawCa, rawProfile);
+      if (!out.ok) {
+        res.status(400).json({
+          success: false,
+          error: out.error || 'invalid_contract',
+          detail: out.detail || null
+        });
+        return;
+      }
+      res.json({
+        success: true,
+        contractAddress: out.contractAddress,
+        profile: out.profile,
+        note: out.note,
+        scan: out.scan,
+        evaluation: out.evaluation
+      });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'ca-analyze failed';
+      console.error('[API] POST /internal/admin/ca-analyze', msg);
       res.status(500).json({ success: false, error: 'Internal Server Error' });
     }
   });

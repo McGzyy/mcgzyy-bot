@@ -13,6 +13,7 @@ const {
   updateTrackedCallData
 } = require('./trackedCallsService');
 const { fetchGeckoTerminalCandidatePools } = require('../providers/geckoTerminalProvider');
+const { fetchDexScreenerCandidatePairs } = require('../providers/dexScreenerProvider');
 const { enqueueAlert } = require('./alertQueue');
 
 let isRunning = false;
@@ -604,6 +605,65 @@ function getPasserRankScore(scan) {
 }
 
 /**
+ * Same gates as the auto-call loop for a single scan (no dedupe, cooldown, or hourly caps).
+ * Used by admin CA analyzer and tooling.
+ *
+ * @param {object} scan
+ * @param {string} profileName
+ * @returns {{ pass: boolean, stage: string|null, reason: string|null, profileName: string, rankScore?: number }}
+ */
+function evaluateAutoCallFiltersOnScan(scan, profileName) {
+  const profile = String(profileName || autoCallConfig.defaultProfile || 'balanced').trim();
+
+  if (!scan || typeof scan !== 'object' || scan.__monitorProviderSkip === true) {
+    return {
+      pass: false,
+      stage: 'scan',
+      reason: scan && scan.__monitorProviderSkip ? 'provider_unavailable' : 'missing_or_invalid_scan',
+      profileName: profile
+    };
+  }
+  if (!scan.contractAddress) {
+    return { pass: false, stage: 'scan', reason: 'missing_or_invalid_scan', profileName: profile };
+  }
+
+  const sanityReject = getSanityRejectReason(scan);
+  if (sanityReject) {
+    return { pass: false, stage: 'sanity', reason: sanityReject, profileName: profile };
+  }
+
+  if (autoCallConfig.alerts.skipUnknownTokens) {
+    const namingReject = getNamingRejectReason(scan);
+    if (namingReject) {
+      return { pass: false, stage: 'naming', reason: namingReject, profileName: profile };
+    }
+  }
+
+  const profileReject = getProfileRejectReason(scan, profile);
+  if (profileReject) {
+    return { pass: false, stage: 'profile', reason: profileReject, profileName: profile };
+  }
+
+  const globalReject = getGlobalRejectReason(scan, profile);
+  if (globalReject) {
+    return { pass: false, stage: 'global', reason: globalReject, profileName: profile };
+  }
+
+  const momentumReject = getMomentumRejectReason(scan);
+  if (momentumReject) {
+    return { pass: false, stage: 'momentum', reason: momentumReject, profileName: profile };
+  }
+
+  return {
+    pass: true,
+    stage: null,
+    reason: null,
+    profileName: profile,
+    rankScore: getPasserRankScore(scan)
+  };
+}
+
+/**
  * =========================
  * MAIN LOOP
  * =========================
@@ -627,14 +687,52 @@ async function runAutoCallCycle(channel) {
   const passers = [];
   const fallbackCandidates = [];
 
-  console.log(`[AutoCall] Fetching GeckoTerminal candidates (${profileName})...`);
+  console.log(`[AutoCall] Fetching candidate pools (${profileName}) — GeckoTerminal + DexScreener…`);
 
   let candidates = [];
 
   try {
-    candidates = await fetchGeckoTerminalCandidatePools();
+    let gecko = [];
+    try {
+      gecko = await fetchGeckoTerminalCandidatePools();
+    } catch (err) {
+      console.error('[AutoCall] GeckoTerminal candidates failed:', err.message);
+    }
+
+    let dex = [];
+    try {
+      dex = await fetchDexScreenerCandidatePairs();
+    } catch (err) {
+      console.error('[AutoCall] DexScreener candidate feed failed:', err.message);
+    }
+
+    if (!gecko.length && !dex.length) {
+      console.warn('[AutoCall] No candidates from Gecko or DexScreener this cycle.');
+      return;
+    }
+
+    const byKey = new Map();
+    for (const c of gecko) {
+      if (!c?.contractAddress) continue;
+      byKey.set(String(c.contractAddress).toLowerCase(), c);
+    }
+    let dexOnly = 0;
+    for (const d of dex) {
+      if (!d?.contractAddress) continue;
+      const k = String(d.contractAddress).toLowerCase();
+      if (byKey.has(k)) continue;
+      byKey.set(k, d);
+      dexOnly += 1;
+    }
+
+    const MAX_UNIQUE_CANDIDATES_PER_CYCLE = 52;
+    candidates = [...byKey.values()].slice(0, MAX_UNIQUE_CANDIDATES_PER_CYCLE);
+
+    console.log(
+      `[AutoCall] Candidate pool: ${gecko.length} Gecko + ${dexOnly} Dex-only → ${candidates.length} unique (max ${MAX_UNIQUE_CANDIDATES_PER_CYCLE})`
+    );
   } catch (err) {
-    console.error('[AutoCall] Failed to fetch candidates:', err.message);
+    console.error('[AutoCall] Failed to build candidate pool:', err.message);
     return;
   }
 
@@ -876,5 +974,6 @@ module.exports = {
   startAutoCallLoop,
   stopAutoCallLoop,
   getAutoCallStatus,
-  runAutoCallCycle
+  runAutoCallCycle,
+  evaluateAutoCallFiltersOnScan
 };

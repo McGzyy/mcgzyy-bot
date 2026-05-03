@@ -1,4 +1,7 @@
-const { fetchDexScreenerTokenData } = require('./dexScreenerProvider');
+const {
+  fetchDexScreenerTokenData,
+  fetchDexScreenerLockedSolanaPair
+} = require('./dexScreenerProvider');
 const {
   fetchGeckoSolanaTokenImageUrl,
   fetchPumpFunTokenImageUrl
@@ -518,19 +521,38 @@ function buildFallbackErrorObject(contractAddress) {
   };
 }
 
-async function fetchRealTokenData(contractAddress) {
+/**
+ * @param {string} contractAddress Solana mint
+ * @param {{ lockedPairAddress?: string | null } | string | null} [opts] Optional `{ lockedPairAddress }` or legacy string pair id
+ */
+async function fetchRealTokenData(contractAddress, opts = null) {
   try {
-    const dex = await fetchDexScreenerTokenData(contractAddress);
+    const ca = String(contractAddress || '').trim();
+    const lockedRaw =
+      typeof opts === 'string'
+        ? opts
+        : opts && typeof opts === 'object' && opts.lockedPairAddress
+          ? String(opts.lockedPairAddress)
+          : '';
+    const lockedPair = lockedRaw.trim();
+
+    let dex = null;
+    if (lockedPair) {
+      dex = await fetchDexScreenerLockedSolanaPair(lockedPair, ca);
+    }
+    if (!dex) {
+      dex = await fetchDexScreenerTokenData(ca);
+    }
 
     // NEW: handle null (no pairs case)
     if (!dex) {
       return null;
     }
 
-    const normalized = normalizeDexData(dex, contractAddress);
+    const normalized = normalizeDexData(dex, ca);
     const dexLogo = String(normalized.token?.logoURI || '').trim();
-    const geckoImg = await fetchGeckoSolanaTokenImageUrl(contractAddress);
-    const pumpImg = await fetchPumpFunTokenImageUrl(contractAddress);
+    const geckoImg = await fetchGeckoSolanaTokenImageUrl(ca);
+    const pumpImg = await fetchPumpFunTokenImageUrl(ca);
     const merged = dexLogo || geckoImg || pumpImg || null;
     if (merged) normalized.token.logoURI = merged;
     if (geckoImg) normalized.token.geckoImageUrl = geckoImg;

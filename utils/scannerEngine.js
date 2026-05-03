@@ -581,9 +581,20 @@ async function generateSimulatedScan(contractAddress = null) {
  * =========================
  */
 
-async function generateRealScan(contractAddress, geckoCandidate = null) {
+async function generateRealScan(contractAddress, geckoCandidate = null, scanOpts = null) {
   try {
-    let realData = await fetchRealTokenData(contractAddress);
+    const lockPair =
+      scanOpts &&
+      typeof scanOpts === 'object' &&
+      typeof scanOpts.lockedPairAddress === 'string' &&
+      scanOpts.lockedPairAddress.trim()
+        ? scanOpts.lockedPairAddress.trim()
+        : '';
+
+    let realData = await fetchRealTokenData(
+      contractAddress,
+      lockPair ? { lockedPairAddress: lockPair } : {}
+    );
 
     if (geckoCandidate) {
       realData = mergeRealDataWithCandidate(realData, geckoCandidate, contractAddress);

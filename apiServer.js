@@ -375,6 +375,7 @@ function startReferralApiServer(discordClient = null, opts = {}) {
       tokenName: call.tokenName != null ? call.tokenName : null,
       ticker: call.ticker != null ? call.ticker : null,
       approvalRequestedAt: call.approvalRequestedAt != null ? call.approvalRequestedAt : null,
+      approvalExpiresAt: call.approvalExpiresAt != null ? call.approvalExpiresAt : null,
       approvalMessageId: mid,
       approvalGuildId: gid,
       approvalChannelId: cid,

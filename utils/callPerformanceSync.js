@@ -14,8 +14,9 @@ function computeAthMultiple(tracked) {
   const first = Number(
     tracked.firstCalledMarketCap || tracked.latestMarketCap || 0
   );
+  // Use rolling high MC only (`athMc`); do not mix in unrelated `ath` fields from stale JSON.
   const ath = Number(
-    tracked.athMc || tracked.ath || tracked.latestMarketCap || first || 0
+    tracked.athMc || tracked.latestMarketCap || first || 0
   );
   if (!(first > 0) || !(ath > 0)) return 1;
   const x = ath / first;

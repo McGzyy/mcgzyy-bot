@@ -156,33 +156,13 @@ function normalizeCandidatePair(pair) {
  * =========================
  */
 
-async function fetchDexScreenerTokenData(contractAddress) {
-  const url = `https://api.dexscreener.com/latest/dex/tokens/${contractAddress}`;
-
-  const response = await axios.get(url, {
-    timeout: 15000,
-    headers: {
-      Accept: 'application/json'
-    }
-  });
-
-  const rawPairs = response.data?.pairs || [];
-
-  // Only Solana pairs
-  const pairs = rawPairs.filter(
-    p => String(p?.chainId || '').toLowerCase() === 'solana'
-  );
-
-  if (!pairs.length) {
-    return null;
-  }
-
-  const bestPair = getBestPair(pairs, contractAddress);
-
-  if (!bestPair) {
-    throw new Error('No usable DexScreener pair found.');
-  }
-
+/**
+ * @param {object} bestPair DexScreener pair object
+ * @param {number} pairCount number of Solana pairs considered (for meta.pairCount)
+ * @param {string} baseContractAddress mint used when baseToken.address is missing
+ */
+function buildDexScreenerTokenPayload(bestPair, pairCount, baseContractAddress) {
+  const contractAddress = String(baseContractAddress || '').trim();
   const socials = bestPair?.info?.socials || [];
   const websites = bestPair?.info?.websites || [];
 
@@ -264,7 +244,7 @@ async function fetchDexScreenerTokenData(contractAddress) {
 
     meta: {
       source: 'dexscreener',
-      pairCount: pairs.length,
+      pairCount,
       migrated: computeMigrated({
         dexId: bestPair?.dexId,
         geckoDexName: null,
@@ -275,6 +255,80 @@ async function fetchDexScreenerTokenData(contractAddress) {
       })
     }
   };
+}
+
+async function fetchDexScreenerTokenData(contractAddress) {
+  const url = `https://api.dexscreener.com/latest/dex/tokens/${contractAddress}`;
+
+  const response = await axios.get(url, {
+    timeout: 15000,
+    headers: {
+      Accept: 'application/json'
+    }
+  });
+
+  const rawPairs = response.data?.pairs || [];
+
+  // Only Solana pairs
+  const pairs = rawPairs.filter(
+    p => String(p?.chainId || '').toLowerCase() === 'solana'
+  );
+
+  if (!pairs.length) {
+    return null;
+  }
+
+  const bestPair = getBestPair(pairs, contractAddress);
+
+  if (!bestPair) {
+    throw new Error('No usable DexScreener pair found.');
+  }
+
+  return buildDexScreenerTokenPayload(bestPair, pairs.length, contractAddress);
+}
+
+/**
+ * Latest stats for one Solana pool (stable MC path for monitoring).
+ * Requires the mint to be the pair's base token (DexScreener convention for pump-style pools).
+ *
+ * @param {string} pairAddress
+ * @param {string} baseMint token mint that must match baseToken.address
+ * @returns {Promise<object|null>}
+ */
+async function fetchDexScreenerLockedSolanaPair(pairAddress, baseMint) {
+  const pairId = String(pairAddress || '').trim();
+  const wantMint = String(baseMint || '').trim();
+  if (!pairId || !wantMint) return null;
+
+  try {
+    const url = `https://api.dexscreener.com/latest/dex/pairs/solana/${encodeURIComponent(pairId)}`;
+    const response = await axios.get(url, {
+      timeout: 15000,
+      headers: {
+        Accept: 'application/json'
+      }
+    });
+
+    const rawPairs = response.data?.pairs || [];
+    const bestPair = rawPairs[0];
+    if (!bestPair || String(bestPair?.chainId || '').toLowerCase() !== 'solana') {
+      return null;
+    }
+
+    const baseA = String(bestPair?.baseToken?.address || '').trim().toLowerCase();
+    if (!baseA || baseA !== wantMint.toLowerCase()) {
+      return null;
+    }
+
+    return buildDexScreenerTokenPayload(bestPair, 1, wantMint);
+  } catch (err) {
+    console.error(
+      '[DexScreener] Locked pair fetch failed:',
+      pairId.slice(0, 12),
+      err && err.message ? err.message : err
+    );
+    return null;
+  }
 }
 
 /**
@@ -353,5 +407,6 @@ async function fetchDexScreenerCandidatePairs() {
 
 module.exports = {
   fetchDexScreenerTokenData,
+  fetchDexScreenerLockedSolanaPair,
   fetchDexScreenerCandidatePairs
 };

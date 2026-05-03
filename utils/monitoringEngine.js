@@ -726,6 +726,22 @@ function queueDump(channel, coin, scan, key, drawdown) {
   });
 }
 
+/** Prefer the pool we first tracked so DexScreener "best pair" hops do not spike ATH MC. */
+function lockedPairScanOpts(coin) {
+  const live = getTrackedCall(coin.contractAddress) || coin;
+  const p = String(live.pairAddress || '').trim();
+  return p ? { lockedPairAddress: p } : null;
+}
+
+/** Persist pair id once (from first successful token scan) for stable monitoring reads. */
+function pairAddressPatchFromScan(coin, scan) {
+  const basis = getTrackedCall(coin.contractAddress) || coin;
+  const prev = String(basis.pairAddress || '').trim();
+  if (prev) return {};
+  const next = scan && typeof scan === 'object' ? String(scan.pairAddress || '').trim() : '';
+  return next ? { pairAddress: next } : {};
+}
+
 /**
  * Successful monitor tick requires a real scan object with finite marketCap > 0.
  * Null scan, missing/invalid marketCap, NaN, and mc <= 0 all count as failed scans.
@@ -775,7 +791,7 @@ async function checkTrackedCoins(channel, sourceBucket = 'all') {
         continue;
       }
 
-      const scan = await generateRealScan(coin.contractAddress);
+      const scan = await generateRealScan(coin.contractAddress, null, lockedPairScanOpts(coin));
 
       if (scan && typeof scan === 'object' && scan.__monitorProviderSkip === true) {
         console.log(
@@ -841,7 +857,8 @@ if (lifecycleStatus === 'archived') {
     athMc,
     lastUpdatedAt: new Date().toISOString(),
     lifecycleStatus: 'archived',
-    isActive: false
+    isActive: false,
+    ...pairAddressPatchFromScan(coin, scan)
   });
 
   try {
@@ -980,7 +997,8 @@ if (lifecycleStatus === 'archived') {
         milestonesHit,
         dumpAlertsHit: dumpHits,
         lastPostedX: lastPostedXOut,
-        priceHistory
+        priceHistory,
+        ...pairAddressPatchFromScan(coin, scan)
       });
 
       try {
@@ -1119,7 +1137,7 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
     let ok = 0;
     for (const coin of coins) {
       try {
-        const scan = await generateRealScan(coin.contractAddress);
+        const scan = await generateRealScan(coin.contractAddress, null, lockedPairScanOpts(coin));
         if (!isSuccessfulMarketScan(scan)) continue;
 
         const currentMc = Number(scan.marketCap);
@@ -1138,7 +1156,8 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
           athMc,
           failedScans: 0,
           lastUpdatedAt: new Date().toISOString(),
-          priceHistory
+          priceHistory,
+          ...pairAddressPatchFromScan(coin, scan)
         });
 
         const { queueUpdateUserCallPerformanceAth } = require('./callPerformanceSync');

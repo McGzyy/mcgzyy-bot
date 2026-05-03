@@ -428,6 +428,10 @@ function saveTrackedCall(
         (existing.tokenImageUrl && String(existing.tokenImageUrl).trim()) ||
         null,
       contractAddress: scan.contractAddress || existing.contractAddress,
+      pairAddress:
+        String(existing.pairAddress || '').trim() ||
+        (scan.pairAddress ? String(scan.pairAddress).trim() : '') ||
+        null,
       latestMarketCap: scan.marketCap ?? existing.latestMarketCap,
       entryScore: scan.entryScore ?? existing.entryScore,
       grade: scan.grade ?? existing.grade,
@@ -561,6 +565,7 @@ function saveTrackedCall(
       (scan.token?.imageUrl && String(scan.token.imageUrl).trim()) ||
       null,
     contractAddress: scan.contractAddress,
+    pairAddress: scan.pairAddress ? String(scan.pairAddress).trim() : null,
     firstCalledMarketCap: scan.marketCap,
     latestMarketCap: scan.marketCap,
     entryScore: scan.entryScore,
@@ -656,6 +661,10 @@ function reactivateTrackedCall(
       existing.tokenImageUrl ||
       null,
     contractAddress: scan.contractAddress || existing.contractAddress,
+    pairAddress:
+      String(existing.pairAddress || '').trim() ||
+      (scan.pairAddress ? String(scan.pairAddress).trim() : '') ||
+      null,
     latestMarketCap: scan.marketCap ?? existing.latestMarketCap,
     entryScore: scan.entryScore ?? existing.entryScore,
     grade: scan.grade ?? existing.grade,

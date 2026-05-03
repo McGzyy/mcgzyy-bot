@@ -288,7 +288,12 @@ async function buildOhlcvCandlestickBufferForTrackedCall(
   if (trackedCall.contractAddress) {
     if (!pair) {
       try {
-        const s = await generateRealScan(trackedCall.contractAddress);
+        const lock = String(trackedCall.pairAddress || '').trim();
+        const s = await generateRealScan(
+          trackedCall.contractAddress,
+          null,
+          lock ? { lockedPairAddress: lock } : null
+        );
         if (s && !s.__monitorProviderSkip) {
           pair = resolveOhlcvPairAddress(null, s);
           scanForOverlay = s;
@@ -298,7 +303,12 @@ async function buildOhlcvCandlestickBufferForTrackedCall(
       }
     } else if (spotMissing) {
       try {
-        const s = await generateRealScan(trackedCall.contractAddress);
+        const lock2 = String(trackedCall.pairAddress || '').trim();
+        const s = await generateRealScan(
+          trackedCall.contractAddress,
+          null,
+          lock2 ? { lockedPairAddress: lock2 } : null
+        );
         if (
           s &&
           !s.__monitorProviderSkip &&

@@ -18,7 +18,6 @@ const {
   xTerminalFooterLine,
   fitTweet,
   fitTweetWholeLines,
-  resolveXTweetMaxChars,
   resolveWeeklyStatsTweetMaxChars
 } = require('./buildXPostText');
 
@@ -66,7 +65,8 @@ function weeklyCohortBlock(emoji, title, subtitle, s) {
  * @param {{ windowLabel: string, days: number, topN?: number }} p
  */
 function buildLeaderboardDigestBody(p) {
-  const maxChars = resolveXTweetMaxChars();
+  /** Same budget as weekly stats (`X_WEEKLY_STATS_*`, `X_TWEET_MAX_CHARS`) so digests are not stuck at 280. */
+  const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 4;
   const rows = getCallerLeaderboardInTimeframe(p.days, topN);
   const bestHuman = getBestCallInTimeframe(p.days);
@@ -113,7 +113,10 @@ function buildLeaderboardDigestBody(p) {
     chunks.push(footer);
   }
   const raw = chunks.filter(Boolean).join(gap).trim();
-  return fitTweet(raw, maxChars);
+  if (raw.length <= maxChars) {
+    return raw;
+  }
+  return maxChars >= 2000 ? fitTweet(raw, maxChars) : fitTweetWholeLines(raw, maxChars);
 }
 
 const UTC_MO = [

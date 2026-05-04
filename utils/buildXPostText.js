@@ -1,7 +1,5 @@
 'use strict';
 
-const { getXBotUsernameForCopy } = require('./xPoster');
-
 /**
  * Premium X (Twitter) copy for McGBot Terminal — milestones, approvals, and manual posts.
  * Attribution:
@@ -21,9 +19,7 @@ function xTerminalSectionGap() {
 }
 
 function xTerminalFooterLine() {
-  const raw = getXBotUsernameForCopy().trim() || 'McGBot';
-  const tag = raw.startsWith('@') ? raw : `@${raw}`;
-  return `🔗 Dashboard + live boards — link in ${tag} bio`;
+  return '🔗 Dashboard + live boards — link in bio';
 }
 
 /** Hard ceiling for long-form X posts (raise via env if APIs change). */

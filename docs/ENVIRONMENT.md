@@ -202,7 +202,7 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_TWEET_MAX_CHARS`** | Default `280`. Long-form (e.g. `25000`) is honored up to **`X_TWEET_CHAR_HARD_CAP`** (default `25000`). Strip spaces; avoid wrapping the value in quotes in `.env` unless the whole value is quoted normally. |
 | **`X_TWEET_CHAR_HARD_CAP`** | Optional; default `25000`. Clamps `X_TWEET_MAX_CHARS` so copy builders stay within API limits. |
 | **`X_WEEKLY_STATS_MAX_CHARS`** | Optional. When set (e.g. `25000`), the **weekly stats snapshot** uses this budget even if `X_TWEET_MAX_CHARS` is missing on the bot host (prevents silent 280 truncation). |
-| **`X_WEEKLY_STATS_CHAR_FLOOR`** | Optional. Minimum character budget for the weekly snapshot (default **12000**, capped by `X_TWEET_CHAR_HARD_CAP`). Use if you want a higher floor than the default. |
+| **`X_WEEKLY_STATS_CHAR_FLOOR`** | Optional. Minimum character budget for the **weekly stats snapshot** and **leaderboard digests** (daily/7d X posts from `buildLeaderboardDigestBody`; default **12000**, capped by `X_TWEET_CHAR_HARD_CAP`). Digests used to cap at **280** when only the global default applied — they now share this resolver. |
 | **`X_POST_INCLUDE_GMGN`** | `1` / `true` — append GMGN link (uses more characters). |
 | **`X_AUTO_APPROVE_USER_CALLS`** | `1` / `true` — **user_call** rows skip `#mod-approvals` for X and go straight to `xApproved` (bot_call still needs mod approve). |
 | **`X_LEADERBOARD_DIGEST_ENABLED`** | `1` / `true` — enable scheduled digest tweets (off by default). |
@@ -215,7 +215,7 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_WEEKLY_STATS_UTC_HOUR`** | `0`–`23`; defaults to the same value as `X_LEADERBOARD_DIGEST_UTC_HOUR` (or `16`). |
 | **`X_WEEKLY_SNAPSHOT_CALLER_TOP_N`** | Optional; default **`8`** (max `15`). Caller rows on the weekly snapshot (shorter reads better on mobile). |
 | **`X_WEEKLY_SNAPSHOT_PRINT_TOP_N`** | Optional; default **`6`** (max `12`). Top member-call / McGBot-call lines per list. |
-| **`X_BOT_USERNAME`** | `utils/xPoster.js` | X handle **without** `@` (default `McGBot`). Used for **“link in @… bio”** footers on terminal-style posts (`buildXPostText`, digests, weekly snapshot). |
+| **`X_BOT_USERNAME`** | `utils/xPoster.js` | X handle **without** `@` (default `McGBot`). Used for API/DM copy (e.g. `getXBotUsernameForCopy`); terminal-style post footers say **“link in bio”** without @-mentioning the bot. |
 | **`DASHBOARD_PUBLIC_URL`** | Dashboard / links elsewhere | Optional; not appended to digest/snapshot tweets (footer points to the bot profile instead). `NEXT_PUBLIC_APP_URL` / `MCBOT_DASHBOARD_URL` are fallbacks where the codebase still reads a public app URL. |
 
 ### 7.4 Optional — Supabase (Discord bot, repo root)

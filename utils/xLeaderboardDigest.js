@@ -12,7 +12,15 @@ const {
   getTopUserCallsInUtcWeekBounds,
   getTopBotCallsInUtcWeekBounds
 } = require('./callerStatsService');
-const { xBrandKicker, fitTweet, fitTweetWholeLines, resolveXTweetMaxChars } = require('./buildXPostText');
+const {
+  xBrandKicker,
+  fitTweet,
+  fitTweetWholeLines,
+  resolveXTweetMaxChars,
+  resolveWeeklyStatsTweetMaxChars
+} = require('./buildXPostText');
+
+const SECTION_RULE = '━━━━━━━━━━━━━━━━━━━━';
 
 function formatCallOneLiner(call) {
   if (!call || !call.ticker) return null;
@@ -117,20 +125,17 @@ function formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive) {
  * @param {{ count: number, medianX: number|null, pctGe2: number|null, pctGe3: number|null }} s
  */
 function appendWeeklyCohortSection(lines, title, s) {
-  lines.push(title, '');
+  lines.push(title);
   if (!s.count) {
-    lines.push('· No qualifying prints in this window.');
-    lines.push('');
+    lines.push('  (no qualifying prints)');
     return;
   }
   const med = s.medianX == null ? '—' : `${Number(s.medianX).toFixed(2)}×`;
   const p2 = s.pctGe2 == null ? '—' : `${Number(s.pctGe2).toFixed(1)}%`;
   const p3 = s.pctGe3 == null ? '—' : `${Number(s.pctGe3).toFixed(1)}%`;
-  lines.push(`· Calls · ${s.count}`);
-  lines.push(`· Median ATH × · ${med}`);
-  lines.push(`· At or above 2× · ${p2}`);
-  lines.push(`· At or above 3× · ${p3}`);
-  lines.push('');
+  lines.push(`  Calls: ${s.count}`);
+  lines.push(`  Median ATH ×: ${med}`);
+  lines.push(`  Share ≥2×: ${p2}  ·  ≥3×: ${p3}`);
 }
 
 /**
@@ -139,7 +144,7 @@ function appendWeeklyCohortSection(lines, title, s) {
  * @param {object} snap from getWeeklyUtcTerminalSnapshot()
  */
 function buildWeeklyStatsSnapshotBody(snap) {
-  const maxChars = resolveXTweetMaxChars();
+  const maxChars = resolveWeeklyStatsTweetMaxChars();
   const { startInclusive, endExclusive } = snap;
   const range = formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive);
   const callerTopN = Math.min(25, Math.max(5, Number(process.env.X_WEEKLY_SNAPSHOT_CALLER_TOP_N) || 15));
@@ -147,99 +152,83 @@ function buildWeeklyStatsSnapshotBody(snap) {
 
   const lines = [
     xBrandKicker(),
-    '',
-    '◆ Weekly terminal snapshot',
-    `Completed UTC week · ${range}`,
-    '',
-    '────────',
-    ''
+    `◆ Weekly terminal snapshot · ${range}`,
+    SECTION_RULE,
+    'SUMMARY',
+    `  User-attributed: ${snap.user.count}  ·  Auto-scanned: ${snap.bot.count}  ·  Combined: ${snap.totalPrints}`,
+    `  Active distinct callers: ${snap.uniqueCallers}`
   ];
 
   if (!snap.totalPrints) {
-    lines.push('No qualifying prints in this UTC week.', '');
+    lines.push(SECTION_RULE, 'No qualifying prints in this UTC week.');
   } else {
-    lines.push('Summary', '');
-    lines.push(`· User-attributed calls · ${snap.user.count}`);
-    lines.push(`· Auto-scanned calls · ${snap.bot.count}`);
-    lines.push(`· Combined prints · ${snap.totalPrints}`);
-    lines.push(`· Active distinct callers · ${snap.uniqueCallers}`);
-    lines.push('');
-    lines.push('────────', '');
-    appendWeeklyCohortSection(lines, 'User desk — distribution', snap.user);
-    lines.push('────────', '');
-    appendWeeklyCohortSection(lines, 'Auto desk — distribution', snap.bot);
-    lines.push('────────', '');
+    lines.push(SECTION_RULE);
+    appendWeeklyCohortSection(lines, 'USER DESK — ATH× vs entry', snap.user);
+    lines.push(SECTION_RULE);
+    appendWeeklyCohortSection(lines, 'AUTO DESK — ATH× vs entry', snap.bot);
+    lines.push(SECTION_RULE);
 
     const desk = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, callerTopN);
-    lines.push(`Caller desk — avg ATH × (top ${callerTopN} by average)`, '');
+    lines.push(`CALLER DESK — avg ATH× (top ${callerTopN})`);
     if (desk.length) {
       for (let i = 0; i < desk.length; i += 1) {
         const r = desk[i];
-        lines.push(`${i + 1}. ${r.username} · ${r.avgX.toFixed(2)}× avg · ${r.totalCalls} print${r.totalCalls === 1 ? '' : 's'}`);
+        lines.push(
+          `  ${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} print${r.totalCalls === 1 ? '' : 's'}`
+        );
       }
     } else {
-      lines.push('· — no qualifying user desk rows —');
+      lines.push('  (no qualifying rows)');
     }
-    lines.push('');
-    lines.push('────────', '');
 
+    lines.push(SECTION_RULE);
     const topUser = getTopUserCallsInUtcWeekBounds(startInclusive, endExclusive, printTopN);
-    lines.push(`Top user prints — ATH × vs entry (top ${printTopN})`, '');
+    lines.push(`TOP USER PRINTS (by ATH×, top ${printTopN})`);
     if (topUser.length) {
       for (let i = 0; i < topUser.length; i += 1) {
         const row = topUser[i];
         const one = formatCallOneLiner(row);
-        lines.push(one ? `${i + 1}. ${one}` : `${i + 1}. (unknown)`);
+        lines.push(`  ${i + 1}. ${one || '—'}`);
       }
     } else {
-      lines.push('· — none —');
+      lines.push('  (none)');
     }
-    lines.push('');
-    lines.push('────────', '');
 
+    lines.push(SECTION_RULE);
     const topBot = getTopBotCallsInUtcWeekBounds(startInclusive, endExclusive, printTopN);
-    lines.push(`Top auto prints — ATH × vs entry (top ${printTopN})`, '');
+    lines.push(`TOP AUTO PRINTS (by ATH×, top ${printTopN})`);
     if (topBot.length) {
       for (let i = 0; i < topBot.length; i += 1) {
         const row = topBot[i];
         const one = formatCallOneLiner(row);
-        lines.push(one ? `${i + 1}. ${one}` : `${i + 1}. (unknown)`);
+        lines.push(`  ${i + 1}. ${one || '—'}`);
       }
     } else {
-      lines.push('· — none —');
+      lines.push('  (none)');
     }
-    lines.push('');
-    lines.push('────────', '');
 
+    lines.push(SECTION_RULE);
     const bestH = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
     const bestB = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
-    lines.push('Week highs', '');
-    if (bestH) {
-      const h = formatCallOneLiner(bestH);
-      if (h) lines.push(`· Best user print · ${h}`);
-    } else {
-      lines.push('· Best user print · —');
-    }
-    if (bestB) {
-      const b = formatCallOneLiner(bestB);
-      if (b) lines.push(`· Best auto print · ${b}`);
-    } else {
-      lines.push('· Best auto print · —');
-    }
-    lines.push('');
-    lines.push('────────', '');
+    lines.push('WEEK HIGHS');
     lines.push(
-      'Footnote · ATH × = peak MC ÷ entry MC at first tracked print. User desk = community calls; auto desk = scanner. Same validity filters as the dashboard leaderboards (not financial advice).',
-      ''
+      `  Best user print: ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}  ·  Best auto: ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
+    );
+    lines.push(
+      SECTION_RULE,
+      'ATH× = peak MC ÷ entry MC at first print. User = community calls; Auto = scanner. Same filters as dashboard leaderboards. Not financial advice.'
     );
   }
 
   const dash = dashboardLinkLine();
   if (dash) {
-    lines.push('────────', dash, '');
+    lines.push(SECTION_RULE, dash);
   }
 
   const raw = lines.join('\n').trimEnd();
+  if (raw.length <= maxChars) {
+    return raw;
+  }
   return maxChars >= 2000 ? fitTweet(raw, maxChars) : fitTweetWholeLines(raw, maxChars);
 }
 
@@ -325,6 +314,9 @@ async function tickWeeklyStatsSnapshot() {
   }
 
   const text = buildWeeklyStatsSnapshotBody(snap);
+  console.log(
+    `[XWeeklyStatsSnapshot] bodyLen=${text.length} budget=${resolveWeeklyStatsTweetMaxChars()} week=${key}`
+  );
   const result = await createPost(text);
   if (!result.success) {
     console.error('[XWeeklyStatsSnapshot] post failed:', result.error || 'unknown');

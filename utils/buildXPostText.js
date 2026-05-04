@@ -8,15 +8,46 @@
  */
 
 /** Hard ceiling for long-form X posts (raise via env if APIs change). */
-const X_TWEET_CHAR_HARD_CAP =
-  Number.isFinite(Number(process.env.X_TWEET_CHAR_HARD_CAP)) && Number(process.env.X_TWEET_CHAR_HARD_CAP) >= 100
-    ? Number(process.env.X_TWEET_CHAR_HARD_CAP)
-    : 25000;
+function readXTweetCharHardCap() {
+  const v = Number(String(process.env.X_TWEET_CHAR_HARD_CAP || '').trim().replace(/,/g, ''));
+  if (Number.isFinite(v) && v >= 100) return v;
+  return 25000;
+}
+
+/**
+ * Parse env int (handles quotes, commas, spaces). Empty / invalid → fallback.
+ * @param {string|undefined} name
+ * @param {number} fallback
+ */
+function parseEnvTweetCharBudget(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null) return fallback;
+  const s = String(raw).trim().replace(/^['"]+|['"]+$/g, '').replace(/,/g, '');
+  if (s === '') return fallback;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 100) return fallback;
+  return n;
+}
 
 function resolveXTweetMaxChars() {
-  const raw = Number(process.env.X_TWEET_MAX_CHARS ?? 280);
-  const n = Number.isFinite(raw) && raw >= 100 ? raw : 280;
-  return Math.min(X_TWEET_CHAR_HARD_CAP, Math.max(100, n));
+  const cap = readXTweetCharHardCap();
+  const n = parseEnvTweetCharBudget('X_TWEET_MAX_CHARS', 280);
+  return Math.min(cap, Math.max(100, n));
+}
+
+/**
+ * Weekly stats snapshot can use `X_WEEKLY_STATS_MAX_CHARS` so a missing global
+ * `X_TWEET_MAX_CHARS` on the bot host does not silently fall back to 280.
+ */
+function resolveWeeklyStatsTweetMaxChars() {
+  const cap = readXTweetCharHardCap();
+  if (process.env.X_WEEKLY_STATS_MAX_CHARS != null && String(process.env.X_WEEKLY_STATS_MAX_CHARS).trim() !== '') {
+    const dedicated = parseEnvTweetCharBudget('X_WEEKLY_STATS_MAX_CHARS', 0);
+    if (dedicated >= 280) {
+      return Math.min(cap, dedicated);
+    }
+  }
+  return resolveXTweetMaxChars();
 }
 
 
@@ -234,5 +265,6 @@ module.exports = {
   xBrandKicker,
   fitTweet,
   fitTweetWholeLines,
-  resolveXTweetMaxChars
+  resolveXTweetMaxChars,
+  resolveWeeklyStatsTweetMaxChars
 };

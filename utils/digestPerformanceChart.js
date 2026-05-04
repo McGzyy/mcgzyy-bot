@@ -25,6 +25,8 @@ const POINT_RING = 'rgba(255, 255, 255, 0.35)';
 
 /** Modest ATH × when a UTC weekday had no qualifying prints — keeps the line chart from hugging Sat–Sun only. */
 const DIGEST_PLACEHOLDER_ATH_X = 1.68;
+/** Keep placeholder + low-multiple days in frame; otherwise Chart.js auto-zoom hides Mon–Fri backfill. */
+const DIGEST_Y_AXIS_MIN = 1.25;
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -164,6 +166,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
           border: { display: false }
         },
         y: {
+          min: DIGEST_Y_AXIS_MIN,
           title: {
             display: true,
             text: 'Avg ATH ×',
@@ -175,7 +178,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 32, right: 16, bottom: 10, left: 12 } }
+      layout: { padding: { top: 36, right: 16, bottom: 10, left: 12 } }
     }
   };
 
@@ -250,6 +253,7 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
           border: { display: false }
         },
         y: {
+          min: DIGEST_Y_AXIS_MIN,
           title: {
             display: true,
             text: 'Avg ATH ×',
@@ -261,7 +265,7 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 32, right: 16, bottom: 10, left: 12 } }
+      layout: { padding: { top: 36, right: 16, bottom: 10, left: 12 } }
     }
   };
 
@@ -346,6 +350,7 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30) {
           border: { display: false }
         },
         y: {
+          min: DIGEST_Y_AXIS_MIN,
           title: {
             display: true,
             text: 'Avg ATH ×',
@@ -357,7 +362,7 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 32, right: 18, bottom: 8, left: 12 } }
+      layout: { padding: { top: 36, right: 18, bottom: 8, left: 12 } }
     }
   };
 

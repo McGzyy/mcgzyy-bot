@@ -26,6 +26,12 @@ const {
 } = require('./buildXPostText');
 
 /**
+ * List-row marker for X: U+25AB "▫️" often renders as a solid/black square on Android/X clients.
+ * U+203A (›) stays readable everywhere.
+ */
+const X_LIST_MARK = '\u203A ';
+
+/**
  * One-line print for X. No leading `$` on the ticker — X allows only **one** cashtag
  * ($SYMBOL) per post; weekly / digest lists would otherwise exceed that and get 403.
  */
@@ -63,10 +69,10 @@ function weeklyCohortBlock(emoji, title, subtitle, s) {
   return [
     head,
     '',
-    `▪ Calls — ${s.count}`,
-    `▪ Median ATH × — ${med}`,
-    `▪ Share at ≥ 2× — ${p2}`,
-    `▪ Share at ≥ 3× — ${p3}`
+    `${X_LIST_MARK}Calls — ${s.count}`,
+    `${X_LIST_MARK}Median ATH × — ${med}`,
+    `${X_LIST_MARK}Share at ≥ 2× — ${p2}`,
+    `${X_LIST_MARK}Share at ≥ 3× — ${p3}`
   ].join('\n');
 }
 
@@ -107,14 +113,14 @@ function buildLeaderboardDigestBody(p) {
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
     if (h) {
-      hiLines.push(`▫️ Best member call — ${h}`);
+      hiLines.push(`${X_LIST_MARK}Best member call — ${h}`);
       anyHi = true;
     }
   }
   if (bestBot) {
     const b = formatCallOneLiner(bestBot);
     if (b) {
-      hiLines.push(`▫️ Best McGBot call — ${b}`);
+      hiLines.push(`${X_LIST_MARK}Best McGBot call — ${b}`);
       anyHi = true;
     }
   }
@@ -197,16 +203,16 @@ function buildWeeklyStatsSnapshotBody(snap) {
       [
         '📊 Summary',
         '',
-        `▫️ Member calls — ${snap.user.count}`,
-        `▫️ McGBot calls — ${snap.bot.count}`,
-        `▫️ Combined calls — ${snap.totalPrints}`,
-        `▫️ Active callers (distinct) — ${snap.uniqueCallers}`
+        `${X_LIST_MARK}Member calls — ${snap.user.count}`,
+        `${X_LIST_MARK}McGBot calls — ${snap.bot.count}`,
+        `${X_LIST_MARK}Combined calls — ${snap.totalPrints}`,
+        `${X_LIST_MARK}Active callers (distinct) — ${snap.uniqueCallers}`
       ].join('\n')
     );
 
     sections.push(weeklyCohortBlock('🔺', 'Member desk', null, snap.user));
 
-    sections.push(weeklyCohortBlock('▫️', 'McGBot desk', null, snap.bot));
+    sections.push(weeklyCohortBlock('*', 'McGBot desk', null, snap.bot));
 
     const desk = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, callerTopN);
     const deskLines = [`💎 Caller leaderboard (top ${callerTopN} by avg ATH ×)`, ''];
@@ -252,8 +258,8 @@ function buildWeeklyStatsSnapshotBody(snap) {
       [
         '⭐️ Best of the week',
         '',
-        `▫️ Best member call — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
-        `▫️ Best McGBot call — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
+        `${X_LIST_MARK}Best member call — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
+        `${X_LIST_MARK}Best McGBot call — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
       ].join('\n')
     );
   }

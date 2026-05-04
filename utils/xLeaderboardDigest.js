@@ -1,6 +1,6 @@
 'use strict';
 
-const { createPost } = require('./xPoster');
+const { createPost, uploadMediaPng, normalizePngUploadBuffer } = require('./xPoster');
 const {
   buildWeeklyAvgXpDigestPng,
   buildMonthlyAvgXpDigestPng
@@ -266,13 +266,22 @@ let lastWeeklyStatsKey = '';
  */
 async function postDigest(p, options = {}) {
   const { windowLabel, days, topN } = p;
-  let mediaPngBuffer = null;
+  let preUploadedMediaId = null;
   let caption = '';
 
   if (options.attachWeeklyAvgXChart) {
     try {
-      mediaPngBuffer = await buildWeeklyAvgXpDigestPng(new Date());
-      caption = '\n\n📈 Chart: avg ATH × by weekday (last completed UTC week).';
+      const png = await buildWeeklyAvgXpDigestPng(new Date());
+      if (!normalizePngUploadBuffer(png)) {
+        console.error('[XLeaderboardDigest] weekly chart: render did not produce a valid PNG');
+      } else {
+        preUploadedMediaId = await uploadMediaPng(png);
+        if (preUploadedMediaId) {
+          caption = '\n\n📈 Chart: avg ATH × by weekday (last completed UTC week).';
+        } else {
+          console.error('[XLeaderboardDigest] weekly chart: X media upload returned no id');
+        }
+      }
     } catch (err) {
       console.error('[XLeaderboardDigest] weekly avg× chart failed:', err?.message || err);
     }
@@ -280,8 +289,17 @@ async function postDigest(p, options = {}) {
 
   if (options.monthlyChartYear != null && Number.isFinite(Number(options.monthlyChartYear))) {
     try {
-      mediaPngBuffer = await buildMonthlyAvgXpDigestPng(Number(options.monthlyChartYear));
-      caption = '\n\n📈 Chart: avg ATH × by calendar month (UTC year).';
+      const png = await buildMonthlyAvgXpDigestPng(Number(options.monthlyChartYear));
+      if (!normalizePngUploadBuffer(png)) {
+        console.error('[XLeaderboardDigest] monthly chart: render did not produce a valid PNG');
+      } else {
+        preUploadedMediaId = await uploadMediaPng(png);
+        if (preUploadedMediaId) {
+          caption = '\n\n📈 Chart: avg ATH × by calendar month (UTC year).';
+        } else {
+          console.error('[XLeaderboardDigest] monthly chart: X media upload returned no id');
+        }
+      }
     } catch (err) {
       console.error('[XLeaderboardDigest] monthly avg× chart failed:', err?.message || err);
     }
@@ -296,12 +314,17 @@ async function postDigest(p, options = {}) {
     text = maxChars >= 2000 ? fitTweet(text, maxChars) : fitTweetWholeLines(text, maxChars);
   }
 
-  const result = await createPost(text, null, mediaPngBuffer);
+  const result = await createPost(
+    text,
+    null,
+    null,
+    preUploadedMediaId ? { preUploadedMediaId } : null
+  );
   if (!result.success) {
     console.error('[XLeaderboardDigest] post failed:', result.error || 'unknown');
   } else {
     console.log(
-      `[XLeaderboardDigest] posted ${windowLabel} (${result.id || 'ok'}) media=${mediaPngBuffer ? 'yes' : 'no'} len=${text.length}`
+      `[XLeaderboardDigest] posted ${windowLabel} (${result.id || 'ok'}) media=${preUploadedMediaId ? 'yes' : 'no'} len=${text.length}`
     );
   }
   return { ...result, textLength: text.length };

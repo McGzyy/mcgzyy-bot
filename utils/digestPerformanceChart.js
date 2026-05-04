@@ -16,10 +16,20 @@ const GRID = 'rgba(148, 163, 184, 0.1)';
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+/**
+ * @param {import('chart.js').Chart & { registerables?: import('chart.js').ChartComponentLike[] }} ChartJS
+ */
+function digestChartCallback(ChartJS) {
+  if (ChartJS.registerables) {
+    ChartJS.register(...ChartJS.registerables);
+  }
+}
+
 const chartCanvas = new ChartJSNodeCanvas({
   width: WIDTH,
   height: HEIGHT,
-  backgroundColour: BG
+  backgroundColour: BG,
+  chartCallback: digestChartCallback
 });
 
 const UTC_MO = [

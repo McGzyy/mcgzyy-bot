@@ -200,14 +200,36 @@ async function fetchXAuthenticatedUser() {
   }
 }
 
+/**
+ * chartjs-node-canvas / canvas may return Buffer or Uint8Array; X upload expects a real Buffer + PNG signature.
+ * @param {unknown} raw
+ * @returns {Buffer | null}
+ */
+function normalizePngUploadBuffer(raw) {
+  if (raw == null) return null;
+  let buf;
+  try {
+    buf = Buffer.isBuffer(raw) ? raw : Buffer.from(/** @type {Uint8Array} */ (raw));
+  } catch {
+    return null;
+  }
+  if (!buf.length || buf.length < 68) return null;
+  if (buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4e || buf[3] !== 0x47) {
+    console.error('[XPoster] normalizePngUploadBuffer: not a PNG (bad signature)');
+    return null;
+  }
+  return buf;
+}
+
 async function uploadMediaPng(buffer) {
-  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 100) return null;
+  const buf = normalizePngUploadBuffer(buffer);
+  if (!buf) return null;
 
   const uploadUrl = 'https://upload.twitter.com/1.1/media/upload.json';
   const authHeader = buildOAuthHeader('POST', uploadUrl);
 
   const params = new URLSearchParams();
-  params.set('media_data', buffer.toString('base64'));
+  params.set('media_data', buf.toString('base64'));
 
   try {
     const response = await axios.post(uploadUrl, params.toString(), {
@@ -217,14 +239,22 @@ async function uploadMediaPng(buffer) {
       }
     });
 
-    return response?.data?.media_id_string || null;
+    const d = response?.data;
+    const id = d?.media_id_string ?? d?.media_id;
+    return id != null && id !== '' ? String(id) : null;
   } catch (error) {
     console.error('[XPoster] Media upload failed:', error?.response?.data || error.message);
     return null;
   }
 }
 
-async function createPost(text, replyToId = null, mediaPngBuffer = null) {
+/**
+ * @param {string} text
+ * @param {string | null} [replyToId]
+ * @param {Buffer | Uint8Array | null} [mediaPngBuffer] uploaded when set (unless `options.preUploadedMediaId` is set)
+ * @param {{ preUploadedMediaId?: string } | null} [options] pass `preUploadedMediaId` when the caller already called `uploadMediaPng`
+ */
+async function createPost(text, replyToId = null, mediaPngBuffer = null, options = null) {
   const url = `${X_API_BASE}/tweets`;
 
   const body = {
@@ -237,16 +267,28 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null) {
     };
   }
 
-  let mediaId = null;
-  if (mediaPngBuffer && !replyToId) {
+  const preUploadedMediaId =
+    options && typeof options === 'object' && options.preUploadedMediaId != null
+      ? String(options.preUploadedMediaId).trim()
+      : '';
+
+  let mediaId = preUploadedMediaId || null;
+  if (!mediaId && mediaPngBuffer && !replyToId) {
     try {
       mediaId = await uploadMediaPng(mediaPngBuffer);
-    } catch (_) {
+      if (!mediaId) {
+        const n = normalizePngUploadBuffer(mediaPngBuffer)?.length ?? 0;
+        console.error(
+          `[XPoster] Media upload skipped or failed (png bytes=${n}). Tweet will be text-only.`
+        );
+      }
+    } catch (e) {
       mediaId = null;
+      console.error('[XPoster] Media upload exception:', e?.message || e);
     }
-    if (mediaId) {
-      body.media = { media_ids: [mediaId] };
-    }
+  }
+  if (mediaId && !replyToId) {
+    body.media = { media_ids: [String(mediaId)] };
   }
 
   const authHeader = buildOAuthHeader('POST', url);
@@ -289,6 +331,7 @@ function getXBotUsernameForCopy() {
 module.exports = {
   createPost,
   uploadMediaPng,
+  normalizePngUploadBuffer,
   buildOAuthHeader,
   oauth1aGet,
   listDmMessageCreates,

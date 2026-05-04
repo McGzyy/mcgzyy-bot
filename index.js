@@ -39,7 +39,8 @@ const { fitTweet, xBrandKicker, xTerminalSectionRule } = require('./utils/buildX
 const {
   startXLeaderboardDigestScheduler,
   buildLeaderboardDigestBody,
-  buildWeeklyStatsSnapshotBody
+  buildWeeklyStatsSnapshotBody,
+  postLeaderboardDigestToX
 } = require('./utils/xLeaderboardDigest');
 const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
 const { publishApprovedCoinToX } = require('./utils/publishApprovedCoinToX');
@@ -476,7 +477,8 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
-    `• \`!testdailydigest\` / \`!test7ddigest\` — Post **daily** / **7d** leaderboard digest to X (owner only; **scheduled** daily digest is off unless \`X_LEADERBOARD_DAILY_DIGEST_ENABLED\`)\n\n`;
+    `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (with weekday chart), **7d**, or **monthly** (with month chart) digest to X (owner only)\n` +
+    `• Scheduled daily digest is **on** when \`X_LEADERBOARD_DIGEST_ENABLED\` is on; set \`X_LEADERBOARD_DAILY_DIGEST_ENABLED=0\` to disable\n\n`;
 
   if (canSeeModHelp) {
     contentOut +=
@@ -2967,30 +2969,52 @@ if (lowerContent === '!scanner off') {
         return;
       }
 
-      if (lowerContent === '!testdailydigest' || lowerContent === '!test7ddigest') {
+      if (
+        lowerContent === '!testdailydigest' ||
+        lowerContent === '!test7ddigest' ||
+        lowerContent === '!testmonthlydigest'
+      ) {
         if (!isBotOwnerDiscordId(message.author.id)) {
           return message.reply('❌ You do not have permission to use this command.');
         }
 
         const is7d = lowerContent === '!test7ddigest';
+        const isMonthly = lowerContent === '!testmonthlydigest';
 
         try {
-          const text = buildLeaderboardDigestBody({
-            windowLabel: is7d ? '7d snapshot' : 'Daily snapshot',
-            days: is7d ? 7 : 1,
-            topN: is7d ? 5 : 4
-          });
-          const result = await createPost(text);
-          if (result.success) {
+          let result;
+          let label = 'digest';
+          if (isMonthly) {
+            const now = new Date();
+            let chartYear = now.getUTCFullYear();
+            if (now.getUTCMonth() === 0) {
+              chartYear -= 1;
+            }
+            label = `monthly (+ chart ${chartYear})`;
+            result = await postLeaderboardDigestToX(
+              { windowLabel: 'Monthly snapshot', days: 30, topN: 8 },
+              { monthlyChartYear: chartYear }
+            );
+          } else if (is7d) {
+            label = '7d';
+            result = await postLeaderboardDigestToX({ windowLabel: '7d snapshot', days: 7, topN: 5 });
+          } else {
+            label = 'daily (+ weekday chart)';
+            result = await postLeaderboardDigestToX(
+              { windowLabel: 'Daily snapshot', days: 1, topN: 4 },
+              { attachWeeklyAvgXChart: true }
+            );
+          }
+          if (result?.success) {
             await replyText(
               message,
-              `✅ Posted ${is7d ? '7d' : 'daily'} digest to X\nPost ID: ${result.id}\nBody length: ${text.length} characters`
+              `✅ Posted **${label}** to X\nPost ID: ${result.id}\nBody length: ${result.textLength ?? '—'} characters`
             );
           } else {
-            await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
+            await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result?.error, null, 2)}`);
           }
         } catch (e) {
-          console.error('[!testdailydigest/!test7ddigest]', e);
+          console.error('[!test*digest]', e);
           await replyText(
             message,
             `❌ Digest test failed: ${e instanceof Error ? e.message : String(e)}`

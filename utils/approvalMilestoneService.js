@@ -12,7 +12,7 @@ function normalizeLadderRungs(list) {
 
 function getApprovalTriggerX() {
   const settings = loadScannerSettings() || {};
-  return Number(settings.approvalTriggerX || 4);
+  return Number(settings.approvalTriggerX || 8);
 }
 
 /**

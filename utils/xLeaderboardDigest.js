@@ -2,6 +2,10 @@
 
 const { createPost } = require('./xPoster');
 const {
+  buildWeeklyAvgXpDigestPng,
+  buildMonthlyAvgXpDigestPng
+} = require('./digestPerformanceChart');
+const {
   getCallerLeaderboardInTimeframe,
   getBestCallInTimeframe,
   getBestBotCallInTimeframe,
@@ -253,16 +257,54 @@ function buildWeeklyStatsSnapshotBody(snap) {
 
 let lastDailyKey = '';
 let lastWeeklyKey = '';
+let lastMonthlyKey = '';
 let lastWeeklyStatsKey = '';
 
-async function postDigest(windowLabel, days, topN) {
-  const text = buildLeaderboardDigestBody({ windowLabel, days, topN });
-  const result = await createPost(text);
+/**
+ * @param {{ windowLabel: string, days: number, topN: number }} p
+ * @param {{ attachWeeklyAvgXChart?: boolean, monthlyChartYear?: number }} [options]
+ */
+async function postDigest(p, options = {}) {
+  const { windowLabel, days, topN } = p;
+  let mediaPngBuffer = null;
+  let caption = '';
+
+  if (options.attachWeeklyAvgXChart) {
+    try {
+      mediaPngBuffer = await buildWeeklyAvgXpDigestPng(new Date());
+      caption = '\n\n📈 Chart: avg ATH × by weekday (last completed UTC week).';
+    } catch (err) {
+      console.error('[XLeaderboardDigest] weekly avg× chart failed:', err?.message || err);
+    }
+  }
+
+  if (options.monthlyChartYear != null && Number.isFinite(Number(options.monthlyChartYear))) {
+    try {
+      mediaPngBuffer = await buildMonthlyAvgXpDigestPng(Number(options.monthlyChartYear));
+      caption = '\n\n📈 Chart: avg ATH × by calendar month (UTC year).';
+    } catch (err) {
+      console.error('[XLeaderboardDigest] monthly avg× chart failed:', err?.message || err);
+    }
+  }
+
+  let text = buildLeaderboardDigestBody({ windowLabel, days, topN });
+  if (caption) {
+    text = `${text}${caption}`;
+  }
+  const maxChars = resolveWeeklyStatsTweetMaxChars();
+  if (text.length > maxChars) {
+    text = maxChars >= 2000 ? fitTweet(text, maxChars) : fitTweetWholeLines(text, maxChars);
+  }
+
+  const result = await createPost(text, null, mediaPngBuffer);
   if (!result.success) {
     console.error('[XLeaderboardDigest] post failed:', result.error || 'unknown');
   } else {
-    console.log(`[XLeaderboardDigest] posted ${windowLabel} (${result.id || 'ok'})`);
+    console.log(
+      `[XLeaderboardDigest] posted ${windowLabel} (${result.id || 'ok'}) media=${mediaPngBuffer ? 'yes' : 'no'} len=${text.length}`
+    );
   }
+  return { ...result, textLength: text.length };
 }
 
 async function tickXLeaderboardDigest() {
@@ -282,15 +324,18 @@ async function tickXLeaderboardDigest() {
     return;
   }
 
-  const dailyDigestOn = ['1', 'true', 'yes'].includes(
+  const dailyDigestOff = ['0', 'false', 'no'].includes(
     String(process.env.X_LEADERBOARD_DAILY_DIGEST_ENABLED || '')
       .trim()
       .toLowerCase()
   );
   const dailyKey = `d:${utcDate}`;
-  if (dailyDigestOn && lastDailyKey !== dailyKey) {
+  if (!dailyDigestOff && lastDailyKey !== dailyKey) {
     lastDailyKey = dailyKey;
-    await postDigest('Daily snapshot', 1, 4);
+    await postDigest(
+      { windowLabel: 'Daily snapshot', days: 1, topN: 4 },
+      { attachWeeklyAvgXChart: true }
+    );
   }
 
   const weeklyOn = String(process.env.X_LEADERBOARD_WEEKLY_DIGEST_ENABLED ?? 'true')
@@ -303,7 +348,27 @@ async function tickXLeaderboardDigest() {
     const weekKey = `w:${utcDate}`;
     if (lastWeeklyKey !== weekKey) {
       lastWeeklyKey = weekKey;
-      await postDigest('7d snapshot', 7, 5);
+      await postDigest({ windowLabel: '7d snapshot', days: 7, topN: 5 });
+    }
+  }
+
+  const monthlyDigestOff = ['0', 'false', 'no'].includes(
+    String(process.env.X_LEADERBOARD_MONTHLY_DIGEST_ENABLED || '')
+      .trim()
+      .toLowerCase()
+  );
+  if (!monthlyDigestOff && now.getUTCDate() === 1) {
+    const mKey = `m:${utcDate.slice(0, 7)}`;
+    if (lastMonthlyKey !== mKey) {
+      lastMonthlyKey = mKey;
+      let chartYear = now.getUTCFullYear();
+      if (now.getUTCMonth() === 0) {
+        chartYear -= 1;
+      }
+      await postDigest(
+        { windowLabel: 'Monthly snapshot', days: 30, topN: 8 },
+        { monthlyChartYear: chartYear }
+      );
     }
   }
 }
@@ -357,9 +422,19 @@ function startXLeaderboardDigestScheduler() {
   }, 5 * 60 * 1000);
 }
 
+/**
+ * Post a leaderboard digest to X (same path as the scheduler). For Discord test commands.
+ * @param {{ windowLabel: string, days: number, topN: number }} body
+ * @param {{ attachWeeklyAvgXChart?: boolean, monthlyChartYear?: number }} [opts]
+ */
+async function postLeaderboardDigestToX(body, opts = {}) {
+  return postDigest(body, opts);
+}
+
 module.exports = {
   startXLeaderboardDigestScheduler,
   buildLeaderboardDigestBody,
   buildWeeklyStatsSnapshotBody,
-  tickWeeklyStatsSnapshot
+  tickWeeklyStatsSnapshot,
+  postLeaderboardDigestToX
 };

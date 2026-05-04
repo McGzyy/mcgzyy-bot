@@ -789,6 +789,88 @@ function getTopBotCallsInUtcWeekBounds(startInclusive, endExclusive, limit = 15)
   return buildTopCalls(callsForUtcWeekDesk(isBotCall, startInclusive, endExclusive), limit);
 }
 
+/** Mon=0 … Sun=6 in UTC (Monday-first week index). */
+function utcMondayFirstIndexFromMs(ms) {
+  const dow = new Date(ms).getUTCDay();
+  return dow === 0 ? 6 : dow - 1;
+}
+
+/**
+ * Average ATH × per UTC weekday for calls in `[startInclusive, endExclusive)` (same filters as week desk).
+ * @returns {{ memberAvg: (number|null)[], botAvg: (number|null)[] }} length 7 (Mon–Sun); `null` if no calls that day.
+ */
+function getAvgAthXByUtcWeekdayInBounds(startInclusive, endExclusive) {
+  const memberBuckets = Array.from({ length: 7 }, () => /** @type {number[]} */ ([]));
+  const botBuckets = Array.from({ length: 7 }, () => /** @type {number[]} */ ([]));
+
+  for (const call of callsForUtcWeekDesk(isHumanUserCall, startInclusive, endExclusive)) {
+    const ms = getCallTimestampMs(call);
+    if (ms == null) continue;
+    const idx = utcMondayFirstIndexFromMs(ms);
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+    if (Number.isFinite(x) && x > 0) memberBuckets[idx].push(x);
+  }
+  for (const call of callsForUtcWeekDesk(isBotCall, startInclusive, endExclusive)) {
+    const ms = getCallTimestampMs(call);
+    if (ms == null) continue;
+    const idx = utcMondayFirstIndexFromMs(ms);
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+    if (Number.isFinite(x) && x > 0) botBuckets[idx].push(x);
+  }
+
+  const avg = (/** @type {number[][]} */ buckets) =>
+    buckets.map(xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null));
+
+  return { memberAvg: avg(memberBuckets), botAvg: avg(botBuckets) };
+}
+
+function avgXForCalls(calls) {
+  if (!calls.length) return null;
+  let s = 0;
+  let n = 0;
+  for (const call of calls) {
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+    if (Number.isFinite(x) && x > 0) {
+      s += x;
+      n += 1;
+    }
+  }
+  return n ? s / n : null;
+}
+
+/**
+ * Average ATH × per calendar month (UTC) for `yearUtc` (Jan=0 … Dec=11).
+ * @param {number} yearUtc e.g. 2026
+ */
+function getAvgAthXByUtcMonthInYear(yearUtc) {
+  const memberAvg = /** @type {(number|null)[]} */ (Array(12).fill(null));
+  const botAvg = /** @type {(number|null)[]} */ (Array(12).fill(null));
+
+  for (let m = 0; m < 12; m += 1) {
+    const startInclusive = new Date(Date.UTC(yearUtc, m, 1, 0, 0, 0, 0));
+    const endExclusive = new Date(Date.UTC(yearUtc, m + 1, 1, 0, 0, 0, 0));
+    const startMs = startInclusive.getTime();
+    const endMs = endExclusive.getTime();
+
+    const human = getAllTrackedCalls()
+      .filter(isHumanUserCall)
+      .filter(isValid)
+      .filter(c => isCallTimestampInUtcMsRange(c, startMs, endMs));
+    const bot = getAllTrackedCalls()
+      .filter(isBotCall)
+      .filter(isValid)
+      .filter(c => isCallTimestampInUtcMsRange(c, startMs, endMs));
+
+    memberAvg[m] = avgXForCalls(human);
+    botAvg[m] = avgXForCalls(bot);
+  }
+
+  return { year: yearUtc, memberAvg, botAvg };
+}
+
 module.exports = {
   getCallerStats,
   getCallerStatsRaw,
@@ -804,5 +886,8 @@ module.exports = {
   getBestCallInUtcWeekBounds,
   getBestBotCallInUtcWeekBounds,
   getTopUserCallsInUtcWeekBounds,
-  getTopBotCallsInUtcWeekBounds
+  getTopBotCallsInUtcWeekBounds,
+  getPreviousCompletedUtcWeekBounds,
+  getAvgAthXByUtcWeekdayInBounds,
+  getAvgAthXByUtcMonthInYear
 };

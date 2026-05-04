@@ -46,6 +46,11 @@ const {
 const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
 const { publishApprovedCoinToX } = require('./utils/publishApprovedCoinToX');
 const {
+  postTestMilestoneToX,
+  defaultOriginalMilestoneX,
+  defaultReplyMilestoneX
+} = require('./utils/milestoneXTestPost');
+const {
   buildOhlcvCandlestickBufferForTrackedCall
 } = require('./utils/ohlcvCandlestickBuffer');
 const { handleOhlcvTimeframeButton } = require('./utils/ohlcvChartControls');
@@ -479,6 +484,7 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
     `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (desk summary cards), **7d** (weekday chart), or **monthly** (30d trend chart) digest to X (owner only)\n` +
+    `• \`!testxmilestone user\` / \`bot\` — Sample **User Calls** or **McGBot Calls** X milestone (+ chart when not a reply). Optional \`<sol_ca>\` and \`[mult]\`. \`!testxmilestone reply <post_id> user|bot [mult]\` — test **reply** (no chart)\n` +
     `• Scheduled daily digest is **on** when \`X_LEADERBOARD_DIGEST_ENABLED\` is on; set \`X_LEADERBOARD_DAILY_DIGEST_ENABLED=0\` to disable\n\n`;
 
   if (canSeeModHelp) {
@@ -2965,6 +2971,100 @@ if (lowerContent === '!scanner off') {
           await replyText(message, `✅ Posted to X\nPost ID: ${result.id}`);
         } else {
           await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
+        }
+
+        return;
+      }
+
+      if (lowerContent.startsWith('!testxmilestone')) {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        const parts = content.trim().split(/\s+/);
+        const usage =
+          '**Usage**\n' +
+          '• `!testxmilestone user` or `!testxmilestone bot` — first milestone (+ chart if OHLCV works). Optional: `<sol_ca>` then `[mult]`\n' +
+          '• `!testxmilestone reply <tweet_id> user` or `... bot` — **reply** on that post (no chart). Optional trailing `[mult]` (default = higher ladder rung).\n' +
+          'Default mint: `X_TEST_MILESTONE_CONTRACT` env, else wrapped SOL.';
+
+        if (parts.length < 2) {
+          await replyText(message, usage);
+          return;
+        }
+
+        try {
+          /** @type {'user' | 'bot' | null} */
+          let variant = null;
+          let replyToId = '';
+          let headlineMx = 0;
+          /** @type {string | null} */
+          let contractOverride = null;
+
+          if (parts[1].toLowerCase() === 'reply') {
+            replyToId = String(parts[2] || '').trim();
+            if (!/^\d{10,22}$/.test(replyToId)) {
+              await replyText(message, '❌ After `reply`, paste the **numeric X post ID** (10–22 digits).\n\n' + usage);
+              return;
+            }
+            const v = String(parts[3] || '').toLowerCase();
+            if (v !== 'user' && v !== 'bot') {
+              await replyText(message, '❌ After the post ID, specify **user** or **bot**.\n\n' + usage);
+              return;
+            }
+            variant = v === 'bot' ? 'bot' : 'user';
+            headlineMx =
+              parts[4] != null && parts[4] !== '' && Number.isFinite(Number(parts[4]))
+                ? Number(parts[4])
+                : defaultReplyMilestoneX();
+          } else {
+            const v = String(parts[1] || '').toLowerCase();
+            if (v !== 'user' && v !== 'bot') {
+              await replyText(message, usage);
+              return;
+            }
+            variant = v === 'bot' ? 'bot' : 'user';
+            let idx = 2;
+            if (parts[idx] && isLikelySolanaCA(parts[idx])) {
+              contractOverride = parts[idx];
+              idx += 1;
+            }
+            headlineMx =
+              parts[idx] != null && parts[idx] !== '' && Number.isFinite(Number(parts[idx]))
+                ? Number(parts[idx])
+                : defaultOriginalMilestoneX();
+          }
+
+          if (!Number.isFinite(headlineMx) || headlineMx < 2) {
+            await replyText(message, '❌ Multiplier must be a number ≥ 2.');
+            return;
+          }
+
+          const result = await postTestMilestoneToX({
+            variant,
+            replyToTweetId: replyToId || null,
+            headlineMilestoneX: headlineMx,
+            contractAddress: contractOverride,
+            firstCallerDiscordId: variant === 'user' ? message.author.id : null
+          });
+
+          if (result.success) {
+            const label = variant === 'bot' ? 'McGBot Calls' : 'User Calls';
+            const replyHint = replyToId
+              ? ''
+              : `\nReply test: \`!testxmilestone reply ${result.id} ${variant} ${Math.min(100, Math.max(20, Math.floor(headlineMx * 2)))}\``;
+            await replyText(
+              message,
+              `✅ Posted **${label}** milestone test to X\nPost ID: **${result.id}**\n` +
+                `Headline multiple: **${headlineMx}×** · chart: **${result.chartAttached ? 'yes' : 'no'}** · chars: **${result.textLength ?? '—'}**` +
+                replyHint
+            );
+          } else {
+            await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
+          }
+        } catch (e) {
+          console.error('[!testxmilestone]', e);
+          await replyText(message, `❌ ${e instanceof Error ? e.message : String(e)}`);
         }
 
         return;

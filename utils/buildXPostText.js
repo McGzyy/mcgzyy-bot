@@ -252,7 +252,8 @@ async function buildXPostText(trackedCall, opts = {}) {
         : `◆ ${milestoneX}× · first call`
       : '◆ Live call';
 
-  const brand = 'McGBot Terminal';
+  const channelBrand =
+    trackedCall?.callSourceType === 'bot_call' ? 'McGBot Calls' : 'User Calls';
   const sub =
     athX > 0
       ? `$${ticker} · ${athX.toFixed(2)}× ATH  ·  spot ${spotX.toFixed(2)}×`
@@ -260,7 +261,7 @@ async function buildXPostText(trackedCall, opts = {}) {
 
   const rule = X_TERMINAL_SECTION_RULE;
   const lines = [
-    `▲ ${brand}`,
+    `▲ ${channelBrand}`,
     headline,
     rule,
     sub,

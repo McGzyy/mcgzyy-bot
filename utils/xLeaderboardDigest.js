@@ -352,7 +352,7 @@ async function tickXLeaderboardDigest() {
     lastDailyKey = dailyKey;
     await postDigest(
       { windowLabel: 'Daily snapshot', days: 1, topN: 4 },
-      { attachWeeklyAvgXChart: true }
+      { attachDailyDualPanel: true }
     );
   }
 

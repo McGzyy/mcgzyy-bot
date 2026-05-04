@@ -154,20 +154,60 @@ async function buildDailySnapshotModulesPng(anchor = new Date()) {
   ctx.font = '500 10px system-ui, Segoe UI, sans-serif';
   ctx.fillText(yesterdayLabel, cxL, headerTop + 14);
 
-  const hero =
-    mOk ? `${Number(mY).toFixed(2)}× avg` : '—';
-  const heroMaxByHeight = Math.floor((panelH - 72) * 0.52);
-  const heroSize = fitFontSize(ctx, hero, maxTextW, Math.min(108, heroMaxByHeight), 40);
-  ctx.font = `800 ${heroSize}px system-ui, Segoe UI, sans-serif`;
-  const heroMetrics = ctx.measureText(hero);
-  const heroH = heroMetrics.actualBoundingBoxAscent + heroMetrics.actualBoundingBoxDescent || heroSize * 1.05;
-
   const blockTop = headerTop + 34;
   const blockBottom = y0 + panelH - 22;
   const heroCenterY = blockTop + (blockBottom - blockTop) / 2;
+  const heroMaxByHeight = Math.floor((panelH - 72) * 0.52);
+  const maxNum = Math.min(108, heroMaxByHeight);
+
   ctx.fillStyle = memberHeroColor;
   ctx.textBaseline = 'middle';
-  ctx.fillText(hero, cxL, heroCenterY - heroH * 0.05);
+
+  if (!mOk) {
+    const dashSize = fitFontSize(ctx, '—', maxTextW, maxNum, 40);
+    ctx.font = `800 ${dashSize}px system-ui, Segoe UI, sans-serif`;
+    const hm =
+      ctx.measureText('—').actualBoundingBoxAscent +
+        ctx.measureText('—').actualBoundingBoxDescent || dashSize * 1.05;
+    ctx.fillText('—', cxL, heroCenterY - hm * 0.05);
+  } else {
+    const numStr = `${Number(mY).toFixed(2)}×`;
+    const avgStr = 'avg';
+    let numSize = 40;
+    let avgSize = 20;
+    for (let n = maxNum; n >= 40; n -= 2) {
+      const aSz = Math.max(20, Math.round(n * 0.38));
+      ctx.font = `800 ${n}px system-ui, Segoe UI, sans-serif`;
+      const wNum = ctx.measureText(numStr).width;
+      ctx.font = `600 ${aSz}px system-ui, Segoe UI, sans-serif`;
+      const wAvg = ctx.measureText(avgStr).width;
+      const g = Math.max(6, Math.round(n * 0.06));
+      if (wNum + g + wAvg <= maxTextW) {
+        numSize = n;
+        avgSize = aSz;
+        break;
+      }
+    }
+
+    ctx.font = `800 ${numSize}px system-ui, Segoe UI, sans-serif`;
+    const wNum = ctx.measureText(numStr).width;
+    ctx.font = `600 ${avgSize}px system-ui, Segoe UI, sans-serif`;
+    const wAvg = ctx.measureText(avgStr).width;
+    const g = Math.max(6, Math.round(numSize * 0.06));
+    const totalW = wNum + g + wAvg;
+    const x0 = cxL - totalW / 2;
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = memberHeroColor;
+    ctx.font = `800 ${numSize}px system-ui, Segoe UI, sans-serif`;
+    ctx.fillText(numStr, x0, heroCenterY);
+
+    ctx.font = `600 ${avgSize}px system-ui, Segoe UI, sans-serif`;
+    ctx.globalAlpha = 0.88;
+    ctx.fillText(avgStr, x0 + wNum + g, heroCenterY);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'center';
+  }
 
   ctx.textBaseline = 'top';
   ctx.font = '600 14px system-ui, Segoe UI, sans-serif';

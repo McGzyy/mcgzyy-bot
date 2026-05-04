@@ -199,7 +199,8 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 
 | Variable | Purpose |
 |----------|---------|
-| **`X_TWEET_MAX_CHARS`** | Default `280`; raise if the X account supports long-form posts. |
+| **`X_TWEET_MAX_CHARS`** | Default `280`. Long-form (e.g. `25000`) is honored up to **`X_TWEET_CHAR_HARD_CAP`** (default `25000`). |
+| **`X_TWEET_CHAR_HARD_CAP`** | Optional; default `25000`. Clamps `X_TWEET_MAX_CHARS` so copy builders stay within API limits. |
 | **`X_POST_INCLUDE_GMGN`** | `1` / `true` — append GMGN link (uses more characters). |
 | **`X_AUTO_APPROVE_USER_CALLS`** | `1` / `true` — **user_call** rows skip `#mod-approvals` for X and go straight to `xApproved` (bot_call still needs mod approve). |
 | **`X_LEADERBOARD_DIGEST_ENABLED`** | `1` / `true` — enable scheduled digest tweets (off by default). |

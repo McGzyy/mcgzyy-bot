@@ -7,9 +7,9 @@ const {
   getBestBotCallInTimeframe,
   getWeeklyUtcTerminalSnapshot
 } = require('./callerStatsService');
-const { xBrandKicker, fitTweet } = require('./buildXPostText');
+const { xBrandKicker, fitTweet, fitTweetWholeLines, resolveXTweetMaxChars } = require('./buildXPostText');
 
-const DEFAULT_MAX = Math.min(4000, Math.max(100, Number(process.env.X_TWEET_MAX_CHARS || 280) || 280));
+const TWEET_MAX_CHARS = resolveXTweetMaxChars();
 
 function formatCallOneLiner(call) {
   if (!call || !call.ticker) return null;
@@ -26,6 +26,19 @@ function dashboardLinkLine() {
       ''
   ).trim();
   return u ? `Full boards · ${u.replace(/\/$/, '')}` : '';
+}
+
+/** Shorter footer for weekly stats (saves chars at 280). */
+function shortDashboardLinkLine() {
+  const u = String(
+    process.env.DASHBOARD_PUBLIC_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.MCBOT_DASHBOARD_URL ||
+      ''
+  )
+    .trim()
+    .replace(/\/$/, '');
+  return u ? `Boards · ${u}` : '';
 }
 
 /**
@@ -108,49 +121,77 @@ function formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive) {
 }
 
 /**
+ * @param {string[]} lines
+ * @param {string} title
  * @param {{ count: number, medianX: number|null, pctGe2: number|null, pctGe3: number|null }} s
  */
-function formatCohortSnapshotLine(label, s) {
+function appendWeeklyCohortSection(lines, title, s) {
+  lines.push(title, '');
   if (!s.count) {
-    return `${label} · 0 prints`;
+    lines.push('· No qualifying prints in this window.');
+    lines.push('');
+    return;
   }
   const med = s.medianX == null ? '—' : `${Number(s.medianX).toFixed(2)}×`;
-  const p2 = s.pctGe2 == null ? '—' : `${s.pctGe2.toFixed(1)}%`;
-  const p3 = s.pctGe3 == null ? '—' : `${s.pctGe3.toFixed(1)}%`;
-  return `${label} · ${s.count} print${s.count === 1 ? '' : 's'} · median ${med} · ≥2× ${p2} · ≥3× ${p3}`;
+  const p2 = s.pctGe2 == null ? '—' : `${Number(s.pctGe2).toFixed(1)}%`;
+  const p3 = s.pctGe3 == null ? '—' : `${Number(s.pctGe3).toFixed(1)}%`;
+  lines.push(`· Calls · ${s.count}`);
+  lines.push(`· Median ATH × · ${med}`);
+  lines.push(`· At or above 2× · ${p2}`);
+  lines.push(`· At or above 3× · ${p3}`);
+  lines.push('');
 }
 
 /**
  * Stats-only weekly X copy (previous completed UTC Mon–Sun). No tickers.
+ * Layout uses long-form space when `X_TWEET_MAX_CHARS` is high (e.g. 25,000).
  * @param {object} snap from getWeeklyUtcTerminalSnapshot()
  */
 function buildWeeklyStatsSnapshotBody(snap) {
   const range = formatCompletedUtcWeekRangeLabel(snap.startInclusive, snap.endExclusive);
   const lines = [
     xBrandKicker(),
+    '',
     '◆ Weekly terminal snapshot',
-    range,
+    `Completed UTC week · ${range}`,
+    '',
     '────────',
-    'Tracked performance (ATH multiple vs entry)'
+    '',
+    'How this reads',
+    '',
+    '· ATH multiple = peak market cap ÷ market cap at first tracked print (entry).',
+    '· User desk = community !call / attributed prints. Auto desk = scanner auto-calls.',
+    '· Same filters as in-app leaderboards (valid range, not denied / excluded from stats).',
+    '',
+    '────────',
+    ''
   ];
 
   if (!snap.totalPrints) {
-    lines.push('No qualifying prints this UTC week.');
+    lines.push('No qualifying prints in this UTC week.', '');
   } else {
-    lines.push(formatCohortSnapshotLine('User desk', snap.user));
-    lines.push(formatCohortSnapshotLine('Auto desk', snap.bot));
-    lines.push('────────');
-    lines.push(
-      `Active callers · ${snap.uniqueCallers} · ${snap.totalPrints} total print${snap.totalPrints === 1 ? '' : 's'}`
-    );
+    lines.push('Volume', '');
+    lines.push(`· User-attributed calls · ${snap.user.count}`);
+    lines.push(`· Auto-scanned calls · ${snap.bot.count}`);
+    lines.push(`· Combined · ${snap.totalPrints}`);
+    lines.push('');
+    lines.push('────────', '');
+    appendWeeklyCohortSection(lines, 'User desk', snap.user);
+    lines.push('────────', '');
+    appendWeeklyCohortSection(lines, 'Auto desk', snap.bot);
+    lines.push('────────', '');
+    lines.push('Community', '');
+    lines.push(`· Active distinct callers · ${snap.uniqueCallers}`);
+    lines.push('');
   }
 
   const dash = dashboardLinkLine();
   if (dash) {
-    lines.push('────────', dash);
+    lines.push('────────', '', dash, '');
   }
 
-  return fitTweet(lines.join('\n'), DEFAULT_MAX);
+  const raw = lines.join('\n').trimEnd();
+  return TWEET_MAX_CHARS >= 2000 ? fitTweet(raw, TWEET_MAX_CHARS) : fitTweetWholeLines(raw, TWEET_MAX_CHARS);
 }
 
 let lastDailyKey = '';

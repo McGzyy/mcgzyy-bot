@@ -7,7 +7,19 @@
  * - User calls: @handle when Supabase prefs allow tagging and multiple >= threshold; else generic credit
  */
 
-const DEFAULT_MAX = Math.min(4000, Math.max(100, Number(process.env.X_TWEET_MAX_CHARS || 280) || 280));
+/** Hard ceiling for long-form X posts (raise via env if APIs change). */
+const X_TWEET_CHAR_HARD_CAP =
+  Number.isFinite(Number(process.env.X_TWEET_CHAR_HARD_CAP)) && Number(process.env.X_TWEET_CHAR_HARD_CAP) >= 100
+    ? Number(process.env.X_TWEET_CHAR_HARD_CAP)
+    : 25000;
+
+function resolveXTweetMaxChars() {
+  const raw = Number(process.env.X_TWEET_MAX_CHARS ?? 280);
+  const n = Number.isFinite(raw) && raw >= 100 ? raw : 280;
+  return Math.min(X_TWEET_CHAR_HARD_CAP, Math.max(100, n));
+}
+
+const DEFAULT_MAX = resolveXTweetMaxChars();
 
 function formatUsd(value) {
   const num = Number(value);
@@ -102,6 +114,41 @@ function fitTweet(text, max) {
 }
 
 /**
+ * Prefer dropping whole lines over cutting mid-sentence (better for stats / digests).
+ * @param {string} text
+ * @param {number} max
+ */
+function fitTweetWholeLines(text, max) {
+  const s = String(text || '').trim();
+  if (s.length <= max) return s;
+  const marker = '\n…';
+  const budget = max - marker.length;
+  const lines = s.split('\n');
+  let acc = '';
+  for (const line of lines) {
+    const next = acc ? `${acc}\n${line}` : line;
+    if (next.length <= budget) {
+      acc = next;
+    } else {
+      break;
+    }
+  }
+  if (!acc && lines[0]) {
+    const first = lines[0];
+    if (first.length <= budget) {
+      acc = first;
+    } else {
+      let cut = budget;
+      while (cut > 24 && first[cut - 1] !== ' ') {
+        cut -= 1;
+      }
+      acc = first.slice(0, cut).trimEnd();
+    }
+  }
+  return `${acc}${marker}`;
+}
+
+/**
  * @param {object} trackedCall
  * @param {{ milestoneX?: number, isReply?: boolean, maxChars?: number }} [opts]
  */
@@ -182,4 +229,11 @@ function xBrandKicker() {
   return '▲ McGBot Terminal';
 }
 
-module.exports = { buildXPostText, buildAttributionLine, xBrandKicker, fitTweet };
+module.exports = {
+  buildXPostText,
+  buildAttributionLine,
+  xBrandKicker,
+  fitTweet,
+  fitTweetWholeLines,
+  resolveXTweetMaxChars
+};

@@ -845,6 +845,89 @@ function avgXForCalls(calls) {
  * Average ATH × per calendar month (UTC) for `yearUtc` (Jan=0 … Dec=11).
  * @param {number} yearUtc e.g. 2026
  */
+/** Start of the UTC calendar day containing `d` (00:00:00.000Z). */
+function startOfUtcCalendarDay(d) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+}
+
+/**
+ * `[startInclusive, endExclusive)` for each of the `n` full UTC days immediately before `endExclusiveDayStart`
+ * (i.e. if `endExclusiveDayStart` is today 00:00 UTC, the newest bucket is yesterday).
+ * @param {Date} endExclusiveDayStart
+ * @param {number} n
+ * @returns {Array<{ startInclusive: Date, endExclusive: Date, label: string }>}
+ */
+function listUtcCalendarDayBucketsBefore(endExclusiveDayStart, n) {
+  const out = [];
+  const end0 = startOfUtcCalendarDay(endExclusiveDayStart);
+  for (let k = 0; k < n; k += 1) {
+    const dayStart = new Date(end0);
+    dayStart.setUTCDate(dayStart.getUTCDate() - (n - k));
+    const dayEnd = new Date(dayStart);
+    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+    const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][
+      dayStart.getUTCMonth()
+    ];
+    const label = `${mo} ${dayStart.getUTCDate()}`;
+    out.push({ startInclusive: dayStart, endExclusive: dayEnd, label });
+  }
+  return out;
+}
+
+/**
+ * Per-UTC-day avg ATH × for member vs bot over `n` full UTC days ending the day before `anchor` (exclusive of `anchor`'s calendar day).
+ * @param {Date} [anchor]
+ * @param {number} [nDays] default 30
+ * @returns {{ labels: string[], memberAvg: (number|null)[], botAvg: (number|null)[] }}
+ */
+function getAvgAthXLastNUtcDaysBeforeAnchor(anchor = new Date(), nDays = 30) {
+  const endExclusive = startOfUtcCalendarDay(anchor);
+  const buckets = listUtcCalendarDayBucketsBefore(endExclusive, nDays);
+  const labels = buckets.map(b => b.label);
+  const memberAvg = buckets.map(b =>
+    avgXForCalls(callsForUtcWeekDesk(isHumanUserCall, b.startInclusive, b.endExclusive))
+  );
+  const botAvg = buckets.map(b =>
+    avgXForCalls(callsForUtcWeekDesk(isBotCall, b.startInclusive, b.endExclusive))
+  );
+  return { labels, memberAvg, botAvg };
+}
+
+/**
+ * Avg ATH × + counts for member and bot desks on `[startInclusive, endExclusive)`.
+ * @returns {{ memberAvgX: number|null, botAvgX: number|null, memberCount: number, botCount: number }}
+ */
+function getDeskAvgAthXPairForUtcRange(startInclusive, endExclusive) {
+  const mCalls = callsForUtcWeekDesk(isHumanUserCall, startInclusive, endExclusive);
+  const bCalls = callsForUtcWeekDesk(isBotCall, startInclusive, endExclusive);
+  return {
+    memberAvgX: avgXForCalls(mCalls),
+    botAvgX: avgXForCalls(bCalls),
+    memberCount: mCalls.length,
+    botCount: bCalls.length
+  };
+}
+
+/**
+ * Yesterday vs prior UTC day desk averages (for snapshot “day change” panel).
+ * @param {Date} [anchor]
+ */
+function getUtcYesterdayAndPriorDeskAvgs(anchor = new Date()) {
+  const todayStart = startOfUtcCalendarDay(anchor);
+  const yEnd = new Date(todayStart);
+  const yStart = new Date(todayStart);
+  yStart.setUTCDate(yStart.getUTCDate() - 1);
+  const pEnd = new Date(yStart);
+  const pStart = new Date(yStart);
+  pStart.setUTCDate(pStart.getUTCDate() - 1);
+  return {
+    yesterday: getDeskAvgAthXPairForUtcRange(yStart, yEnd),
+    prior: getDeskAvgAthXPairForUtcRange(pStart, pEnd),
+    yesterdayLabel: yStart.toISOString().slice(0, 10),
+    priorLabel: pStart.toISOString().slice(0, 10)
+  };
+}
+
 function getAvgAthXByUtcMonthInYear(yearUtc) {
   const memberAvg = /** @type {(number|null)[]} */ (Array(12).fill(null));
   const botAvg = /** @type {(number|null)[]} */ (Array(12).fill(null));
@@ -889,5 +972,9 @@ module.exports = {
   getTopBotCallsInUtcWeekBounds,
   getPreviousCompletedUtcWeekBounds,
   getAvgAthXByUtcWeekdayInBounds,
-  getAvgAthXByUtcMonthInYear
+  getAvgAthXByUtcMonthInYear,
+  getAvgAthXLastNUtcDaysBeforeAnchor,
+  getDeskAvgAthXPairForUtcRange,
+  getUtcYesterdayAndPriorDeskAvgs,
+  startOfUtcCalendarDay
 };

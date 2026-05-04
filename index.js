@@ -34,7 +34,8 @@ const {
   startUserPerformanceSupabaseMirror
 } = require('./utils/monitoringEngine');
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
-const { createPost, getXBotUsernameForCopy } = require('./utils/xPoster');
+const { createPost, getXBotUsernameForCopy, normalizePngUploadBuffer } = require('./utils/xPoster');
+const { buildWeeklySnapshotModulesPng } = require('./utils/weeklySnapshotPanel');
 const { fitTweet, xBrandKicker, xTerminalSectionRule } = require('./utils/buildXPostText');
 const {
   startXLeaderboardDigestScheduler,
@@ -2985,19 +2986,17 @@ if (lowerContent === '!scanner off') {
           let result;
           let label = 'digest';
           if (isMonthly) {
-            const now = new Date();
-            let chartYear = now.getUTCFullYear();
-            if (now.getUTCMonth() === 0) {
-              chartYear -= 1;
-            }
-            label = `monthly (+ chart ${chartYear})`;
+            label = 'monthly (+ 30d chart)';
             result = await postLeaderboardDigestToX(
               { windowLabel: 'Monthly snapshot', days: 30, topN: 8 },
-              { monthlyChartYear: chartYear }
+              { attachPast30DaysChart: true }
             );
           } else if (is7d) {
-            label = '7d';
-            result = await postLeaderboardDigestToX({ windowLabel: '7d snapshot', days: 7, topN: 5 });
+            label = '7d (+ weekday chart)';
+            result = await postLeaderboardDigestToX(
+              { windowLabel: '7d snapshot', days: 7, topN: 5 },
+              { attachWeeklyAvgXChart: true }
+            );
           } else {
             label = 'daily (+ weekday chart)';
             result = await postLeaderboardDigestToX(
@@ -3032,7 +3031,14 @@ if (lowerContent === '!scanner off') {
         try {
           const snap = getWeeklyUtcTerminalSnapshot();
           const text = buildWeeklyStatsSnapshotBody(snap);
-          const result = await createPost(text);
+          let png = null;
+          try {
+            const raw = await buildWeeklySnapshotModulesPng(new Date());
+            png = normalizePngUploadBuffer(raw);
+          } catch (e) {
+            console.error('[!testweeklysnapshot] panel PNG:', e);
+          }
+          const result = await createPost(text, null, png);
 
           if (result.success) {
             await replyText(

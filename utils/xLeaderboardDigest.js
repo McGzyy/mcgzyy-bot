@@ -3,8 +3,9 @@
 const { createPost, normalizePngUploadBuffer } = require('./xPoster');
 const {
   buildWeeklyAvgXpDigestPng,
-  buildMonthlyAvgXpDigestPng
+  buildPast30DaysDigestPng
 } = require('./digestPerformanceChart');
+const { buildWeeklySnapshotModulesPng } = require('./weeklySnapshotPanel');
 const {
   getCallerLeaderboardInTimeframe,
   getBestCallInTimeframe,
@@ -38,6 +39,11 @@ function formatCallOneLiner(call) {
 
 function weeklySectionGap() {
   return xTerminalSectionGap();
+}
+
+/** Heavy horizontal rule — reads stronger on X than the short `·` divider. */
+function digestSectionGap() {
+  return `\n${'\u2501'.repeat(26)}\n`;
 }
 
 /**
@@ -74,12 +80,17 @@ function buildLeaderboardDigestBody(p) {
   const rows = getCallerLeaderboardInTimeframe(p.days, topN);
   const bestHuman = getBestCallInTimeframe(p.days);
   const bestBot = getBestBotCallInTimeframe(p.days);
-  const gap = weeklySectionGap();
+  const gap = digestSectionGap();
   const footer = xTerminalFooterLine();
 
-  const head = `🚀 ${p.windowLabel}`;
+  const rawLabel = String(p.windowLabel || '').trim();
+  const head = ['\u2501'.repeat(26), `  🚀  ${rawLabel.toUpperCase()}`, '\u2501'.repeat(26)].join('\n');
 
-  const deskLines = [`💎 Caller leaderboard (top ${topN} by avg ATH ×)`, ''];
+  const deskLines = [
+    '  ◆  CALLER LEADERBOARD',
+    `      (top ${topN} by avg ATH ×)`,
+    ''
+  ];
   if (rows.length) {
     for (let i = 0; i < rows.length; i += 1) {
       const r = rows[i];
@@ -91,7 +102,7 @@ function buildLeaderboardDigestBody(p) {
     deskLines.push('(quiet window)');
   }
 
-  const hiLines = ['⭐️ Highlights', ''];
+  const hiLines = ['  ◆  HIGHLIGHTS', ''];
   let anyHi = false;
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
@@ -164,13 +175,18 @@ function formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive) {
  */
 function buildWeeklyStatsSnapshotBody(snap) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
-  const gap = weeklySectionGap();
+  const gap = digestSectionGap();
   const { startInclusive, endExclusive } = snap;
   const range = formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive);
   const callerTopN = Math.min(15, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_CALLER_TOP_N) || 8));
   const printTopN = Math.min(12, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_PRINT_TOP_N) || 6));
 
-  const hero = `🚀 Weekly snapshot — ${range}`;
+  const hero = [
+    '\u2501'.repeat(26),
+    '  🚀  WEEKLY SNAPSHOT',
+    `      ${range}`,
+    '\u2501'.repeat(26)
+  ].join('\n');
 
   const sections = [hero];
 
@@ -261,7 +277,7 @@ let lastWeeklyStatsKey = '';
 
 /**
  * @param {{ windowLabel: string, days: number, topN: number }} p
- * @param {{ attachWeeklyAvgXChart?: boolean, monthlyChartYear?: number }} [options]
+ * @param {{ attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean }} [options]
  */
 async function postDigest(p, options = {}) {
   const { windowLabel, days, topN } = p;
@@ -280,15 +296,15 @@ async function postDigest(p, options = {}) {
     }
   }
 
-  if (options.monthlyChartYear != null && Number.isFinite(Number(options.monthlyChartYear))) {
+  if (options.attachPast30DaysChart) {
     try {
-      const raw = await buildMonthlyAvgXpDigestPng(Number(options.monthlyChartYear));
+      const raw = await buildPast30DaysDigestPng(new Date(), 30);
       png = normalizePngUploadBuffer(raw);
       if (!png) {
-        console.error('[XLeaderboardDigest] monthly chart: render did not produce a valid PNG buffer');
+        console.error('[XLeaderboardDigest] 30d trend chart: render did not produce a valid PNG buffer');
       }
     } catch (err) {
-      console.error('[XLeaderboardDigest] monthly avg× chart failed:', err?.message || err);
+      console.error('[XLeaderboardDigest] 30d trend chart failed:', err?.message || err);
     }
   }
 
@@ -350,7 +366,10 @@ async function tickXLeaderboardDigest() {
     const weekKey = `w:${utcDate}`;
     if (lastWeeklyKey !== weekKey) {
       lastWeeklyKey = weekKey;
-      await postDigest({ windowLabel: '7d snapshot', days: 7, topN: 5 });
+      await postDigest(
+        { windowLabel: '7d snapshot', days: 7, topN: 5 },
+        { attachWeeklyAvgXChart: true }
+      );
     }
   }
 
@@ -363,13 +382,9 @@ async function tickXLeaderboardDigest() {
     const mKey = `m:${utcDate.slice(0, 7)}`;
     if (lastMonthlyKey !== mKey) {
       lastMonthlyKey = mKey;
-      let chartYear = now.getUTCFullYear();
-      if (now.getUTCMonth() === 0) {
-        chartYear -= 1;
-      }
       await postDigest(
         { windowLabel: 'Monthly snapshot', days: 30, topN: 8 },
-        { monthlyChartYear: chartYear }
+        { attachPast30DaysChart: true }
       );
     }
   }
@@ -408,7 +423,19 @@ async function tickWeeklyStatsSnapshot() {
   console.log(
     `[XWeeklyStatsSnapshot] bodyLen=${text.length} budget=${resolveWeeklyStatsTweetMaxChars()} week=${key}`
   );
-  const result = await createPost(text);
+
+  let png = null;
+  try {
+    const raw = await buildWeeklySnapshotModulesPng(now);
+    png = normalizePngUploadBuffer(raw);
+    if (!png) {
+      console.error('[XWeeklyStatsSnapshot] panel image: invalid PNG buffer');
+    }
+  } catch (err) {
+    console.error('[XWeeklyStatsSnapshot] panel image failed:', err?.message || err);
+  }
+
+  const result = await createPost(text, null, png);
   if (!result.success) {
     console.error('[XWeeklyStatsSnapshot] post failed:', result.error || 'unknown');
     return;
@@ -427,7 +454,7 @@ function startXLeaderboardDigestScheduler() {
 /**
  * Post a leaderboard digest to X (same path as the scheduler). For Discord test commands.
  * @param {{ windowLabel: string, days: number, topN: number }} body
- * @param {{ attachWeeklyAvgXChart?: boolean, monthlyChartYear?: number }} [opts]
+ * @param {{ attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean }} [opts]
  */
 async function postLeaderboardDigestToX(body, opts = {}) {
   return postDigest(body, opts);

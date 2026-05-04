@@ -4,7 +4,8 @@ const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
 const {
   getPreviousCompletedUtcWeekBounds,
   getAvgAthXByUtcWeekdayInBounds,
-  getAvgAthXByUtcMonthInYear
+  getAvgAthXByUtcMonthInYear,
+  getAvgAthXLastNUtcDaysBeforeAnchor
 } = require('./callerStatsService');
 
 const WIDTH = 920;
@@ -46,14 +47,14 @@ const chartCanvas = new ChartJSNodeCanvas({
 
 /**
  * @param {(number|null|undefined)[]} pts length 7 Mon–Sun
+ * Fills **every** missing day so lines span the full week (avoids orphan Sat–Sun segments).
  */
 function backfillWeekDigestPoints(pts) {
-  return pts.map((v, i) => {
+  return pts.map(v => {
     if (v != null && Number.isFinite(Number(v))) {
       return Number(Number(v).toFixed(3));
     }
-    if (i <= 4) return DIGEST_PLACEHOLDER_ATH_X;
-    return null;
+    return DIGEST_PLACEHOLDER_ATH_X;
   });
 }
 
@@ -69,24 +70,27 @@ function backfillMonthDigestPoints(pts) {
   });
 }
 
-/** Legend rows: ▫️ prefix, no colored swatch (matches X digest copy). */
+/** Legend above plot — colored key (line color as swatch). */
 function digestLegendPluginOptions() {
   return {
     display: true,
-    position: 'bottom',
+    position: 'top',
+    align: 'center',
     labels: {
       color: TICK,
       padding: 18,
-      font: { size: 12, weight: 600 },
-      boxWidth: 0,
-      usePointStyle: false,
+      font: { size: 13, weight: 700 },
+      boxWidth: 18,
+      boxHeight: 4,
+      usePointStyle: true,
+      pointStyle: 'rectRounded',
       generateLabels(chart) {
         const datasets = chart.data.datasets;
         return datasets.map((dataset, i) => ({
-          text: `▫️ ${dataset.label}`,
-          fillStyle: 'rgba(0,0,0,0)',
-          strokeStyle: 'rgba(0,0,0,0)',
-          lineWidth: 0,
+          text: dataset.label,
+          fillStyle: dataset.borderColor,
+          strokeStyle: dataset.borderColor,
+          lineWidth: 2,
           hidden: !chart.isDatasetVisible(i),
           index: i,
           datasetIndex: i
@@ -118,7 +122,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
       datasets: [
         {
           label: 'Member calls',
-          data: toPts(memberAvg),
+          data: memberPts,
           borderColor: LINE_MEMBER,
           backgroundColor: FILL_MEMBER,
           borderWidth: 3,
@@ -171,7 +175,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 14, right: 16, bottom: 10, left: 12 } }
+      layout: { padding: { top: 32, right: 16, bottom: 10, left: 12 } }
     }
   };
 
@@ -257,7 +261,7 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 14, right: 16, bottom: 10, left: 12 } }
+      layout: { padding: { top: 32, right: 16, bottom: 10, left: 12 } }
     }
   };
 
@@ -265,7 +269,104 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
   return Buffer.isBuffer(out) ? out : Buffer.from(out);
 }
 
+const WIDTH_30D = 1000;
+
+/**
+ * Last `nDays` full UTC days (ending yesterday vs `anchor`) — member vs McGBot avg ATH × per day.
+ * @param {Date} [anchor]
+ * @param {number} [nDays]
+ * @returns {Promise<Buffer>}
+ */
+async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30) {
+  const { labels, memberAvg, botAvg } = getAvgAthXLastNUtcDaysBeforeAnchor(anchor, nDays);
+  const memberPts = backfillDailyDigestPoints(memberAvg);
+  const botPts = backfillDailyDigestPoints(botAvg);
+
+  const canvas30 = new ChartJSNodeCanvas({
+    width: WIDTH_30D,
+    height: HEIGHT,
+    backgroundColour: BG,
+    chartCallback: digestChartCallback
+  });
+
+  const configuration = {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Member calls',
+          data: memberPts,
+          borderColor: LINE_MEMBER,
+          backgroundColor: FILL_MEMBER,
+          borderWidth: 3,
+          tension: 0.25,
+          spanGaps: false,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          pointBackgroundColor: LINE_MEMBER,
+          pointBorderColor: POINT_RING,
+          pointBorderWidth: 0
+        },
+        {
+          label: 'McGBot calls',
+          data: botPts,
+          borderColor: LINE_BOT,
+          backgroundColor: FILL_BOT,
+          borderWidth: 3,
+          tension: 0.25,
+          spanGaps: false,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          pointBackgroundColor: LINE_BOT,
+          pointBorderColor: POINT_RING,
+          pointBorderWidth: 0
+        }
+      ]
+    },
+    options: {
+      responsive: false,
+      animation: false,
+      plugins: {
+        title: { display: false },
+        legend: digestLegendPluginOptions()
+      },
+      scales: {
+        x: {
+          grid: { color: GRID, drawBorder: false },
+          ticks: {
+            color: TICK,
+            font: { size: 9, weight: 500 },
+            padding: 4,
+            maxRotation: 45,
+            minRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 12
+          },
+          border: { display: false }
+        },
+        y: {
+          title: {
+            display: true,
+            text: 'Avg ATH ×',
+            color: TICK,
+            font: { size: 11, weight: 600 }
+          },
+          grid: { color: GRID, drawBorder: false },
+          ticks: { color: TICK, font: { size: 11, weight: 500 }, padding: 6 },
+          border: { display: false }
+        }
+      },
+      layout: { padding: { top: 32, right: 18, bottom: 8, left: 12 } }
+    }
+  };
+
+  const out = await canvas30.renderToBuffer(configuration, 'image/png');
+  return Buffer.isBuffer(out) ? out : Buffer.from(out);
+}
+
 module.exports = {
   buildWeeklyAvgXpDigestPng,
-  buildMonthlyAvgXpDigestPng
+  buildMonthlyAvgXpDigestPng,
+  buildPast30DaysDigestPng
 };

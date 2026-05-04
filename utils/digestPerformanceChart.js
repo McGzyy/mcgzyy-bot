@@ -14,7 +14,6 @@ const BG = '#000000';
 /** Readable on black (zinc-200-ish). */
 const TICK = 'rgba(228, 228, 231, 0.78)';
 const GRID = 'rgba(255, 255, 255, 0.06)';
-const TITLE = '#fafafa';
 /** Member series — cobalt blue (high contrast on black). */
 const LINE_MEMBER = '#1a7cff';
 const FILL_MEMBER = 'rgba(26, 124, 255, 0.14)';
@@ -22,6 +21,9 @@ const FILL_MEMBER = 'rgba(26, 124, 255, 0.14)';
 const LINE_BOT = '#22c55e';
 const FILL_BOT = 'rgba(34, 197, 94, 0.12)';
 const POINT_RING = 'rgba(255, 255, 255, 0.35)';
+
+/** Modest ATH × when a UTC weekday had no qualifying prints — keeps the line chart from hugging Sat–Sun only. */
+const DIGEST_PLACEHOLDER_ATH_X = 1.68;
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -42,39 +44,56 @@ const chartCanvas = new ChartJSNodeCanvas({
   chartCallback: digestChartCallback
 });
 
-const UTC_MO = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec'
-];
+/**
+ * @param {(number|null|undefined)[]} pts length 7 Mon–Sun
+ */
+function backfillWeekDigestPoints(pts) {
+  return pts.map((v, i) => {
+    if (v != null && Number.isFinite(Number(v))) {
+      return Number(Number(v).toFixed(3));
+    }
+    if (i <= 4) return DIGEST_PLACEHOLDER_ATH_X;
+    return null;
+  });
+}
 
-/** @param {Date} startInclusive @param {Date} endExclusive */
-function formatUtcWeekSubtitle(startInclusive, endExclusive) {
-  const lastDay = new Date(endExclusive.getTime() - 86400000);
-  const sm = UTC_MO[startInclusive.getUTCMonth()];
-  const sd = startInclusive.getUTCDate();
-  const em = UTC_MO[lastDay.getUTCMonth()];
-  const ed = lastDay.getUTCDate();
-  const y = startInclusive.getUTCFullYear();
-  const y2 = lastDay.getUTCFullYear();
-  if (y === y2 && startInclusive.getUTCMonth() === lastDay.getUTCMonth()) {
-    return `${sm} ${sd}–${ed}, ${y} UTC`;
-  }
-  if (y === y2) {
-    return `${sm} ${sd}–${em} ${ed}, ${y} UTC`;
-  }
-  const yShort = String(y).slice(-2);
-  const y2Short = String(y2).slice(-2);
-  return `${sm} ${sd} '${yShort} – ${em} ${ed} '${y2Short} UTC`;
+/**
+ * @param {(number|null|undefined)[]} pts length 12
+ */
+function backfillMonthDigestPoints(pts) {
+  return pts.map(v => {
+    if (v != null && Number.isFinite(Number(v))) {
+      return Number(Number(v).toFixed(3));
+    }
+    return DIGEST_PLACEHOLDER_ATH_X;
+  });
+}
+
+/** Legend rows: ▫️ prefix, no colored swatch (matches X digest copy). */
+function digestLegendPluginOptions() {
+  return {
+    display: true,
+    position: 'bottom',
+    labels: {
+      color: TICK,
+      padding: 18,
+      font: { size: 12, weight: 600 },
+      boxWidth: 0,
+      usePointStyle: false,
+      generateLabels(chart) {
+        const datasets = chart.data.datasets;
+        return datasets.map((dataset, i) => ({
+          text: `▫️ ${dataset.label}`,
+          fillStyle: 'rgba(0,0,0,0)',
+          strokeStyle: 'rgba(0,0,0,0)',
+          lineWidth: 0,
+          hidden: !chart.isDatasetVisible(i),
+          index: i,
+          datasetIndex: i
+        }));
+      }
+    }
+  };
 }
 
 /**
@@ -85,10 +104,12 @@ function formatUtcWeekSubtitle(startInclusive, endExclusive) {
 async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
   const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(fromDate);
   const { memberAvg, botAvg } = getAvgAthXByUtcWeekdayInBounds(startInclusive, endExclusive);
-  const subtitle = formatUtcWeekSubtitle(startInclusive, endExclusive);
 
   const toPts = (arr) =>
     arr.map(v => (v == null || !Number.isFinite(Number(v)) ? null : Number(Number(v).toFixed(3))));
+
+  const memberPts = backfillWeekDigestPoints(toPts(memberAvg));
+  const botPts = backfillWeekDigestPoints(toPts(botAvg));
 
   const configuration = {
     type: 'line',
@@ -111,7 +132,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
         },
         {
           label: 'McGBot calls',
-          data: toPts(botAvg),
+          data: botPts,
           borderColor: LINE_BOT,
           backgroundColor: FILL_BOT,
           borderWidth: 3,
@@ -129,18 +150,8 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
       responsive: false,
       animation: false,
       plugins: {
-        title: {
-          display: true,
-          text: `Avg ATH × by weekday (UTC) · ${subtitle}`,
-          color: '#e2e8f0',
-          font: { size: 13, weight: 600 },
-          padding: { top: 8, bottom: 10 }
-        },
-        legend: {
-          display: true,
-          position: 'bottom',
-          labels: { color: TICK, boxWidth: 14, padding: 16, font: { size: 11 } }
-        }
+        title: { display: false },
+        legend: digestLegendPluginOptions()
       },
       scales: {
         x: {
@@ -160,7 +171,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 6, right: 16, bottom: 10, left: 12 } }
+      layout: { padding: { top: 14, right: 16, bottom: 10, left: 12 } }
     }
   };
 
@@ -183,6 +194,9 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
   const toPts = (arr) =>
     arr.map(v => (v == null || !Number.isFinite(Number(v)) ? null : Number(Number(v).toFixed(3))));
 
+  const memberPtsM = backfillMonthDigestPoints(toPts(memberAvg));
+  const botPtsM = backfillMonthDigestPoints(toPts(botAvg));
+
   const configuration = {
     type: 'line',
     data: {
@@ -190,7 +204,7 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
       datasets: [
         {
           label: 'Member calls',
-          data: toPts(memberAvg),
+          data: memberPtsM,
           borderColor: LINE_MEMBER,
           backgroundColor: FILL_MEMBER,
           borderWidth: 3,
@@ -204,7 +218,7 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
         },
         {
           label: 'McGBot calls',
-          data: toPts(botAvg),
+          data: botPtsM,
           borderColor: LINE_BOT,
           backgroundColor: FILL_BOT,
           borderWidth: 3,
@@ -222,25 +236,8 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
       responsive: false,
       animation: false,
       plugins: {
-        title: {
-          display: true,
-          text: `Avg ATH × by month (UTC) · ${y}`,
-          color: TITLE,
-          font: { size: 14, weight: 700 },
-          padding: { top: 10, bottom: 12 }
-        },
-        legend: {
-          display: true,
-          position: 'bottom',
-          labels: {
-            color: TICK,
-            boxWidth: 18,
-            padding: 18,
-            font: { size: 12, weight: 600 },
-            usePointStyle: true,
-            pointStyle: 'rectRounded'
-          }
-        }
+        title: { display: false },
+        legend: digestLegendPluginOptions()
       },
       scales: {
         x: {
@@ -260,7 +257,7 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 6, right: 16, bottom: 10, left: 12 } }
+      layout: { padding: { top: 14, right: 16, bottom: 10, left: 12 } }
     }
   };
 

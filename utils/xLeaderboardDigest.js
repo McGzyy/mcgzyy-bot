@@ -17,7 +17,6 @@ const {
   getTopBotCallsInUtcWeekBounds
 } = require('./callerStatsService');
 const {
-  xBrandKicker,
   xTerminalSectionGap,
   xTerminalFooterLine,
   fitTweet,
@@ -78,7 +77,7 @@ function buildLeaderboardDigestBody(p) {
   const gap = weeklySectionGap();
   const footer = xTerminalFooterLine();
 
-  const head = [xBrandKicker(), `🚀 ${p.windowLabel}`].join('\n');
+  const head = `🚀 ${p.windowLabel}`;
 
   const deskLines = [`💎 Caller leaderboard (top ${topN} by avg ATH ×)`, ''];
   if (rows.length) {
@@ -97,14 +96,14 @@ function buildLeaderboardDigestBody(p) {
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
     if (h) {
-      hiLines.push(`▪ Best member call — ${h}`);
+      hiLines.push(`▫️ Best member call — ${h}`);
       anyHi = true;
     }
   }
   if (bestBot) {
     const b = formatCallOneLiner(bestBot);
     if (b) {
-      hiLines.push(`▪ Best McGBot call — ${b}`);
+      hiLines.push(`▫️ Best McGBot call — ${b}`);
       anyHi = true;
     }
   }
@@ -171,7 +170,7 @@ function buildWeeklyStatsSnapshotBody(snap) {
   const callerTopN = Math.min(15, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_CALLER_TOP_N) || 8));
   const printTopN = Math.min(12, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_PRINT_TOP_N) || 6));
 
-  const hero = [xBrandKicker(), `🚀 Weekly snapshot — ${range}`].join('\n');
+  const hero = `🚀 Weekly snapshot — ${range}`;
 
   const sections = [hero];
 
@@ -182,16 +181,16 @@ function buildWeeklyStatsSnapshotBody(snap) {
       [
         '📊 Summary',
         '',
-        `▪ Member calls — ${snap.user.count}`,
-        `▪ McGBot calls — ${snap.bot.count}`,
-        `▪ Combined calls — ${snap.totalPrints}`,
-        `▪ Active callers (distinct) — ${snap.uniqueCallers}`
+        `▫️ Member calls — ${snap.user.count}`,
+        `▫️ McGBot calls — ${snap.bot.count}`,
+        `▫️ Combined calls — ${snap.totalPrints}`,
+        `▫️ Active callers (distinct) — ${snap.uniqueCallers}`
       ].join('\n')
     );
 
     sections.push(weeklyCohortBlock('🔺', 'Member desk', null, snap.user));
 
-    sections.push(weeklyCohortBlock('◼️', 'McGBot desk', null, snap.bot));
+    sections.push(weeklyCohortBlock('▫️', 'McGBot desk', null, snap.bot));
 
     const desk = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, callerTopN);
     const deskLines = [`💎 Caller leaderboard (top ${callerTopN} by avg ATH ×)`, ''];
@@ -237,8 +236,8 @@ function buildWeeklyStatsSnapshotBody(snap) {
       [
         '⭐️ Best of the week',
         '',
-        `▪ Best member call — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
-        `▪ Best McGBot call — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
+        `▫️ Best member call — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
+        `▫️ Best McGBot call — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
       ].join('\n')
     );
   }
@@ -268,15 +267,12 @@ async function postDigest(p, options = {}) {
   const { windowLabel, days, topN } = p;
   /** Same attach path as milestone `createPost(text, null, chartBuf)` — upload inside `createPost`. */
   let png = null;
-  let caption = '';
 
   if (options.attachWeeklyAvgXChart) {
     try {
       const raw = await buildWeeklyAvgXpDigestPng(new Date());
       png = normalizePngUploadBuffer(raw);
-      if (png) {
-        caption = '\n\n📈 Chart: avg ATH × by weekday (last completed UTC week).';
-      } else {
+      if (!png) {
         console.error('[XLeaderboardDigest] weekly chart: render did not produce a valid PNG buffer');
       }
     } catch (err) {
@@ -288,9 +284,7 @@ async function postDigest(p, options = {}) {
     try {
       const raw = await buildMonthlyAvgXpDigestPng(Number(options.monthlyChartYear));
       png = normalizePngUploadBuffer(raw);
-      if (png) {
-        caption = '\n\n📈 Chart: avg ATH × by calendar month (UTC year).';
-      } else {
+      if (!png) {
         console.error('[XLeaderboardDigest] monthly chart: render did not produce a valid PNG buffer');
       }
     } catch (err) {
@@ -299,9 +293,6 @@ async function postDigest(p, options = {}) {
   }
 
   let text = buildLeaderboardDigestBody({ windowLabel, days, topN });
-  if (caption) {
-    text = `${text}${caption}`;
-  }
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   if (text.length > maxChars) {
     text = maxChars >= 2000 ? fitTweet(text, maxChars) : fitTweetWholeLines(text, maxChars);

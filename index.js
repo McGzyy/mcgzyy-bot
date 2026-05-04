@@ -478,7 +478,7 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
-    `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (with weekday chart), **7d**, or **monthly** (with month chart) digest to X (owner only)\n` +
+    `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (desk summary cards), **7d** (weekday chart), or **monthly** (30d trend chart) digest to X (owner only)\n` +
     `• Scheduled daily digest is **on** when \`X_LEADERBOARD_DIGEST_ENABLED\` is on; set \`X_LEADERBOARD_DAILY_DIGEST_ENABLED=0\` to disable\n\n`;
 
   if (canSeeModHelp) {
@@ -2998,10 +2998,10 @@ if (lowerContent === '!scanner off') {
               { attachWeeklyAvgXChart: true }
             );
           } else {
-            label = 'daily (+ weekday chart)';
+            label = 'daily (+ desk cards)';
             result = await postLeaderboardDigestToX(
               { windowLabel: 'Daily snapshot', days: 1, topN: 4 },
-              { attachWeeklyAvgXChart: true }
+              { attachDailyDualPanel: true }
             );
           }
           if (result?.success) {

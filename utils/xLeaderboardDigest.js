@@ -6,6 +6,7 @@ const {
   buildPast30DaysDigestPng
 } = require('./digestPerformanceChart');
 const { buildWeeklySnapshotModulesPng } = require('./weeklySnapshotPanel');
+const { buildDailySnapshotModulesPng } = require('./dailyDigestPanel');
 const {
   getCallerLeaderboardInTimeframe,
   getBestCallInTimeframe,
@@ -266,14 +267,24 @@ let lastWeeklyStatsKey = '';
 
 /**
  * @param {{ windowLabel: string, days: number, topN: number }} p
- * @param {{ attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean }} [options]
+ * @param {{ attachDailyDualPanel?: boolean, attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean }} [options]
  */
 async function postDigest(p, options = {}) {
   const { windowLabel, days, topN } = p;
   /** Same attach path as milestone `createPost(text, null, chartBuf)` — upload inside `createPost`. */
   let png = null;
 
-  if (options.attachWeeklyAvgXChart) {
+  if (options.attachDailyDualPanel) {
+    try {
+      const raw = await buildDailySnapshotModulesPng(new Date());
+      png = normalizePngUploadBuffer(raw);
+      if (!png) {
+        console.error('[XLeaderboardDigest] daily dual panel: render did not produce a valid PNG buffer');
+      }
+    } catch (err) {
+      console.error('[XLeaderboardDigest] daily dual panel failed:', err?.message || err);
+    }
+  } else if (options.attachWeeklyAvgXChart) {
     try {
       const raw = await buildWeeklyAvgXpDigestPng(new Date());
       png = normalizePngUploadBuffer(raw);
@@ -443,7 +454,7 @@ function startXLeaderboardDigestScheduler() {
 /**
  * Post a leaderboard digest to X (same path as the scheduler). For Discord test commands.
  * @param {{ windowLabel: string, days: number, topN: number }} body
- * @param {{ attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean }} [opts]
+ * @param {{ attachDailyDualPanel?: boolean, attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean }} [opts]
  */
 async function postLeaderboardDigestToX(body, opts = {}) {
   return postDigest(body, opts);

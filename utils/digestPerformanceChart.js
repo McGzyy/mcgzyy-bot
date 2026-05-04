@@ -72,7 +72,19 @@ function backfillMonthDigestPoints(pts) {
   });
 }
 
-/** Legend above plot — colored key (line color as swatch). */
+/**
+ * @param {(number|null|undefined)[]} pts one entry per UTC day in range
+ */
+function backfillDailyDigestPoints(pts) {
+  return pts.map(v => {
+    if (v != null && Number.isFinite(Number(v))) {
+      return Number(Number(v).toFixed(3));
+    }
+    return DIGEST_PLACEHOLDER_ATH_X;
+  });
+}
+
+/** Legend above plot — explicit fonts/colors so labels render in chartjs-node-canvas (no invisible text). */
 function digestLegendPluginOptions() {
   return {
     display: true,
@@ -80,24 +92,12 @@ function digestLegendPluginOptions() {
     align: 'center',
     labels: {
       color: TICK,
-      padding: 18,
-      font: { size: 13, weight: 700 },
-      boxWidth: 18,
-      boxHeight: 4,
+      padding: 16,
+      boxWidth: 14,
+      boxHeight: 14,
       usePointStyle: true,
-      pointStyle: 'rectRounded',
-      generateLabels(chart) {
-        const datasets = chart.data.datasets;
-        return datasets.map((dataset, i) => ({
-          text: dataset.label,
-          fillStyle: dataset.borderColor,
-          strokeStyle: dataset.borderColor,
-          lineWidth: 2,
-          hidden: !chart.isDatasetVisible(i),
-          index: i,
-          datasetIndex: i
-        }));
-      }
+      pointStyle: 'rect',
+      font: { size: 14, weight: '600', family: 'Arial, Helvetica, sans-serif' }
     }
   };
 }
@@ -178,7 +178,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 36, right: 16, bottom: 10, left: 12 } }
+      layout: { padding: { top: 44, right: 16, bottom: 10, left: 12 } }
     }
   };
 
@@ -265,7 +265,7 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 36, right: 16, bottom: 10, left: 12 } }
+      layout: { padding: { top: 44, right: 16, bottom: 10, left: 12 } }
     }
   };
 
@@ -362,7 +362,7 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 36, right: 18, bottom: 8, left: 12 } }
+      layout: { padding: { top: 44, right: 18, bottom: 8, left: 12 } }
     }
   };
 

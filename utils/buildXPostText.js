@@ -19,7 +19,6 @@ function resolveXTweetMaxChars() {
   return Math.min(X_TWEET_CHAR_HARD_CAP, Math.max(100, n));
 }
 
-const DEFAULT_MAX = resolveXTweetMaxChars();
 
 function formatUsd(value) {
   const num = Number(value);
@@ -153,7 +152,7 @@ function fitTweetWholeLines(text, max) {
  * @param {{ milestoneX?: number, isReply?: boolean, maxChars?: number }} [opts]
  */
 async function buildXPostText(trackedCall, opts = {}) {
-  const maxChars = Number(opts.maxChars) > 0 ? Number(opts.maxChars) : DEFAULT_MAX;
+  const maxChars = Number(opts.maxChars) > 0 ? Number(opts.maxChars) : resolveXTweetMaxChars();
   const milestoneX = Number(opts.milestoneX) > 0 ? Number(opts.milestoneX) : 0;
   const isReply = opts.isReply === true;
 

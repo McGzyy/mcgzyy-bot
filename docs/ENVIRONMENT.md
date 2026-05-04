@@ -210,6 +210,8 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_WEEKLY_STATS_SNAPSHOT_ENABLED`** | `1` / `true` — post a **stats-only** weekly X summary (previous completed UTC Mon–Sun); **independent** of `X_LEADERBOARD_DIGEST_ENABLED`. |
 | **`X_WEEKLY_STATS_UTC_WEEKDAY`** | `0`–`6`; default `1` (Monday). |
 | **`X_WEEKLY_STATS_UTC_HOUR`** | `0`–`23`; defaults to the same value as `X_LEADERBOARD_DIGEST_UTC_HOUR` (or `16`). |
+| **`X_WEEKLY_SNAPSHOT_CALLER_TOP_N`** | Optional; default `15` (max `25`). Rows on the weekly snapshot caller desk. |
+| **`X_WEEKLY_SNAPSHOT_PRINT_TOP_N`** | Optional; default `12` (max `25`). Top user / top auto print lists on the weekly snapshot. |
 | **`DASHBOARD_PUBLIC_URL`** | Shown at the bottom of digest tweets (any of `NEXT_PUBLIC_APP_URL` / `MCBOT_DASHBOARD_URL` also work). |
 
 ### 7.4 Optional — Supabase (Discord bot, repo root)

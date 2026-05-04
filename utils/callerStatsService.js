@@ -688,6 +688,107 @@ function getBotStatsRaw() {
   };
 }
 
+function callsForUtcWeekDesk(isDeskFn, startInclusive, endExclusive) {
+  const startMs = startInclusive.getTime();
+  const endMs = endExclusive.getTime();
+  return getAllTrackedCalls()
+    .filter(isDeskFn)
+    .filter(isValid)
+    .filter(c => isCallTimestampInUtcMsRange(c, startMs, endMs));
+}
+
+function getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, limit = 20) {
+  const calls = callsForUtcWeekDesk(isHumanUserCall, startInclusive, endExclusive);
+  const map = new Map();
+
+  for (const call of calls) {
+    const key =
+      call.firstCallerDiscordId ||
+      call.firstCallerId ||
+      normalize(call.firstCallerUsername) ||
+      normalize(call.firstCallerDisplayName) ||
+      normalize(call.firstCallerPublicName);
+
+    if (!key) continue;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        calls: [],
+        totalX: 0,
+        totalAth: 0
+      });
+    }
+
+    const entry = map.get(key);
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+
+    entry.calls.push(call);
+    entry.totalX += x;
+    entry.totalAth += ath;
+  }
+
+  return [...map.values()]
+    .map(entry => {
+      const totalCalls = entry.calls.length;
+
+      return {
+        username: resolveBestName(entry.calls),
+        totalCalls,
+        avgX: totalCalls ? entry.totalX / totalCalls : 0,
+        avgAth: totalCalls ? entry.totalAth / totalCalls : 0
+      };
+    })
+    .sort((a, b) => b.avgX - a.avgX)
+    .slice(0, limit);
+}
+
+function getBestCallInUtcWeekBounds(startInclusive, endExclusive) {
+  const calls = callsForUtcWeekDesk(isHumanUserCall, startInclusive, endExclusive);
+  if (!calls.length) return null;
+
+  let best = null;
+  let bestX = -Infinity;
+
+  for (const call of calls) {
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+    if (x > bestX) {
+      bestX = x;
+      best = call;
+    }
+  }
+
+  return best ? enrichCallWithX(best) : null;
+}
+
+function getBestBotCallInUtcWeekBounds(startInclusive, endExclusive) {
+  const calls = callsForUtcWeekDesk(isBotCall, startInclusive, endExclusive);
+  if (!calls.length) return null;
+
+  let best = null;
+  let bestX = -Infinity;
+
+  for (const call of calls) {
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+    if (x > bestX) {
+      bestX = x;
+      best = call;
+    }
+  }
+
+  return best ? enrichCallWithX(best) : null;
+}
+
+function getTopUserCallsInUtcWeekBounds(startInclusive, endExclusive, limit = 15) {
+  return buildTopCalls(callsForUtcWeekDesk(isHumanUserCall, startInclusive, endExclusive), limit);
+}
+
+function getTopBotCallsInUtcWeekBounds(startInclusive, endExclusive, limit = 15) {
+  return buildTopCalls(callsForUtcWeekDesk(isBotCall, startInclusive, endExclusive), limit);
+}
+
 module.exports = {
   getCallerStats,
   getCallerStatsRaw,
@@ -698,5 +799,10 @@ module.exports = {
   getBestCallInTimeframe,
   getTopCallerInTimeframe,
   getBestBotCallInTimeframe,
-  getWeeklyUtcTerminalSnapshot
+  getWeeklyUtcTerminalSnapshot,
+  getCallerLeaderboardInUtcWeekBounds,
+  getBestCallInUtcWeekBounds,
+  getBestBotCallInUtcWeekBounds,
+  getTopUserCallsInUtcWeekBounds,
+  getTopBotCallsInUtcWeekBounds
 };

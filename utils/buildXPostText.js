@@ -1,11 +1,30 @@
 'use strict';
 
+const { getXBotUsernameForCopy } = require('./xPoster');
+
 /**
  * Premium X (Twitter) copy for McGBot Terminal — milestones, approvals, and manual posts.
  * Attribution:
- * - Bot calls: @McGBot
- * - User calls: @handle when Supabase prefs allow tagging and multiple >= threshold; else generic credit
+ * - McGBot calls: @McGBot
+ * - Member calls: @handle when Supabase prefs allow tagging and multiple >= threshold; else generic credit
  */
+
+/** Short section rule (narrow X clients avoid wrapping a long bar). */
+const X_TERMINAL_SECTION_RULE = `${'\u2500'.repeat(4)} \u22C5 ${'\u2500'.repeat(4)}`;
+
+function xTerminalSectionRule() {
+  return X_TERMINAL_SECTION_RULE;
+}
+
+function xTerminalSectionGap() {
+  return `\n${X_TERMINAL_SECTION_RULE}\n`;
+}
+
+function xTerminalFooterLine() {
+  const raw = getXBotUsernameForCopy().trim() || 'McGBot';
+  const tag = raw.startsWith('@') ? raw : `@${raw}`;
+  return `🔗 Dashboard + live boards — link in ${tag} bio`;
+}
 
 /** Hard ceiling for long-form X posts (raise via env if APIs change). */
 function readXTweetCharHardCap() {
@@ -234,7 +253,7 @@ async function buildXPostText(trackedCall, opts = {}) {
     milestoneX > 0
       ? isReply
         ? `↳ ${milestoneX}× milestone`
-        : `◆ ${milestoneX}× · first print`
+        : `◆ ${milestoneX}× · first call`
       : '◆ Live call';
 
   const brand = 'McGBot Terminal';
@@ -243,12 +262,13 @@ async function buildXPostText(trackedCall, opts = {}) {
       ? `$${ticker} · ${athX.toFixed(2)}× ATH  ·  spot ${spotX.toFixed(2)}×`
       : `$${ticker} · ${spotX.toFixed(2)}×`;
 
+  const rule = X_TERMINAL_SECTION_RULE;
   const lines = [
     `▲ ${brand}`,
     headline,
-    '────────',
+    rule,
     sub,
-    '────────',
+    rule,
     attribution,
     '',
     `Entry ${initialMcStr}  →  Peak ${athMcStr}`,
@@ -261,6 +281,11 @@ async function buildXPostText(trackedCall, opts = {}) {
 
   if (includeGmgnLink() && ca) {
     lines.push(`GMGN · https://gmgn.ai/sol/token/${ca}`);
+  }
+
+  const foot = xTerminalFooterLine();
+  if (foot) {
+    lines.push('', rule, '', foot);
   }
 
   let body = lines.join('\n');
@@ -278,6 +303,9 @@ module.exports = {
   buildXPostText,
   buildAttributionLine,
   xBrandKicker,
+  xTerminalSectionRule,
+  xTerminalSectionGap,
+  xTerminalFooterLine,
   fitTweet,
   fitTweetWholeLines,
   resolveXTweetMaxChars,

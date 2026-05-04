@@ -14,14 +14,13 @@ const {
 } = require('./callerStatsService');
 const {
   xBrandKicker,
+  xTerminalSectionGap,
+  xTerminalFooterLine,
   fitTweet,
   fitTweetWholeLines,
   resolveXTweetMaxChars,
   resolveWeeklyStatsTweetMaxChars
 } = require('./buildXPostText');
-
-/** Short rule so narrow X clients do not wrap a “full width” bar into two ugly lines. */
-const WEEKLY_RULE = `${'\u2500'.repeat(4)} \u22C5 ${'\u2500'.repeat(4)}`;
 
 /**
  * One-line print for X. No leading `$` on the ticker — X allows only **one** cashtag
@@ -35,18 +34,8 @@ function formatCallOneLiner(call) {
   return `${t.toUpperCase()} · ${x.toFixed(2)}×`;
 }
 
-function dashboardLinkLine() {
-  const u = String(
-    process.env.DASHBOARD_PUBLIC_URL ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      process.env.MCBOT_DASHBOARD_URL ||
-      ''
-  ).trim();
-  return u ? `🔗 Full boards — ${u.replace(/\/$/, '')}` : '';
-}
-
 function weeklySectionGap() {
-  return `\n${WEEKLY_RULE}\n`;
+  return xTerminalSectionGap();
 }
 
 /**
@@ -58,7 +47,7 @@ function weeklySectionGap() {
 function weeklyCohortBlock(emoji, title, subtitle, s) {
   const head = subtitle ? `${emoji} ${title}\n${subtitle}` : `${emoji} ${title}`;
   if (!s.count) {
-    return `${head}\n(no qualifying prints this week)`;
+    return `${head}\n(no qualifying calls this week)`;
   }
   const med = s.medianX == null ? '—' : `${Number(s.medianX).toFixed(2)}×`;
   const p2 = s.pctGe2 == null ? '—' : `${Number(s.pctGe2).toFixed(1)}%`;
@@ -145,12 +134,14 @@ function formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive) {
   const y = startInclusive.getUTCFullYear();
   const y2 = lastDay.getUTCFullYear();
   if (y === y2 && startInclusive.getUTCMonth() === lastDay.getUTCMonth()) {
-    return `${sm} ${sd}–${ed}, ${y} UTC`;
+    return `${sm} ${sd}–${ed}`;
   }
   if (y === y2) {
-    return `${sm} ${sd}–${em} ${ed}, ${y} UTC`;
+    return `${sm} ${sd}–${em} ${ed}`;
   }
-  return `${sm} ${sd}, ${y} – ${em} ${ed}, ${y2} UTC`;
+  const yShort = String(y).slice(-2);
+  const y2Short = String(y2).slice(-2);
+  return `${sm} ${sd} '${yShort} – ${em} ${ed} '${y2Short}`;
 }
 
 /**
@@ -166,58 +157,35 @@ function buildWeeklyStatsSnapshotBody(snap) {
   const callerTopN = Math.min(15, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_CALLER_TOP_N) || 8));
   const printTopN = Math.min(12, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_PRINT_TOP_N) || 6));
 
-  const hero = [
-    xBrandKicker(),
-    `🚀 Weekly snapshot — ${range}`,
-    '',
-    'Rolled-up performance for qualifying prints the terminal tracked this week (completed Mon–Sun, UTC).'
-  ].join('\n');
+  const hero = [xBrandKicker(), `🚀 Weekly snapshot — ${range}`].join('\n');
 
   const sections = [hero];
 
   if (!snap.totalPrints) {
-    sections.push('📭 No qualifying prints landed in this UTC week window.');
+    sections.push('📭 No qualifying calls this week.');
   } else {
     sections.push(
       [
         '📊 Summary',
         '',
-        `▪ User-attributed prints — ${snap.user.count}`,
-        `▪ Auto-scanned prints — ${snap.bot.count}`,
-        `▪ Combined — ${snap.totalPrints}`,
+        `▪ Member calls — ${snap.user.count}`,
+        `▪ McGBot calls — ${snap.bot.count}`,
+        `▪ Combined calls — ${snap.totalPrints}`,
         `▪ Active callers (distinct) — ${snap.uniqueCallers}`
       ].join('\n')
     );
 
-    sections.push(
-      weeklyCohortBlock(
-        '🔺',
-        'User desk',
-        'Community calls · ATH × = peak MC ÷ entry MC at first print.',
-        snap.user
-      )
-    );
+    sections.push(weeklyCohortBlock('🔺', 'Member desk', null, snap.user));
 
-    sections.push(
-      weeklyCohortBlock(
-        '◼️',
-        'Auto desk',
-        'Scanner auto-calls · same ATH × definition as user desk.',
-        snap.bot
-      )
-    );
+    sections.push(weeklyCohortBlock('◼️', 'McGBot desk', null, snap.bot));
 
     const desk = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, callerTopN);
-    const deskLines = [
-      `💎 Caller leaderboard (top ${callerTopN} by avg ATH ×)`,
-      'Ranked by average multiple across prints this week.',
-      ''
-    ];
+    const deskLines = [`💎 Caller leaderboard (top ${callerTopN} by avg ATH ×)`, ''];
     if (desk.length) {
       for (let i = 0; i < desk.length; i += 1) {
         const r = desk[i];
         deskLines.push(
-          `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} print${r.totalCalls === 1 ? '' : 's'}`
+          `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
         );
       }
     } else {
@@ -226,11 +194,7 @@ function buildWeeklyStatsSnapshotBody(snap) {
     sections.push(deskLines.join('\n'));
 
     const topUser = getTopUserCallsInUtcWeekBounds(startInclusive, endExclusive, printTopN);
-    const uLines = [
-      `📈 User standouts (top ${printTopN} by ATH ×)`,
-      'Highest multiple vs entry this week.',
-      ''
-    ];
+    const uLines = [`📈 Top member calls (top ${printTopN} by ATH ×)`, ''];
     if (topUser.length) {
       for (let i = 0; i < topUser.length; i += 1) {
         const one = formatCallOneLiner(topUser[i]);
@@ -242,11 +206,7 @@ function buildWeeklyStatsSnapshotBody(snap) {
     sections.push(uLines.join('\n'));
 
     const topBot = getTopBotCallsInUtcWeekBounds(startInclusive, endExclusive, printTopN);
-    const bLines = [
-      `⚡ Auto standouts (top ${printTopN} by ATH ×)`,
-      'Highest multiple vs entry this week.',
-      ''
-    ];
+    const bLines = [`⚡ Top McGBot calls (top ${printTopN} by ATH ×)`, ''];
     if (topBot.length) {
       for (let i = 0; i < topBot.length; i += 1) {
         const one = formatCallOneLiner(topBot[i]);
@@ -263,23 +223,15 @@ function buildWeeklyStatsSnapshotBody(snap) {
       [
         '⭐️ Best of the week',
         '',
-        `▪ Best user print — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
-        `▪ Best auto print — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
-      ].join('\n')
-    );
-
-    sections.push(
-      [
-        '📎 Notes',
-        '',
-        'Same validity filters as in-app leaderboards (invalid extremes & excluded/denied flows omitted). Not financial advice.'
+        `▪ Best member call — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
+        `▪ Best McGBot call — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
       ].join('\n')
     );
   }
 
-  const dash = dashboardLinkLine();
-  if (dash) {
-    sections.push(dash);
+  const foot = xTerminalFooterLine();
+  if (foot) {
+    sections.push(foot);
   }
 
   const raw = sections.filter(Boolean).join(gap).trim();
@@ -323,7 +275,7 @@ async function tickXLeaderboardDigest() {
   const dailyKey = `d:${utcDate}`;
   if (lastDailyKey !== dailyKey) {
     lastDailyKey = dailyKey;
-    await postDigest('24h pulse', 1, 4);
+    await postDigest('Daily snapshot', 1, 4);
   }
 
   const weeklyOn = String(process.env.X_LEADERBOARD_WEEKLY_DIGEST_ENABLED ?? 'true')
@@ -336,7 +288,7 @@ async function tickXLeaderboardDigest() {
     const weekKey = `w:${utcDate}`;
     if (lastWeeklyKey !== weekKey) {
       lastWeeklyKey = weekKey;
-      await postDigest('7d board', 7, 5);
+      await postDigest('7d snapshot', 7, 5);
     }
   }
 }

@@ -182,7 +182,7 @@ After a successful verify, the bot adds **`HUMAN_VERIFIED_ROLE_ID`** and removes
 
 | Variable | Used in | Purpose |
 |----------|---------|---------|
-| **`BOT_OWNER_ID`** | `index.js`, `commands/basicCommands.js` | Discord user snowflake; gates `!testx`, `!testweeklysnapshot`, `!setminmc`, sanity `!setsanity*`, etc. If unset, owner checks fail closed where implemented. |
+| **`BOT_OWNER_ID`** | `index.js`, `commands/basicCommands.js` | Discord user snowflake; gates `!testx`, `!testweeklysnapshot`, `!testdailydigest`, `!test7ddigest`, `!setminmc`, sanity `!setsanity*`, etc. If unset, owner checks fail closed where implemented. |
 
 ### 7.3 Required for X (Twitter) posting
 
@@ -207,14 +207,15 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_AUTO_APPROVE_USER_CALLS`** | `1` / `true` — **user_call** rows skip `#mod-approvals` for X and go straight to `xApproved` (bot_call still needs mod approve). |
 | **`X_LEADERBOARD_DIGEST_ENABLED`** | `1` / `true` — enable scheduled digest tweets (off by default). |
 | **`X_LEADERBOARD_DIGEST_UTC_HOUR`** | Hour `0–23` to post (default `16`). |
-| **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the weekly snapshot (default on when digest is enabled). |
+| **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the **7d** leaderboard digest (default on when digest is enabled). |
 | **`X_LEADERBOARD_WEEKLY_UTC_WEEKDAY`** | `0` (Sun) … `6` (Sat); default `1` (Monday). |
 | **`X_WEEKLY_STATS_SNAPSHOT_ENABLED`** | `1` / `true` — post a **stats-only** weekly X summary (previous completed UTC Mon–Sun); **independent** of `X_LEADERBOARD_DIGEST_ENABLED`. |
 | **`X_WEEKLY_STATS_UTC_WEEKDAY`** | `0`–`6`; default `1` (Monday). |
 | **`X_WEEKLY_STATS_UTC_HOUR`** | `0`–`23`; defaults to the same value as `X_LEADERBOARD_DIGEST_UTC_HOUR` (or `16`). |
 | **`X_WEEKLY_SNAPSHOT_CALLER_TOP_N`** | Optional; default **`8`** (max `15`). Caller rows on the weekly snapshot (shorter reads better on mobile). |
-| **`X_WEEKLY_SNAPSHOT_PRINT_TOP_N`** | Optional; default **`6`** (max `12`). Top user / top auto print lines per list. |
-| **`DASHBOARD_PUBLIC_URL`** | Shown at the bottom of digest tweets (any of `NEXT_PUBLIC_APP_URL` / `MCBOT_DASHBOARD_URL` also work). |
+| **`X_WEEKLY_SNAPSHOT_PRINT_TOP_N`** | Optional; default **`6`** (max `12`). Top member-call / McGBot-call lines per list. |
+| **`X_BOT_USERNAME`** | `utils/xPoster.js` | X handle **without** `@` (default `McGBot`). Used for **“link in @… bio”** footers on terminal-style posts (`buildXPostText`, digests, weekly snapshot). |
+| **`DASHBOARD_PUBLIC_URL`** | Dashboard / links elsewhere | Optional; not appended to digest/snapshot tweets (footer points to the bot profile instead). `NEXT_PUBLIC_APP_URL` / `MCBOT_DASHBOARD_URL` are fallbacks where the codebase still reads a public app URL. |
 
 ### 7.4 Optional — Supabase (Discord bot, repo root)
 

@@ -35,9 +35,10 @@ const {
 } = require('./utils/monitoringEngine');
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
 const { createPost, getXBotUsernameForCopy } = require('./utils/xPoster');
-const { fitTweet, xBrandKicker } = require('./utils/buildXPostText');
+const { fitTweet, xBrandKicker, xTerminalSectionRule } = require('./utils/buildXPostText');
 const {
   startXLeaderboardDigestScheduler,
+  buildLeaderboardDigestBody,
   buildWeeklyStatsSnapshotBody
 } = require('./utils/xLeaderboardDigest');
 const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
@@ -467,7 +468,8 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!testreal <ca>\` — Live provider / token test (embed)\n` +
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
-    `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (same body as the scheduled job; owner only)\n\n`;
+    `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
+    `• \`!testdailydigest\` / \`!test7ddigest\` — Post **daily** / **7d** leaderboard digest to X (owner only)\n\n`;
 
   if (canSeeModHelp) {
     contentOut +=
@@ -2942,7 +2944,7 @@ if (lowerContent === '!scanner off') {
             [
               xBrandKicker(),
               '◆ Connection test',
-              '────────',
+              xTerminalSectionRule(),
               'McGBot · X posting verified.'
             ].join('\n'),
             280
@@ -2953,6 +2955,39 @@ if (lowerContent === '!scanner off') {
           await replyText(message, `✅ Posted to X\nPost ID: ${result.id}`);
         } else {
           await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
+        }
+
+        return;
+      }
+
+      if (lowerContent === '!testdailydigest' || lowerContent === '!test7ddigest') {
+        if (message.author.id !== process.env.BOT_OWNER_ID) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        const is7d = lowerContent === '!test7ddigest';
+        const text = buildLeaderboardDigestBody({
+          windowLabel: is7d ? '7d snapshot' : 'Daily snapshot',
+          days: is7d ? 7 : 1,
+          topN: is7d ? 5 : 4
+        });
+
+        try {
+          const result = await createPost(text);
+          if (result.success) {
+            await replyText(
+              message,
+              `✅ Posted ${is7d ? '7d' : 'daily'} digest to X\nPost ID: ${result.id}\nBody length: ${text.length} characters`
+            );
+          } else {
+            await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
+          }
+        } catch (e) {
+          console.error('[!testdailydigest/!test7ddigest]', e);
+          await replyText(
+            message,
+            `❌ Digest test failed: ${e instanceof Error ? e.message : String(e)}`
+          );
         }
 
         return;

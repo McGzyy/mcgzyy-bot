@@ -226,6 +226,12 @@ function normalizePngUploadBuffer(raw) {
   return buf;
 }
 
+/**
+ * Simple image upload: multipart `media` (binary) + optional `media_category`.
+ * Do not use urlencoded `media_data` here — OAuth 1.0a must sign x-www-form-urlencoded
+ * body parameters (except oauth_*), and signing multi‑MB base64 is error-prone; X
+ * expects multipart for this flow (OAuth signs oauth params only).
+ */
 async function uploadMediaPng(buffer) {
   const buf = normalizePngUploadBuffer(buffer);
   if (!buf) return null;
@@ -233,17 +239,27 @@ async function uploadMediaPng(buffer) {
   const uploadUrl = 'https://upload.twitter.com/1.1/media/upload.json';
   const authHeader = buildOAuthHeader('POST', uploadUrl);
 
-  const params = new URLSearchParams();
-  params.set('media_data', buf.toString('base64'));
-  /** Helps X attach images to v2 tweets; see X media upload docs. */
-  params.set('media_category', 'tweet_image');
+  const boundary = `----McGBotPng${crypto.randomBytes(16).toString('hex')}`;
+  const crlf = '\r\n';
+  const head =
+    `--${boundary}${crlf}` +
+    `Content-Disposition: form-data; name="media"; filename="chart.png"${crlf}` +
+    `Content-Type: image/png${crlf}${crlf}`;
+  const tail =
+    `${crlf}--${boundary}${crlf}` +
+    `Content-Disposition: form-data; name="media_category"${crlf}${crlf}` +
+    `tweet_image${crlf}` +
+    `--${boundary}--${crlf}`;
+  const body = Buffer.concat([Buffer.from(head, 'utf8'), buf, Buffer.from(tail, 'utf8')]);
 
   try {
-    const response = await axios.post(uploadUrl, params.toString(), {
+    const response = await axios.post(uploadUrl, body, {
       headers: {
         Authorization: authHeader,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      }
+        'Content-Type': `multipart/form-data; boundary=${boundary}`
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity
     });
 
     const d = response?.data;

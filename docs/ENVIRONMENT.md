@@ -206,6 +206,7 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_POST_INCLUDE_GMGN`** | `1` / `true` — append GMGN link (uses more characters). |
 | **`X_AUTO_APPROVE_USER_CALLS`** | `1` / `true` — **user_call** rows skip `#mod-approvals` for X and go straight to `xApproved` (bot_call still needs mod approve). |
 | **`X_LEADERBOARD_DIGEST_ENABLED`** | `1` / `true` — enable scheduled digest tweets (off by default). |
+| **`X_LEADERBOARD_DAILY_DIGEST_ENABLED`** | Optional; default **off**. Set `1` / `true` / `yes` to post the **rolling 24h** leaderboard digest. Leave unset so only the **7d** digest runs (daily noise is skipped; milestones + weekly stats cover the rest). |
 | **`X_LEADERBOARD_DIGEST_UTC_HOUR`** | Hour `0–23` to post (default `16`). |
 | **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the **7d** leaderboard digest (default on when digest is enabled). |
 | **`X_LEADERBOARD_WEEKLY_UTC_WEEKDAY`** | `0` (Sun) … `6` (Sat); default `1` (Monday). |

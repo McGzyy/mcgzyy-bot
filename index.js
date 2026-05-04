@@ -337,6 +337,13 @@ async function replyText(message, content) {
   });
 }
 
+function isBotOwnerDiscordId(userId) {
+  const expected = String(process.env.BOT_OWNER_ID ?? '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
+  return Boolean(expected) && String(userId) === expected;
+}
+
 function splitDiscordMessage(content, limit = 1900) {
   const text = String(content ?? '');
   if (!text) return [''];
@@ -469,7 +476,7 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
-    `• \`!testdailydigest\` / \`!test7ddigest\` — Post **daily** / **7d** leaderboard digest to X (owner only)\n\n`;
+    `• \`!testdailydigest\` / \`!test7ddigest\` — Post **daily** / **7d** leaderboard digest to X (owner only; **scheduled** daily digest is off unless \`X_LEADERBOARD_DAILY_DIGEST_ENABLED\`)\n\n`;
 
   if (canSeeModHelp) {
     contentOut +=
@@ -2935,7 +2942,7 @@ if (lowerContent === '!scanner off') {
   return;
 }
       if (lowerContent === '!testx') {
-        if (message.author.id !== process.env.BOT_OWNER_ID) {
+        if (!isBotOwnerDiscordId(message.author.id)) {
           return message.reply('❌ You do not have permission to use this command.');
         }
 
@@ -2961,18 +2968,18 @@ if (lowerContent === '!scanner off') {
       }
 
       if (lowerContent === '!testdailydigest' || lowerContent === '!test7ddigest') {
-        if (message.author.id !== process.env.BOT_OWNER_ID) {
+        if (!isBotOwnerDiscordId(message.author.id)) {
           return message.reply('❌ You do not have permission to use this command.');
         }
 
         const is7d = lowerContent === '!test7ddigest';
-        const text = buildLeaderboardDigestBody({
-          windowLabel: is7d ? '7d snapshot' : 'Daily snapshot',
-          days: is7d ? 7 : 1,
-          topN: is7d ? 5 : 4
-        });
 
         try {
+          const text = buildLeaderboardDigestBody({
+            windowLabel: is7d ? '7d snapshot' : 'Daily snapshot',
+            days: is7d ? 7 : 1,
+            topN: is7d ? 5 : 4
+          });
           const result = await createPost(text);
           if (result.success) {
             await replyText(
@@ -2994,7 +3001,7 @@ if (lowerContent === '!scanner off') {
       }
 
       if (lowerContent === '!testweeklysnapshot') {
-        if (message.author.id !== process.env.BOT_OWNER_ID) {
+        if (!isBotOwnerDiscordId(message.author.id)) {
           return message.reply('❌ You do not have permission to use this command.');
         }
 

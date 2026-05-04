@@ -272,8 +272,13 @@ async function tickXLeaderboardDigest() {
     return;
   }
 
+  const dailyDigestOn = ['1', 'true', 'yes'].includes(
+    String(process.env.X_LEADERBOARD_DAILY_DIGEST_ENABLED || '')
+      .trim()
+      .toLowerCase()
+  );
   const dailyKey = `d:${utcDate}`;
-  if (lastDailyKey !== dailyKey) {
+  if (dailyDigestOn && lastDailyKey !== dailyKey) {
     lastDailyKey = dailyKey;
     await postDigest('Daily snapshot', 1, 4);
   }

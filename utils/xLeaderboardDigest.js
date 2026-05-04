@@ -37,7 +37,32 @@ function dashboardLinkLine() {
       process.env.MCBOT_DASHBOARD_URL ||
       ''
   ).trim();
-  return u ? `Full boards · ${u.replace(/\/$/, '')}` : '';
+  return u ? `Full boards — ${u.replace(/\/$/, '')}` : '';
+}
+
+function weeklySectionGap() {
+  return `\n\n${WEEKLY_RULE}\n\n`;
+}
+
+/**
+ * @param {{ count: number, medianX: number|null, pctGe2: number|null, pctGe3: number|null }} s
+ */
+function weeklyCohortBlock(title, subtitle, s) {
+  const head = subtitle ? `${title}\n${subtitle}` : title;
+  if (!s.count) {
+    return `${head}\n\n(no qualifying prints in this window)`;
+  }
+  const med = s.medianX == null ? '—' : `${Number(s.medianX).toFixed(2)}×`;
+  const p2 = s.pctGe2 == null ? '—' : `${Number(s.pctGe2).toFixed(1)}%`;
+  const p3 = s.pctGe3 == null ? '—' : `${Number(s.pctGe3).toFixed(1)}%`;
+  return [
+    head,
+    '',
+    `• Calls — ${s.count}`,
+    `• Median ATH × — ${med}`,
+    `• Share at ≥ 2× — ${p2}`,
+    `• Share at ≥ 3× — ${p3}`
+  ].join('\n');
 }
 
 /**
@@ -200,7 +225,7 @@ function buildWeeklyStatsSnapshotBody(snap) {
     if (topUser.length) {
       for (let i = 0; i < topUser.length; i += 1) {
         const one = formatCallOneLiner(topUser[i]);
-        uLines.push(`${String(i + 1).padStart(2, ' ')}. ${one || '—'}`);
+        uLines.push(`${i + 1}. ${one || '—'}`);
       }
     } else {
       uLines.push('(none)');

@@ -2963,14 +2963,22 @@ if (lowerContent === '!scanner off') {
           return message.reply('❌ You do not have permission to use this command.');
         }
 
-        const snap = getWeeklyUtcTerminalSnapshot();
-        const text = buildWeeklyStatsSnapshotBody(snap);
-        const result = await createPost(text);
+        try {
+          const snap = getWeeklyUtcTerminalSnapshot();
+          const text = buildWeeklyStatsSnapshotBody(snap);
+          const result = await createPost(text);
 
-        if (result.success) {
-          await replyText(message, `✅ Posted weekly stats snapshot to X\nPost ID: ${result.id}`);
-        } else {
-          await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
+          if (result.success) {
+            await replyText(message, `✅ Posted weekly stats snapshot to X\nPost ID: ${result.id}`);
+          } else {
+            await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
+          }
+        } catch (e) {
+          console.error('[!testweeklysnapshot]', e);
+          await replyText(
+            message,
+            `❌ Weekly snapshot failed: ${e instanceof Error ? e.message : String(e)}`
+          );
         }
 
         return;

@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * Premium X (Twitter) copy for McGBot Terminal — milestones, approvals, and manual posts.
+ * Premium X (Twitter) copy — milestones, approvals, and manual posts.
+ * Milestones share the same long-form budget as digests (`resolveWeeklyStatsTweetMaxChars`).
  * Attribution:
  * - McGBot calls: @McGBot
  * - Member calls: @handle when Supabase prefs allow tagging and multiple >= threshold; else generic credit
@@ -213,9 +214,11 @@ function fitTweetWholeLines(text, max) {
  * @param {{ milestoneX?: number, isReply?: boolean, maxChars?: number }} [opts]
  */
 async function buildXPostText(trackedCall, opts = {}) {
-  const maxChars = Number(opts.maxChars) > 0 ? Number(opts.maxChars) : resolveXTweetMaxChars();
+  const maxChars =
+    Number(opts.maxChars) > 0 ? Number(opts.maxChars) : resolveWeeklyStatsTweetMaxChars();
   const milestoneX = Number(opts.milestoneX) > 0 ? Number(opts.milestoneX) : 0;
   const isReply = opts.isReply === true;
+  const gap = xTerminalSectionGap();
 
   const ticker = (trackedCall.ticker || 'UNKNOWN').toUpperCase();
   const ca = trackedCall.contractAddress || '';
@@ -248,9 +251,9 @@ async function buildXPostText(trackedCall, opts = {}) {
   const headline =
     milestoneX > 0
       ? isReply
-        ? `↳ ${milestoneX}× milestone`
-        : `◆ ${milestoneX}× · first call`
-      : '◆ Live call';
+        ? `🔥 ${milestoneX}× · milestone`
+        : `🔥 ${milestoneX}× · first call`
+      : '📡 Live call';
 
   const channelBrand =
     trackedCall?.callSourceType === 'bot_call' ? 'McGBot Calls' : 'User Calls';
@@ -259,13 +262,11 @@ async function buildXPostText(trackedCall, opts = {}) {
       ? `$${ticker} · ${athX.toFixed(2)}× ATH  ·  spot ${spotX.toFixed(2)}×`
       : `$${ticker} · ${spotX.toFixed(2)}×`;
 
-  const rule = X_TERMINAL_SECTION_RULE;
-  const lines = [
-    `▲ ${channelBrand}`,
-    headline,
-    rule,
-    sub,
-    rule,
+  const heroBlock = [`🚀 ${channelBrand}`, headline].join('\n');
+
+  const statsBlock = sub;
+
+  const detailLines = [
     attribution,
     '',
     `Entry ${initialMcStr}  →  Peak ${athMcStr}`,
@@ -277,16 +278,17 @@ async function buildXPostText(trackedCall, opts = {}) {
   ];
 
   if (includeGmgnLink() && ca) {
-    lines.push(`GMGN · https://gmgn.ai/sol/token/${ca}`);
+    detailLines.push(`GMGN · https://gmgn.ai/sol/token/${ca}`);
   }
 
   const foot = xTerminalFooterLine();
+  const chunks = [heroBlock, statsBlock, detailLines.join('\n')];
   if (foot) {
-    lines.push('', rule, '', foot);
+    chunks.push(foot);
   }
 
-  let body = lines.join('\n');
-  body = fitTweet(body, maxChars);
+  let body = chunks.filter(Boolean).join(gap).trim();
+  body = maxChars >= 2000 ? fitTweet(body, maxChars) : fitTweetWholeLines(body, maxChars);
 
   return body;
 }

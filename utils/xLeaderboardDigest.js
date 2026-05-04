@@ -23,11 +23,16 @@ const {
 /** Light horizontal rule (Box Drawings) — reads cleanly on X mobile. */
 const WEEKLY_RULE = '\u2500'.repeat(28);
 
+/**
+ * One-line print for X. No leading `$` on the ticker — X allows only **one** cashtag
+ * ($SYMBOL) per post; weekly / digest lists would otherwise exceed that and get 403.
+ */
 function formatCallOneLiner(call) {
   if (!call || !call.ticker) return null;
-  const t = String(call.ticker || call.tokenName || '').trim() || '??';
+  const raw = String(call.ticker || call.tokenName || '').trim().replace(/^\$+/u, '') || '??';
+  const t = raw.length > 18 ? `${raw.slice(0, 16)}…` : raw;
   const x = Number(call.x) || 0;
-  return `$${t} · ${x.toFixed(2)}×`;
+  return `${t.toUpperCase()} · ${x.toFixed(2)}×`;
 }
 
 function dashboardLinkLine() {

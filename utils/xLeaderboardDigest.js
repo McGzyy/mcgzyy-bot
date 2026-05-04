@@ -160,7 +160,6 @@ function buildWeeklyStatsSnapshotBody(snap) {
 
   const hero = [
     xBrandKicker(),
-    '',
     `◆ Weekly snapshot — ${range}`,
     '',
     'Rolled-up performance for qualifying prints the terminal tracked this week (completed Mon–Sun, UTC).'

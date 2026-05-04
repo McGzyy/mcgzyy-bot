@@ -2969,7 +2969,10 @@ if (lowerContent === '!scanner off') {
           const result = await createPost(text);
 
           if (result.success) {
-            await replyText(message, `✅ Posted weekly stats snapshot to X\nPost ID: ${result.id}`);
+            await replyText(
+              message,
+              `✅ Posted weekly stats snapshot to X\nPost ID: ${result.id}\nBody length: ${text.length} characters`
+            );
           } else {
             await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
           }

@@ -41,7 +41,7 @@ function dashboardLinkLine() {
 }
 
 function weeklySectionGap() {
-  return `\n\n${WEEKLY_RULE}\n\n`;
+  return `\n${WEEKLY_RULE}\n`;
 }
 
 /**

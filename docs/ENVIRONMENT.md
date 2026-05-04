@@ -202,6 +202,7 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_TWEET_MAX_CHARS`** | Default `280`. Long-form (e.g. `25000`) is honored up to **`X_TWEET_CHAR_HARD_CAP`** (default `25000`). Strip spaces; avoid wrapping the value in quotes in `.env` unless the whole value is quoted normally. |
 | **`X_TWEET_CHAR_HARD_CAP`** | Optional; default `25000`. Clamps `X_TWEET_MAX_CHARS` so copy builders stay within API limits. |
 | **`X_WEEKLY_STATS_MAX_CHARS`** | Optional. When set (e.g. `25000`), the **weekly stats snapshot** uses this budget even if `X_TWEET_MAX_CHARS` is missing on the bot host (prevents silent 280 truncation). |
+| **`X_WEEKLY_STATS_CHAR_FLOOR`** | Optional. Minimum character budget for the weekly snapshot (default **12000**, capped by `X_TWEET_CHAR_HARD_CAP`). Use if you want a higher floor than the default. |
 | **`X_POST_INCLUDE_GMGN`** | `1` / `true` — append GMGN link (uses more characters). |
 | **`X_AUTO_APPROVE_USER_CALLS`** | `1` / `true` — **user_call** rows skip `#mod-approvals` for X and go straight to `xApproved` (bot_call still needs mod approve). |
 | **`X_LEADERBOARD_DIGEST_ENABLED`** | `1` / `true` — enable scheduled digest tweets (off by default). |

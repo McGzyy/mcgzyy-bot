@@ -38,16 +38,31 @@ function resolveXTweetMaxChars() {
 /**
  * Weekly stats snapshot can use `X_WEEKLY_STATS_MAX_CHARS` so a missing global
  * `X_TWEET_MAX_CHARS` on the bot host does not silently fall back to 280.
+ *
+ * Also enforces a **floor** (default 12_000) so `fitTweet` never chops this post
+ * when ops env is wrong — long-form X still caps at `readXTweetCharHardCap()`.
+ * Override floor with `X_WEEKLY_STATS_CHAR_FLOOR` (500 … cap).
  */
 function resolveWeeklyStatsTweetMaxChars() {
   const cap = readXTweetCharHardCap();
+  let base;
   if (process.env.X_WEEKLY_STATS_MAX_CHARS != null && String(process.env.X_WEEKLY_STATS_MAX_CHARS).trim() !== '') {
     const dedicated = parseEnvTweetCharBudget('X_WEEKLY_STATS_MAX_CHARS', 0);
     if (dedicated >= 280) {
-      return Math.min(cap, dedicated);
+      base = Math.min(cap, dedicated);
+    } else {
+      base = resolveXTweetMaxChars();
     }
+  } else {
+    base = resolveXTweetMaxChars();
   }
-  return resolveXTweetMaxChars();
+
+  const floorParsed = parseEnvTweetCharBudget('X_WEEKLY_STATS_CHAR_FLOOR', 0);
+  const defaultFloor = 12000;
+  const floor =
+    floorParsed >= 500 && floorParsed <= cap ? floorParsed : Math.min(defaultFloor, cap);
+
+  return Math.min(cap, Math.max(base, floor));
 }
 
 

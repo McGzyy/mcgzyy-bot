@@ -43,6 +43,8 @@ const {
   buildWeeklyStatsSnapshotBody,
   postLeaderboardDigestToX
 } = require('./utils/xLeaderboardDigest');
+const { setXEngagementDiscordClient } = require('./utils/xEngagementScheduler');
+const { postWeeklyRunnerToX, postMonthlyTopCallerToX } = require('./utils/xEngagementPosts');
 const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
 const { publishApprovedCoinToX } = require('./utils/publishApprovedCoinToX');
 const {
@@ -485,6 +487,7 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
     `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (desk summary cards), **7d** (weekday chart), or **monthly** (30d trend chart) digest to X (owner only)\n` +
     `• \`!testxmilestone user\` / \`bot\` — Sample **User Calls** or **McGBot Calls** X milestone (+ chart when not a reply). Optional \`<sol_ca>\` and \`[mult]\`. \`!testxmilestone reply <post_id> user|bot [mult]\` — test **reply** (no chart)\n` +
+    `• \`!testweeklyrunner\` / \`!testtopcallermonth\` — Force **weekly runner** or **monthly top caller** X posts (owner only; monthly test skips Discord role)\n` +
     `• Scheduled daily digest is **on** when \`X_LEADERBOARD_DIGEST_ENABLED\` is on; set \`X_LEADERBOARD_DAILY_DIGEST_ENABLED=0\` to disable\n\n`;
 
   if (canSeeModHelp) {
@@ -2053,6 +2056,7 @@ console.log(
   }, 60 * 1000);
 
   try {
+    setXEngagementDiscordClient(client);
     startXLeaderboardDigestScheduler();
   } catch (e) {
     console.error('[XLeaderboardDigest] scheduler failed to start:', e?.message || e);
@@ -3064,6 +3068,52 @@ if (lowerContent === '!scanner off') {
           }
         } catch (e) {
           console.error('[!testxmilestone]', e);
+          await replyText(message, `❌ ${e instanceof Error ? e.message : String(e)}`);
+        }
+
+        return;
+      }
+
+      if (lowerContent === '!testweeklyrunner' || lowerContent === '!testtopcallermonth') {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        try {
+          if (lowerContent === '!testweeklyrunner') {
+            const result = await postWeeklyRunnerToX({ force: true });
+            if (result.skipped) {
+              await replyText(
+                message,
+                'ℹ️ Weekly runner skipped (no qualifying **user** `call_performance` rows for the prior UTC week, or Supabase not configured).'
+              );
+            } else if (result.success) {
+              await replyText(message, `✅ Posted **weekly runner** to X\nPost ID: ${result.id}`);
+            } else {
+              await replyText(message, `❌ ${JSON.stringify(result.error, null, 2)}`);
+            }
+          } else {
+            const result = await postMonthlyTopCallerToX(message.client, {
+              force: true,
+              skipDiscordRole: true,
+              skipSupabaseAward: true
+            });
+            if (result.skipped) {
+              await replyText(
+                message,
+                'ℹ️ Monthly top caller skipped (no **user** leaderboard rows for last completed UTC month, or Supabase not configured).'
+              );
+            } else if (result.success) {
+              await replyText(
+                message,
+                `✅ Posted **monthly top caller** to X (Discord Top Caller role **not** applied in test)\nPost ID: ${result.id}\nPeriod: ${result.periodKey || '—'}`
+              );
+            } else {
+              await replyText(message, `❌ ${JSON.stringify(result.error, null, 2)}`);
+            }
+          }
+        } catch (e) {
+          console.error('[!test*engagement]', e);
           await replyText(message, `❌ ${e instanceof Error ? e.message : String(e)}`);
         }
 

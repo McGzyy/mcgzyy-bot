@@ -182,7 +182,7 @@ After a successful verify, the bot adds **`HUMAN_VERIFIED_ROLE_ID`** and removes
 
 | Variable | Used in | Purpose |
 |----------|---------|---------|
-| **`BOT_OWNER_ID`** | `index.js`, `commands/basicCommands.js` | Discord user snowflake; gates `!testx`, `!testweeklysnapshot`, `!testdailydigest`, `!test7ddigest`, `!testmonthlydigest`, `!setminmc`, sanity `!setsanity*`, etc. If unset, owner checks fail closed where implemented. |
+| **`BOT_OWNER_ID`** | `index.js`, `commands/basicCommands.js` | Discord user snowflake; gates `!testx`, `!testweeklyrunner`, `!testtopcallermonth`, `!testweeklysnapshot`, `!testdailydigest`, `!test7ddigest`, `!testmonthlydigest`, `!setminmc`, sanity `!setsanity*`, etc. If unset, owner checks fail closed where implemented. |
 
 ### 7.3 Required for X (Twitter) posting
 
@@ -218,6 +218,24 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_WEEKLY_SNAPSHOT_PRINT_TOP_N`** | Optional; default **`6`** (max `12`). Top member-call / McGBot-call lines per list. |
 | **`X_BOT_USERNAME`** | `utils/xPoster.js` | X handle **without** `@` (default `McGBot`). Used for API/DM copy (e.g. `getXBotUsernameForCopy`); terminal-style post footers say **“link in bio”** without @-mentioning the bot. |
 | **`DASHBOARD_PUBLIC_URL`** | Dashboard / links elsewhere | Optional; not appended to digest/snapshot tweets (footer points to the bot profile instead). `NEXT_PUBLIC_APP_URL` / `MCBOT_DASHBOARD_URL` are fallbacks where the codebase still reads a public app URL. |
+
+#### 7.3.1 X engagement — weekly runner & monthly Top Caller
+
+Scheduled from the same digest tick (`utils/xLeaderboardDigest.js` → `utils/xEngagementScheduler.js`). Uses **`SUPABASE_URL`** + **`SUPABASE_SERVICE_ROLE_KEY`** (repo root) to read `call_performance` for leaderboards; without them, posts are skipped. X posting still needs the four credentials in the table above (`utils/xPoster.js`).
+
+| Variable | Purpose |
+|----------|---------|
+| **`X_WEEKLY_RUNNER_ENABLED`** | `1` / `true` / `yes` — post a **weekly runner** X card (best single **user** call by ATH multiple in the **prior UTC Mon–Sun** window). |
+| **`X_WEEKLY_RUNNER_UTC_WEEKDAY`** | `0` (Sun) … `6` (Sat); default **`2`** (Tuesday). |
+| **`X_WEEKLY_RUNNER_UTC_HOUR`** | `0`–`23`; defaults to **`X_LEADERBOARD_DIGEST_UTC_HOUR`** or **`16`**. |
+| **`X_MONTHLY_TOP_CALLER_ENABLED`** | `1` / `true` / `yes` — on the **1st** of each UTC month at the configured hour, post the **previous calendar month** #1 caller (avg ATH ×), card PNG, profile link, trophy lines, then award **`user_badges` / `monthly_top_caller_awards`** and sync **`users.is_top_caller`**. |
+| **`X_MONTHLY_TOP_CALLER_UTC_HOUR`** | `0`–`23`; defaults to digest hour / **`16`**. |
+| **`DISCORD_GUILD_ID`** | Guild where the **Top Caller** role is applied (same as other flows that scope to one server). |
+| **`DISCORD_TOP_CALLER_ROLE_ID`** | Snowflake of the **Top Caller** role (default **`1489081922666758264`** in `utils/discordTopCallerRole.js`). Bot needs **Manage Roles** and its role **above** this role in the hierarchy. |
+
+For the monthly post **Profile** link, set one of **`DASHBOARD_PUBLIC_URL`**, **`MCBOT_DASHBOARD_URL`**, or **`NEXT_PUBLIC_APP_URL`** (see the row in the table above); `utils/xEngagementPosts.js` uses the first non-empty value as the dashboard base URL.
+
+**Owner tests (`index.js`, bot owner only):** `!testweeklyrunner` and `!testtopcallermonth` force the respective X posts. The monthly test **does not** assign the Discord role or write Supabase awards (`skipDiscordRole` / `skipSupabaseAward`).
 
 ### 7.4 Optional — Supabase (Discord bot, repo root)
 

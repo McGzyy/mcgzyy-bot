@@ -7,6 +7,7 @@ const {
 } = require('./digestPerformanceChart');
 const { buildWeeklySnapshotModulesPng } = require('./weeklySnapshotPanel');
 const { buildDailySnapshotModulesPng } = require('./dailyDigestPanel');
+const { tickXEngagementPosts } = require('./xEngagementScheduler');
 const {
   getCallerLeaderboardInTimeframe,
   getBestCallInTimeframe,
@@ -448,6 +449,7 @@ function startXLeaderboardDigestScheduler() {
   setInterval(() => {
     void tickXLeaderboardDigest();
     void tickWeeklyStatsSnapshot();
+    void tickXEngagementPosts();
   }, 5 * 60 * 1000);
 }
 

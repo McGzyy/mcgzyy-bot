@@ -71,42 +71,49 @@ function buildLeaderboardDigestBody(p) {
   const rows = getCallerLeaderboardInTimeframe(p.days, topN);
   const bestHuman = getBestCallInTimeframe(p.days);
   const bestBot = getBestBotCallInTimeframe(p.days);
+  const gap = weeklySectionGap();
+  const footer = xTerminalFooterLine();
 
-  const lines = [
-    xBrandKicker(),
-    `◆ ${p.windowLabel}`,
-    '────────',
-    'Caller desk (avg ×)'
-  ];
+  const head = [xBrandKicker(), `🚀 ${p.windowLabel}`].join('\n');
 
+  const deskLines = [`💎 Caller leaderboard (top ${topN} by avg ATH ×)`, ''];
   if (rows.length) {
     for (let i = 0; i < rows.length; i += 1) {
       const r = rows[i];
-      lines.push(
-        `${i + 1}. ${r.username} · ${r.avgX.toFixed(2)}× · ${r.totalCalls} calls`
+      deskLines.push(
+        `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
       );
     }
   } else {
-    lines.push('— quiet window —');
+    deskLines.push('(quiet window)');
   }
 
-  lines.push('────────', 'Highlights');
-
+  const hiLines = ['⭐️ Highlights', ''];
+  let anyHi = false;
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
-    if (h) lines.push(`Best caller print · ${h}`);
+    if (h) {
+      hiLines.push(`▪ Best member call — ${h}`);
+      anyHi = true;
+    }
   }
   if (bestBot) {
     const b = formatCallOneLiner(bestBot);
-    if (b) lines.push(`Best auto call · ${b}`);
+    if (b) {
+      hiLines.push(`▪ Best McGBot call — ${b}`);
+      anyHi = true;
+    }
+  }
+  if (!anyHi) {
+    hiLines.push('(none)');
   }
 
-  const dash = dashboardLinkLine();
-  if (dash) {
-    lines.push('────────', dash);
+  const chunks = [head, deskLines.join('\n'), hiLines.join('\n')];
+  if (footer) {
+    chunks.push(footer);
   }
-
-  return fitTweet(lines.join('\n'), maxChars);
+  const raw = chunks.filter(Boolean).join(gap).trim();
+  return fitTweet(raw, maxChars);
 }
 
 const UTC_MO = [

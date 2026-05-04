@@ -21,11 +21,8 @@ const { enqueueAlert } = require('./alertQueue');
 const { createPost } = require('./xPoster');
 const { buildXPostText } = require('./buildXPostText');
 const { AttachmentBuilder } = require('discord.js');
-const {
-  buildOhlcvCandlestickBuffer,
-  buildOhlcvCandlestickBufferForTrackedCall,
-  resolveOhlcvPairAddress
-} = require('./ohlcvCandlestickBuffer');
+const { buildOhlcvCandlestickBuffer, resolveOhlcvPairAddress } = require('./ohlcvCandlestickBuffer');
+const { buildMilestoneHeroPng } = require('./milestoneHeroImage');
 const { getCandlestickOverlayProps } = require('./candlestickOverlayFromTracked');
 const { persistChartMarkerEvents } = require('./chartEventPersistence');
 const { buildOhlcvTimeframeRows } = require('./ohlcvChartControls');
@@ -238,10 +235,16 @@ async function maybePublishApprovedMilestoneToX(trackedCall, latestScan = null) 
 
     let chartBuf = null;
     if (!hasOriginal) {
-      chartBuf = await buildOhlcvCandlestickBufferForTrackedCall(
-        trackedCall,
-        latestScan
-      );
+      try {
+        chartBuf = await buildMilestoneHeroPng({
+          milestoneX,
+          seedKey: trackedCall.contractAddress || trackedCall.ticker || '',
+          callSourceType: trackedCall.callSourceType,
+          ticker: trackedCall.ticker
+        });
+      } catch (_e) {
+        chartBuf = null;
+      }
     }
 
     const result = await createPost(

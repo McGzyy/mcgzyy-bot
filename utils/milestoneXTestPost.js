@@ -2,7 +2,7 @@
 
 const { buildXPostText } = require('./buildXPostText');
 const { createPost, normalizePngUploadBuffer } = require('./xPoster');
-const { buildOhlcvCandlestickBufferForTrackedCall } = require('./ohlcvCandlestickBuffer');
+const { buildMilestoneHeroPng } = require('./milestoneHeroImage');
 const { getHighestEligibleApprovalMilestone } = require('./approvalMilestoneService');
 
 const DEFAULT_WRAP_SOL = 'So11111111111111111111111111111111111111112';
@@ -76,7 +76,12 @@ async function postTestMilestoneToX(p) {
   let chartBuf = null;
   if (!isReply) {
     try {
-      const raw = await buildOhlcvCandlestickBufferForTrackedCall(tracked, null);
+      const raw = await buildMilestoneHeroPng({
+        milestoneX: mx,
+        seedKey: ca,
+        callSourceType: tracked.callSourceType,
+        ticker: tracked.ticker
+      });
       chartBuf = normalizePngUploadBuffer(raw);
     } catch (_e) {
       chartBuf = null;

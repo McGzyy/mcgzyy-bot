@@ -1,7 +1,7 @@
 'use strict';
 
 const { createPost } = require('./xPoster');
-const { buildOhlcvCandlestickBufferForTrackedCall } = require('./ohlcvCandlestickBuffer');
+const { buildMilestoneHeroPng } = require('./milestoneHeroImage');
 const {
   getHighestEligibleApprovalMilestone,
   computeApprovalAthX
@@ -42,7 +42,16 @@ async function publishApprovedCoinToX(contractAddress) {
 
   let chartBuf = null;
   if (!hasOriginal) {
-    chartBuf = await buildOhlcvCandlestickBufferForTrackedCall(trackedCall, null);
+    try {
+      chartBuf = await buildMilestoneHeroPng({
+        milestoneX,
+        seedKey: trackedCall.contractAddress || trackedCall.ticker || '',
+        callSourceType: trackedCall.callSourceType,
+        ticker: trackedCall.ticker
+      });
+    } catch (_e) {
+      chartBuf = null;
+    }
   }
 
   const result = await createPost(

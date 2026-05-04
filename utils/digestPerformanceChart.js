@@ -146,7 +146,8 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
     }
   };
 
-  return chartCanvas.renderToBuffer(configuration, 'image/png');
+  const out = await chartCanvas.renderToBuffer(configuration, 'image/png');
+  return Buffer.isBuffer(out) ? out : Buffer.from(out);
 }
 
 /**
@@ -230,7 +231,8 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
     }
   };
 
-  return chartCanvas.renderToBuffer(configuration, 'image/png');
+  const out = await chartCanvas.renderToBuffer(configuration, 'image/png');
+  return Buffer.isBuffer(out) ? out : Buffer.from(out);
 }
 
 module.exports = {

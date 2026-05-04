@@ -209,7 +209,12 @@ function normalizePngUploadBuffer(raw) {
   if (raw == null) return null;
   let buf;
   try {
-    buf = Buffer.isBuffer(raw) ? raw : Buffer.from(/** @type {Uint8Array} */ (raw));
+    // Always copy when `raw` is already a Buffer: chart/canvas code may return
+    // views into pooled native memory; reusing the same reference across async
+    // upload can corrupt bytes before the request is sent.
+    buf = Buffer.isBuffer(raw)
+      ? Buffer.from(raw)
+      : Buffer.from(/** @type {Uint8Array} */ (raw));
   } catch {
     return null;
   }
@@ -230,6 +235,8 @@ async function uploadMediaPng(buffer) {
 
   const params = new URLSearchParams();
   params.set('media_data', buf.toString('base64'));
+  /** Helps X attach images to v2 tweets; see X media upload docs. */
+  params.set('media_category', 'tweet_image');
 
   try {
     const response = await axios.post(uploadUrl, params.toString(), {
@@ -240,8 +247,17 @@ async function uploadMediaPng(buffer) {
     });
 
     const d = response?.data;
-    const id = d?.media_id_string ?? d?.media_id;
-    return id != null && id !== '' ? String(id) : null;
+    if (d?.errors?.length) {
+      console.error('[XPoster] Media upload response contained errors:', JSON.stringify(d.errors));
+      return null;
+    }
+    // Never use numeric `media_id` — large snowflakes lose precision in JS; v2 needs exact string id.
+    const id = d?.media_id_string;
+    if (id != null && id !== '') {
+      return String(id);
+    }
+    console.error('[XPoster] Media upload: missing media_id_string in response keys=', d ? Object.keys(d) : []);
+    return null;
   } catch (error) {
     console.error('[XPoster] Media upload failed:', error?.response?.data || error.message);
     return null;
@@ -301,8 +317,12 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null, options
       }
     });
 
-    const postId = response?.data?.data?.id || null;
-    const postText = response?.data?.data?.text || null;
+    const payload = response?.data?.data || {};
+    const postId = payload.id || null;
+    const postText = payload.text || null;
+    if (body.media?.media_ids?.length) {
+      console.log('[XPoster] Tweet created with media_ids=', body.media.media_ids, 'id=', postId);
+    }
 
     return {
       success: true,

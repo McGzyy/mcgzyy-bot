@@ -20,7 +20,8 @@ const {
   resolveWeeklyStatsTweetMaxChars
 } = require('./buildXPostText');
 
-const SECTION_RULE = '━━━━━━━━━━━━━━━━━━━━';
+/** Light horizontal rule (Box Drawings) — reads cleanly on X mobile. */
+const WEEKLY_RULE = '\u2500'.repeat(28);
 
 function formatCallOneLiner(call) {
   if (!call || !call.ticker) return null;
@@ -120,112 +121,134 @@ function formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive) {
 }
 
 /**
- * @param {string[]} lines
- * @param {string} title
- * @param {{ count: number, medianX: number|null, pctGe2: number|null, pctGe3: number|null }} s
- */
-function appendWeeklyCohortSection(lines, title, s) {
-  lines.push(title);
-  if (!s.count) {
-    lines.push('  (no qualifying prints)');
-    return;
-  }
-  const med = s.medianX == null ? '—' : `${Number(s.medianX).toFixed(2)}×`;
-  const p2 = s.pctGe2 == null ? '—' : `${Number(s.pctGe2).toFixed(1)}%`;
-  const p3 = s.pctGe3 == null ? '—' : `${Number(s.pctGe3).toFixed(1)}%`;
-  lines.push(`  Calls: ${s.count}`);
-  lines.push(`  Median ATH ×: ${med}`);
-  lines.push(`  Share ≥2×: ${p2}  ·  ≥3×: ${p3}`);
-}
-
-/**
  * Stats + leaderboards for the previous completed UTC week (aligned with snapshot aggregates).
- * Resolves character limit at build time so `X_TWEET_MAX_CHARS` is never stale from module load.
+ * Plain-text layout tuned for X long-form and mobile "Show more".
  * @param {object} snap from getWeeklyUtcTerminalSnapshot()
  */
 function buildWeeklyStatsSnapshotBody(snap) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
+  const gap = weeklySectionGap();
   const { startInclusive, endExclusive } = snap;
   const range = formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive);
   const callerTopN = Math.min(25, Math.max(5, Number(process.env.X_WEEKLY_SNAPSHOT_CALLER_TOP_N) || 15));
   const printTopN = Math.min(25, Math.max(5, Number(process.env.X_WEEKLY_SNAPSHOT_PRINT_TOP_N) || 12));
 
-  const lines = [
+  const hero = [
     xBrandKicker(),
-    `◆ Weekly terminal snapshot · ${range}`,
-    SECTION_RULE,
-    'SUMMARY',
-    `  User-attributed: ${snap.user.count}  ·  Auto-scanned: ${snap.bot.count}  ·  Combined: ${snap.totalPrints}`,
-    `  Active distinct callers: ${snap.uniqueCallers}`
-  ];
+    '',
+    `◆ Weekly snapshot — ${range}`,
+    '',
+    'Rolled-up performance for qualifying prints the terminal tracked this week (completed Mon–Sun, UTC).'
+  ].join('\n');
+
+  const sections = [hero];
 
   if (!snap.totalPrints) {
-    lines.push(SECTION_RULE, 'No qualifying prints in this UTC week.');
+    sections.push('No qualifying prints landed in this UTC week window.');
   } else {
-    lines.push(SECTION_RULE);
-    appendWeeklyCohortSection(lines, 'USER DESK — ATH× vs entry', snap.user);
-    lines.push(SECTION_RULE);
-    appendWeeklyCohortSection(lines, 'AUTO DESK — ATH× vs entry', snap.bot);
-    lines.push(SECTION_RULE);
+    sections.push(
+      [
+        'Summary',
+        '',
+        `• User-attributed prints — ${snap.user.count}`,
+        `• Auto-scanned prints — ${snap.bot.count}`,
+        `• Combined — ${snap.totalPrints}`,
+        `• Active callers (distinct) — ${snap.uniqueCallers}`
+      ].join('\n')
+    );
+
+    sections.push(
+      weeklyCohortBlock(
+        'User desk',
+        'Community calls. ATH × compares peak market cap to the market cap at the first tracked print (entry).',
+        snap.user
+      )
+    );
+
+    sections.push(
+      weeklyCohortBlock(
+        'Auto desk',
+        'Scanner auto-calls. Same ATH × definition as user desk.',
+        snap.bot
+      )
+    );
 
     const desk = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, callerTopN);
-    lines.push(`CALLER DESK — avg ATH× (top ${callerTopN})`);
+    const deskLines = [
+      'Caller leaderboard',
+      `Average ATH × across prints this week — top ${callerTopN} by average.`,
+      ''
+    ];
     if (desk.length) {
       for (let i = 0; i < desk.length; i += 1) {
         const r = desk[i];
-        lines.push(
-          `  ${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} print${r.totalCalls === 1 ? '' : 's'}`
+        deskLines.push(
+          `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} print${r.totalCalls === 1 ? '' : 's'}`
         );
       }
     } else {
-      lines.push('  (no qualifying rows)');
+      deskLines.push('(no qualifying rows)');
     }
+    sections.push(deskLines.join('\n'));
 
-    lines.push(SECTION_RULE);
     const topUser = getTopUserCallsInUtcWeekBounds(startInclusive, endExclusive, printTopN);
-    lines.push(`TOP USER PRINTS (by ATH×, top ${printTopN})`);
+    const uLines = [
+      'Standout user prints',
+      `Highest ATH × vs entry — top ${printTopN} this week.`,
+      ''
+    ];
     if (topUser.length) {
       for (let i = 0; i < topUser.length; i += 1) {
-        const row = topUser[i];
-        const one = formatCallOneLiner(row);
-        lines.push(`  ${i + 1}. ${one || '—'}`);
+        const one = formatCallOneLiner(topUser[i]);
+        uLines.push(`${String(i + 1).padStart(2, ' ')}. ${one || '—'}`);
       }
     } else {
-      lines.push('  (none)');
+      uLines.push('(none)');
     }
+    sections.push(uLines.join('\n'));
 
-    lines.push(SECTION_RULE);
     const topBot = getTopBotCallsInUtcWeekBounds(startInclusive, endExclusive, printTopN);
-    lines.push(`TOP AUTO PRINTS (by ATH×, top ${printTopN})`);
+    const bLines = [
+      'Standout auto prints',
+      `Highest ATH × vs entry — top ${printTopN} this week.`,
+      ''
+    ];
     if (topBot.length) {
       for (let i = 0; i < topBot.length; i += 1) {
-        const row = topBot[i];
-        const one = formatCallOneLiner(row);
-        lines.push(`  ${i + 1}. ${one || '—'}`);
+        const one = formatCallOneLiner(topBot[i]);
+        bLines.push(`${i + 1}. ${one || '—'}`);
       }
     } else {
-      lines.push('  (none)');
+      bLines.push('(none)');
     }
+    sections.push(bLines.join('\n'));
 
-    lines.push(SECTION_RULE);
     const bestH = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
     const bestB = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
-    lines.push('WEEK HIGHS');
-    lines.push(
-      `  Best user print: ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}  ·  Best auto: ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
+    sections.push(
+      [
+        'Best of the week',
+        '',
+        `• Best user print — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
+        `• Best auto print — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
+      ].join('\n')
     );
-    lines.push(
-      SECTION_RULE,
-      'ATH× = peak MC ÷ entry MC at first print. User = community calls; Auto = scanner. Same filters as dashboard leaderboards. Not financial advice.'
+
+    sections.push(
+      [
+        'Notes',
+        '',
+        'Figures use the same validity filters as the in-app leaderboards (invalid extremes and excluded/denied flows omitted). Not financial advice.'
+      ].join('\n')
     );
   }
 
   const dash = dashboardLinkLine();
   if (dash) {
-    lines.push(SECTION_RULE, dash);
+    sections.push(dash);
   }
 
-  const raw = lines.join('\n').trimEnd();
+  const raw = sections.filter(Boolean).join(gap).trim();
   if (raw.length <= maxChars) {
     return raw;
   }

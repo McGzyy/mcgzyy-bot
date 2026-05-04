@@ -19,7 +19,7 @@ function xTerminalSectionGap() {
 }
 
 function xTerminalFooterLine() {
-  return '🟢 Dashboard + Live Calls - Link in Bio';
+  return '🔹 Dashboard + Live Calls - Link in Bio';
 }
 
 /** Hard ceiling for long-form X posts (raise via env if APIs change). */

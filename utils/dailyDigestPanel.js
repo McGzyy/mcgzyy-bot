@@ -4,15 +4,17 @@ const { createCanvas } = require('canvas');
 const { getUtcYesterdayAndPriorDeskAvgs } = require('./callerStatsService');
 
 const W = 960;
-const H = 420;
+const H = 460;
 const BG = '#000000';
 const PANEL = '#0a0a0a';
 const BORDER = 'rgba(255, 255, 255, 0.12)';
 const TEXT = '#fafafa';
 const MUTED = 'rgba(161, 161, 170, 0.95)';
-const COBALT = '#1a7cff';
 const GREEN = '#22c55e';
+const RED = '#ef4444';
 const RADIUS = 18;
+/** Member desk hero: at or above this avg ATH × → green, else red. */
+const MEMBER_AVG_GOOD_AT = 2;
 
 /**
  * @param {import('canvas').CanvasRenderingContext2D} ctx
@@ -71,6 +73,24 @@ function fmtMemberBotSpread(mX, bX) {
 }
 
 /**
+ * Pick largest font size so text fits maxWidth (bold weight).
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {string} text
+ * @param {number} maxWidth
+ * @param {number} maxSize
+ * @param {number} minSize
+ */
+function fitFontSize(ctx, text, maxWidth, maxSize, minSize) {
+  for (let s = maxSize; s >= minSize; s -= 2) {
+    ctx.font = `800 ${s}px system-ui, "Segoe UI", sans-serif`;
+    if (ctx.measureText(text).width <= maxWidth) {
+      return s;
+    }
+  }
+  return minSize;
+}
+
+/**
  * Two rounded cards: (1) member desk avg for last completed UTC day + day-over-day change,
  * (2) member vs McGBot avg spread for that day.
  * @param {Date} [anchor]
@@ -84,8 +104,8 @@ async function buildDailySnapshotModulesPng(anchor = new Date()) {
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
 
-  const pad = 24;
-  const gap = 20;
+  const pad = 22;
+  const gap = 18;
   const panelW = (W - pad * 2 - gap) / 2;
   const panelH = H - pad * 2;
   const y0 = pad;
@@ -98,8 +118,11 @@ async function buildDailySnapshotModulesPng(anchor = new Date()) {
 
   const dod = fmtDayOverDay(mP, mY);
   const spread = fmtMemberBotSpread(mY, bY);
+
+  const mOk = mY != null && Number.isFinite(Number(mY));
+  const memberHeroColor = !mOk ? MUTED : Number(mY) >= MEMBER_AVG_GOOD_AT ? GREEN : RED;
   const spreadColor =
-    spread.memberAhead == null ? MUTED : spread.memberAhead ? COBALT : GREEN;
+    spread.memberAhead == null ? MUTED : spread.memberAhead ? GREEN : RED;
 
   /**
    * @param {number} px
@@ -117,48 +140,58 @@ async function buildDailySnapshotModulesPng(anchor = new Date()) {
   drawCard(xL);
   drawCard(xR);
 
-  /* Left: member desk avg + change */
   const cxL = xL + panelW / 2;
-  let y = y0 + 36;
+  const cxR = xR + panelW / 2;
+  const maxTextW = panelW - 28;
+  const headerTop = y0 + 14;
+
+  /* Left: compact header, dominant hero, sub */
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   ctx.fillStyle = MUTED;
-  ctx.font = '600 11px system-ui, Segoe UI, sans-serif';
-  ctx.fillText('Member desk', cxL, y);
-  y += 18;
-  ctx.font = '500 11px system-ui, Segoe UI, sans-serif';
-  ctx.fillText(yesterdayLabel, cxL, y);
-  y += 36;
+  ctx.font = '600 10px system-ui, Segoe UI, sans-serif';
+  ctx.fillText('Member desk', cxL, headerTop);
+  ctx.font = '500 10px system-ui, Segoe UI, sans-serif';
+  ctx.fillText(yesterdayLabel, cxL, headerTop + 14);
 
-  ctx.font = '800 44px system-ui, Segoe UI, sans-serif';
-  ctx.fillStyle = COBALT;
   const hero =
-    mY != null && Number.isFinite(Number(mY))
-      ? `${Number(mY).toFixed(2)}× avg`
-      : '—';
-  ctx.fillText(hero, cxL, y);
-  y += 56;
+    mOk ? `${Number(mY).toFixed(2)}× avg` : '—';
+  const heroMaxByHeight = Math.floor((panelH - 72) * 0.52);
+  const heroSize = fitFontSize(ctx, hero, maxTextW, Math.min(108, heroMaxByHeight), 40);
+  ctx.font = `800 ${heroSize}px system-ui, Segoe UI, sans-serif`;
+  const heroMetrics = ctx.measureText(hero);
+  const heroH = heroMetrics.actualBoundingBoxAscent + heroMetrics.actualBoundingBoxDescent || heroSize * 1.05;
 
-  ctx.font = '600 15px system-ui, Segoe UI, sans-serif';
+  const blockTop = headerTop + 34;
+  const blockBottom = y0 + panelH - 22;
+  const heroCenterY = blockTop + (blockBottom - blockTop) / 2;
+  ctx.fillStyle = memberHeroColor;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(hero, cxL, heroCenterY - heroH * 0.05);
+
+  ctx.textBaseline = 'top';
+  ctx.font = '600 14px system-ui, Segoe UI, sans-serif';
   ctx.fillStyle = dod === '—' ? MUTED : TEXT;
-  ctx.fillText(dod, cxL, y);
+  ctx.fillText(dod, cxL, blockBottom - 20);
 
   /* Right: member vs bot spread */
-  const cxR = xR + panelW / 2;
-  y = y0 + 36;
   ctx.fillStyle = MUTED;
-  ctx.font = '600 11px system-ui, Segoe UI, sans-serif';
-  ctx.fillText('Member vs McGBot', cxR, y);
-  y += 18;
-  ctx.font = '500 11px system-ui, Segoe UI, sans-serif';
-  ctx.fillText('Avg ATH × spread · same day', cxR, y);
-  y += 40;
+  ctx.font = '600 10px system-ui, Segoe UI, sans-serif';
+  ctx.fillText('Member vs McGBot', cxR, headerTop);
+  ctx.font = '500 10px system-ui, Segoe UI, sans-serif';
+  ctx.fillText('Avg ATH × spread · same day', cxR, headerTop + 14);
 
-  ctx.font = '800 44px system-ui, Segoe UI, sans-serif';
+  const spreadMaxByHeight = Math.floor((panelH - 72) * 0.52);
+  const spreadSize = fitFontSize(ctx, spread.line, maxTextW, Math.min(108, spreadMaxByHeight), 40);
+  ctx.font = `800 ${spreadSize}px system-ui, Segoe UI, sans-serif`;
+  const sm = ctx.measureText(spread.line);
+  const spreadH = sm.actualBoundingBoxAscent + sm.actualBoundingBoxDescent || spreadSize * 1.05;
+
   ctx.fillStyle = spreadColor;
-  ctx.fillText(spread.line, cxR, y);
-  y += 52;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(spread.line, cxR, heroCenterY - spreadH * 0.05);
 
+  ctx.textBaseline = 'top';
   ctx.font = '500 12px system-ui, Segoe UI, sans-serif';
   ctx.fillStyle = MUTED;
   const sub =
@@ -167,7 +200,7 @@ async function buildDailySnapshotModulesPng(anchor = new Date()) {
       : spread.memberAhead
         ? 'Members ahead of bot for the day'
         : 'Bot ahead of members for the day';
-  ctx.fillText(sub, cxR, y);
+  ctx.fillText(sub, cxR, blockBottom - 20);
 
   return canvas.toBuffer('image/png');
 }

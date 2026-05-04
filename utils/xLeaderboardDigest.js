@@ -97,7 +97,7 @@ function buildLeaderboardDigestBody(p) {
     deskLines.push('(quiet window)');
   }
 
-  const hiLines = ['⭐️ Highlights', ''];
+  const hiLines = ['🔥 Highlights', ''];
   let anyHi = false;
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
@@ -240,7 +240,7 @@ function buildWeeklyStatsSnapshotBody(snap) {
     const bestB = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
     sections.push(
       [
-        '⭐️ Best of the week',
+        '🔥 Best of the week',
         '',
         `${BUL}Best member call — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
         `${BUL}Best McGBot call — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`

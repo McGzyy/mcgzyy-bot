@@ -9,9 +9,19 @@ const {
 
 const WIDTH = 920;
 const HEIGHT = 480;
-const BG = '#0d1117';
-const TICK = 'rgba(148, 163, 184, 0.85)';
-const GRID = 'rgba(148, 163, 184, 0.1)';
+/** Pure black canvas — matches X / terminal hero look. */
+const BG = '#000000';
+/** Readable on black (zinc-200-ish). */
+const TICK = 'rgba(228, 228, 231, 0.78)';
+const GRID = 'rgba(255, 255, 255, 0.06)';
+const TITLE = '#fafafa';
+/** Member series — cobalt blue (high contrast on black). */
+const LINE_MEMBER = '#1a7cff';
+const FILL_MEMBER = 'rgba(26, 124, 255, 0.14)';
+/** McGBot series — same green as dashboard `--accent` (globals.css). */
+const LINE_BOT = '#22c55e';
+const FILL_BOT = 'rgba(34, 197, 94, 0.12)';
+const POINT_RING = 'rgba(255, 255, 255, 0.35)';
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -88,24 +98,30 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
         {
           label: 'Member calls',
           data: toPts(memberAvg),
-          borderColor: '#60a5fa',
-          backgroundColor: 'rgba(96, 165, 250, 0.08)',
-          borderWidth: 2.5,
-          tension: 0.25,
+          borderColor: LINE_MEMBER,
+          backgroundColor: FILL_MEMBER,
+          borderWidth: 3,
+          tension: 0.35,
           spanGaps: false,
-          pointRadius: 3,
-          pointHoverRadius: 4
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: LINE_MEMBER,
+          pointBorderColor: POINT_RING,
+          pointBorderWidth: 1.5
         },
         {
           label: 'McGBot calls',
           data: toPts(botAvg),
-          borderColor: '#34d399',
-          backgroundColor: 'rgba(52, 211, 153, 0.08)',
-          borderWidth: 2.5,
-          tension: 0.25,
+          borderColor: LINE_BOT,
+          backgroundColor: FILL_BOT,
+          borderWidth: 3,
+          tension: 0.35,
           spanGaps: false,
-          pointRadius: 3,
-          pointHoverRadius: 4
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          pointBackgroundColor: LINE_BOT,
+          pointBorderColor: POINT_RING,
+          pointBorderWidth: 1.5
         }
       ]
     },
@@ -129,20 +145,22 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
       scales: {
         x: {
           grid: { color: GRID, drawBorder: false },
-          ticks: { color: TICK, font: { size: 11 } }
+          ticks: { color: TICK, font: { size: 11, weight: 500 }, padding: 6 },
+          border: { display: false }
         },
         y: {
           title: {
             display: true,
             text: 'Avg ATH ×',
             color: TICK,
-            font: { size: 11 }
+            font: { size: 11, weight: 600 }
           },
           grid: { color: GRID, drawBorder: false },
-          ticks: { color: TICK, font: { size: 11 } }
+          ticks: { color: TICK, font: { size: 11, weight: 500 }, padding: 6 },
+          border: { display: false }
         }
       },
-      layout: { padding: { top: 4, right: 14, bottom: 8, left: 10 } }
+      layout: { padding: { top: 6, right: 16, bottom: 10, left: 12 } }
     }
   };
 
@@ -173,24 +191,30 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
         {
           label: 'Member calls',
           data: toPts(memberAvg),
-          borderColor: '#60a5fa',
-          backgroundColor: 'rgba(96, 165, 250, 0.08)',
-          borderWidth: 2.5,
-          tension: 0.2,
+          borderColor: LINE_MEMBER,
+          backgroundColor: FILL_MEMBER,
+          borderWidth: 3,
+          tension: 0.3,
           spanGaps: false,
-          pointRadius: 2.5,
-          pointHoverRadius: 4
+          pointRadius: 3.5,
+          pointHoverRadius: 5,
+          pointBackgroundColor: LINE_MEMBER,
+          pointBorderColor: POINT_RING,
+          pointBorderWidth: 1.5
         },
         {
           label: 'McGBot calls',
           data: toPts(botAvg),
-          borderColor: '#34d399',
-          backgroundColor: 'rgba(52, 211, 153, 0.08)',
-          borderWidth: 2.5,
-          tension: 0.2,
+          borderColor: LINE_BOT,
+          backgroundColor: FILL_BOT,
+          borderWidth: 3,
+          tension: 0.3,
           spanGaps: false,
-          pointRadius: 2.5,
-          pointHoverRadius: 4
+          pointRadius: 3.5,
+          pointHoverRadius: 5,
+          pointBackgroundColor: LINE_BOT,
+          pointBorderColor: POINT_RING,
+          pointBorderWidth: 1.5
         }
       ]
     },
@@ -201,33 +225,42 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
         title: {
           display: true,
           text: `Avg ATH × by month (UTC) · ${y}`,
-          color: '#e2e8f0',
-          font: { size: 13, weight: 600 },
-          padding: { top: 8, bottom: 10 }
+          color: TITLE,
+          font: { size: 14, weight: 700 },
+          padding: { top: 10, bottom: 12 }
         },
         legend: {
           display: true,
           position: 'bottom',
-          labels: { color: TICK, boxWidth: 14, padding: 16, font: { size: 11 } }
+          labels: {
+            color: TICK,
+            boxWidth: 18,
+            padding: 18,
+            font: { size: 12, weight: 600 },
+            usePointStyle: true,
+            pointStyle: 'rectRounded'
+          }
         }
       },
       scales: {
         x: {
           grid: { color: GRID, drawBorder: false },
-          ticks: { color: TICK, font: { size: 10 }, maxRotation: 0 }
+          ticks: { color: TICK, font: { size: 10, weight: 500 }, maxRotation: 0, padding: 6 },
+          border: { display: false }
         },
         y: {
           title: {
             display: true,
             text: 'Avg ATH ×',
             color: TICK,
-            font: { size: 11 }
+            font: { size: 11, weight: 600 }
           },
           grid: { color: GRID, drawBorder: false },
-          ticks: { color: TICK, font: { size: 11 } }
+          ticks: { color: TICK, font: { size: 11, weight: 500 }, padding: 6 },
+          border: { display: false }
         }
       },
-      layout: { padding: { top: 4, right: 14, bottom: 8, left: 10 } }
+      layout: { padding: { top: 6, right: 16, bottom: 10, left: 12 } }
     }
   };
 

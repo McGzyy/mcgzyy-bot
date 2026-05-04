@@ -252,7 +252,7 @@ async function buildXPostText(trackedCall, opts = {}) {
     milestoneX > 0
       ? isReply
         ? `🔥 ${milestoneX}× · milestone`
-        : `🔥 ${milestoneX}× · first call`
+        : `🔥 ${milestoneX}× · since first call`
       : '📡 Live call';
 
   const channelKicker =

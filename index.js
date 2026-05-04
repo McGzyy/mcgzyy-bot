@@ -36,7 +36,10 @@ const {
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
 const { createPost, getXBotUsernameForCopy } = require('./utils/xPoster');
 const { fitTweet, xBrandKicker } = require('./utils/buildXPostText');
-const { startXLeaderboardDigestScheduler } = require('./utils/xLeaderboardDigest');
+const {
+  startXLeaderboardDigestScheduler,
+  buildWeeklyStatsSnapshotBody
+} = require('./utils/xLeaderboardDigest');
 const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
 const { publishApprovedCoinToX } = require('./utils/publishApprovedCoinToX');
 const {
@@ -104,7 +107,8 @@ const {
   getCallerLeaderboard,
   getTopCallerInTimeframe,
   getBestCallInTimeframe,
-  getBestBotCallInTimeframe
+  getBestBotCallInTimeframe,
+  getWeeklyUtcTerminalSnapshot
 } = require('./utils/callerStatsService');
 
 const {
@@ -462,7 +466,8 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!addlaunch <dev_wallet> <token_ca>\` — Log a launch on a tracked dev\n` +
     `• \`!testreal <ca>\` — Live provider / token test (embed)\n` +
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
-    `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n\n`;
+    `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
+    `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (same body as the scheduled job; owner only)\n\n`;
 
   if (canSeeModHelp) {
     contentOut +=
@@ -2946,6 +2951,24 @@ if (lowerContent === '!scanner off') {
 
         if (result.success) {
           await replyText(message, `✅ Posted to X\nPost ID: ${result.id}`);
+        } else {
+          await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
+        }
+
+        return;
+      }
+
+      if (lowerContent === '!testweeklysnapshot') {
+        if (message.author.id !== process.env.BOT_OWNER_ID) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        const snap = getWeeklyUtcTerminalSnapshot();
+        const text = buildWeeklyStatsSnapshotBody(snap);
+        const result = await createPost(text);
+
+        if (result.success) {
+          await replyText(message, `✅ Posted weekly stats snapshot to X\nPost ID: ${result.id}`);
         } else {
           await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
         }

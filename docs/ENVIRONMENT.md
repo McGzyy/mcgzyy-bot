@@ -182,7 +182,7 @@ After a successful verify, the bot adds **`HUMAN_VERIFIED_ROLE_ID`** and removes
 
 | Variable | Used in | Purpose |
 |----------|---------|---------|
-| **`BOT_OWNER_ID`** | `index.js`, `commands/basicCommands.js` | Discord user snowflake; gates `!testx`, `!setminmc`, sanity `!setsanity*`, etc. If unset, owner checks fail closed where implemented. |
+| **`BOT_OWNER_ID`** | `index.js`, `commands/basicCommands.js` | Discord user snowflake; gates `!testx`, `!testweeklysnapshot`, `!setminmc`, sanity `!setsanity*`, etc. If unset, owner checks fail closed where implemented. |
 
 ### 7.3 Required for X (Twitter) posting
 
@@ -206,6 +206,9 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_LEADERBOARD_DIGEST_UTC_HOUR`** | Hour `0–23` to post (default `16`). |
 | **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the weekly snapshot (default on when digest is enabled). |
 | **`X_LEADERBOARD_WEEKLY_UTC_WEEKDAY`** | `0` (Sun) … `6` (Sat); default `1` (Monday). |
+| **`X_WEEKLY_STATS_SNAPSHOT_ENABLED`** | `1` / `true` — post a **stats-only** weekly X summary (previous completed UTC Mon–Sun); **independent** of `X_LEADERBOARD_DIGEST_ENABLED`. |
+| **`X_WEEKLY_STATS_UTC_WEEKDAY`** | `0`–`6`; default `1` (Monday). |
+| **`X_WEEKLY_STATS_UTC_HOUR`** | `0`–`23`; defaults to the same value as `X_LEADERBOARD_DIGEST_UTC_HOUR` (or `16`). |
 | **`DASHBOARD_PUBLIC_URL`** | Shown at the bottom of digest tweets (any of `NEXT_PUBLIC_APP_URL` / `MCBOT_DASHBOARD_URL` also work). |
 
 ### 7.4 Optional — Supabase (Discord bot, repo root)

@@ -53,6 +53,108 @@ function isWithinTimeframeDays(call, days) {
   return ms >= cutoff;
 }
 
+/** Monday 00:00:00.000 UTC of the calendar week containing `from`. */
+function startOfUtcWeekContaining(from) {
+  const y = from.getUTCFullYear();
+  const m = from.getUTCMonth();
+  const d = from.getUTCDate();
+  const dow = from.getUTCDay();
+  const daysFromMonday = dow === 0 ? 6 : dow - 1;
+  return new Date(Date.UTC(y, m, d - daysFromMonday, 0, 0, 0, 0));
+}
+
+/**
+ * Previous completed UTC week (Mon 00:00 .. next Mon 00:00 exclusive), relative to `from`.
+ * When `from` is Monday UTC, the range is the seven days that ended at this Monday 00:00.
+ */
+function getPreviousCompletedUtcWeekBounds(from = new Date()) {
+  const thisWeekMonday = startOfUtcWeekContaining(from);
+  const endExclusive = thisWeekMonday;
+  const startInclusive = new Date(thisWeekMonday);
+  startInclusive.setUTCDate(thisWeekMonday.getUTCDate() - 7);
+  return { startInclusive, endExclusive };
+}
+
+function isCallTimestampInUtcMsRange(call, startMs, endExclusiveMs) {
+  const ms = getCallTimestampMs(call);
+  if (ms == null) return false;
+  return ms >= startMs && ms < endExclusiveMs;
+}
+
+function medianSorted(nums) {
+  if (!nums.length) return null;
+  const s = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  if (s.length % 2 === 1) return s[mid];
+  return (s[mid - 1] + s[mid]) / 2;
+}
+
+function pctAtLeast(xs, threshold) {
+  if (!xs.length) return null;
+  let c = 0;
+  for (const x of xs) {
+    if (x >= threshold) c += 1;
+  }
+  return (100 * c) / xs.length;
+}
+
+function cohortAthXStats(calls) {
+  const xs = [];
+  for (const call of calls) {
+    const ath = getAth(call);
+    const x = calculateX(call.firstCalledMarketCap, ath);
+    if (Number.isFinite(x) && x > 0) xs.push(x);
+  }
+  const n = calls.length;
+  return {
+    count: n,
+    medianX: medianSorted(xs),
+    pctGe2: pctAtLeast(xs, 2),
+    pctGe3: pctAtLeast(xs, 3)
+  };
+}
+
+/**
+ * Aggregate stats for the last completed UTC calendar week (no tickers).
+ * Uses the same validity and user/bot filters as leaderboard helpers.
+ * @param {Date} [from]
+ */
+function getWeeklyUtcTerminalSnapshot(from = new Date()) {
+  const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(from);
+  const startMs = startInclusive.getTime();
+  const endMs = endExclusive.getTime();
+
+  const userCalls = getAllTrackedCalls()
+    .filter(isHumanUserCall)
+    .filter(isValid)
+    .filter(c => isCallTimestampInUtcMsRange(c, startMs, endMs));
+
+  const botCalls = getAllTrackedCalls()
+    .filter(isBotCall)
+    .filter(isValid)
+    .filter(c => isCallTimestampInUtcMsRange(c, startMs, endMs));
+
+  const seenCaller = new Set();
+  for (const call of userCalls) {
+    const key =
+      call.firstCallerDiscordId ||
+      call.firstCallerId ||
+      normalize(call.firstCallerUsername) ||
+      normalize(call.firstCallerDisplayName) ||
+      normalize(call.firstCallerPublicName);
+    if (key) seenCaller.add(String(key));
+  }
+
+  return {
+    startInclusive,
+    endExclusive,
+    user: cohortAthXStats(userCalls),
+    bot: cohortAthXStats(botCalls),
+    uniqueCallers: seenCaller.size,
+    totalPrints: userCalls.length + botCalls.length
+  };
+}
+
 function enrichCallWithX(call) {
   const ath = getAth(call);
   const x = calculateX(call.firstCalledMarketCap, ath);
@@ -595,5 +697,6 @@ module.exports = {
   getBotStatsRaw,
   getBestCallInTimeframe,
   getTopCallerInTimeframe,
-  getBestBotCallInTimeframe
+  getBestBotCallInTimeframe,
+  getWeeklyUtcTerminalSnapshot
 };

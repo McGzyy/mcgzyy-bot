@@ -4,7 +4,8 @@ const { createPost } = require('./xPoster');
 const {
   getCallerLeaderboardInTimeframe,
   getBestCallInTimeframe,
-  getBestBotCallInTimeframe
+  getBestBotCallInTimeframe,
+  getWeeklyUtcTerminalSnapshot
 } = require('./callerStatsService');
 const { xBrandKicker, fitTweet } = require('./buildXPostText');
 
@@ -73,8 +74,88 @@ function buildLeaderboardDigestBody(p) {
   return fitTweet(lines.join('\n'), DEFAULT_MAX);
 }
 
+const UTC_MO = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec'
+];
+
+/** @param {Date} startInclusive @param {Date} endExclusive */
+function formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive) {
+  const lastDay = new Date(endExclusive.getTime() - 86400000);
+  const sm = UTC_MO[startInclusive.getUTCMonth()];
+  const sd = startInclusive.getUTCDate();
+  const em = UTC_MO[lastDay.getUTCMonth()];
+  const ed = lastDay.getUTCDate();
+  const y = startInclusive.getUTCFullYear();
+  const y2 = lastDay.getUTCFullYear();
+  if (y === y2 && startInclusive.getUTCMonth() === lastDay.getUTCMonth()) {
+    return `${sm} ${sd}–${ed}, ${y} UTC`;
+  }
+  if (y === y2) {
+    return `${sm} ${sd}–${em} ${ed}, ${y} UTC`;
+  }
+  return `${sm} ${sd}, ${y} – ${em} ${ed}, ${y2} UTC`;
+}
+
+/**
+ * @param {{ count: number, medianX: number|null, pctGe2: number|null, pctGe3: number|null }} s
+ */
+function formatCohortSnapshotLine(label, s) {
+  if (!s.count) {
+    return `${label} · 0 prints`;
+  }
+  const med = s.medianX == null ? '—' : `${Number(s.medianX).toFixed(2)}×`;
+  const p2 = s.pctGe2 == null ? '—' : `${s.pctGe2.toFixed(1)}%`;
+  const p3 = s.pctGe3 == null ? '—' : `${s.pctGe3.toFixed(1)}%`;
+  return `${label} · ${s.count} print${s.count === 1 ? '' : 's'} · median ${med} · ≥2× ${p2} · ≥3× ${p3}`;
+}
+
+/**
+ * Stats-only weekly X copy (previous completed UTC Mon–Sun). No tickers.
+ * @param {object} snap from getWeeklyUtcTerminalSnapshot()
+ */
+function buildWeeklyStatsSnapshotBody(snap) {
+  const range = formatCompletedUtcWeekRangeLabel(snap.startInclusive, snap.endExclusive);
+  const lines = [
+    xBrandKicker(),
+    '◆ Weekly terminal snapshot',
+    range,
+    '────────',
+    'Tracked performance (ATH multiple vs entry)'
+  ];
+
+  if (!snap.totalPrints) {
+    lines.push('No qualifying prints this UTC week.');
+  } else {
+    lines.push(formatCohortSnapshotLine('User desk', snap.user));
+    lines.push(formatCohortSnapshotLine('Auto desk', snap.bot));
+    lines.push('────────');
+    lines.push(
+      `Active callers · ${snap.uniqueCallers} · ${snap.totalPrints} total print${snap.totalPrints === 1 ? '' : 's'}`
+    );
+  }
+
+  const dash = dashboardLinkLine();
+  if (dash) {
+    lines.push('────────', dash);
+  }
+
+  return fitTweet(lines.join('\n'), DEFAULT_MAX);
+}
+
 let lastDailyKey = '';
 let lastWeeklyKey = '';
+let lastWeeklyStatsKey = '';
 
 async function postDigest(windowLabel, days, topN) {
   const text = buildLeaderboardDigestBody({ windowLabel, days, topN });
@@ -124,10 +205,55 @@ async function tickXLeaderboardDigest() {
   }
 }
 
+async function tickWeeklyStatsSnapshot() {
+  const enabled = String(process.env.X_WEEKLY_STATS_SNAPSHOT_ENABLED || '')
+    .trim()
+    .toLowerCase();
+  if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
+    return;
+  }
+
+  const now = new Date();
+  const hour = now.getUTCHours();
+  const minute = now.getUTCMinutes();
+  const digestHour = Number(process.env.X_LEADERBOARD_DIGEST_UTC_HOUR ?? 16);
+  const targetHour = Number(process.env.X_WEEKLY_STATS_UTC_HOUR ?? digestHour);
+  if (hour !== targetHour || minute > 12) {
+    return;
+  }
+
+  const wday = now.getUTCDay();
+  const statsDay = Number(process.env.X_WEEKLY_STATS_UTC_WEEKDAY ?? 1);
+  if (wday !== statsDay) {
+    return;
+  }
+
+  const snap = getWeeklyUtcTerminalSnapshot(now);
+  const key = `ws:${snap.startInclusive.toISOString().slice(0, 10)}`;
+  if (lastWeeklyStatsKey === key) {
+    return;
+  }
+
+  const text = buildWeeklyStatsSnapshotBody(snap);
+  const result = await createPost(text);
+  if (!result.success) {
+    console.error('[XWeeklyStatsSnapshot] post failed:', result.error || 'unknown');
+    return;
+  }
+  lastWeeklyStatsKey = key;
+  console.log(`[XWeeklyStatsSnapshot] posted week ${key} (${result.id || 'ok'})`);
+}
+
 function startXLeaderboardDigestScheduler() {
   setInterval(() => {
     void tickXLeaderboardDigest();
+    void tickWeeklyStatsSnapshot();
   }, 5 * 60 * 1000);
 }
 
-module.exports = { startXLeaderboardDigestScheduler, buildLeaderboardDigestBody };
+module.exports = {
+  startXLeaderboardDigestScheduler,
+  buildLeaderboardDigestBody,
+  buildWeeklyStatsSnapshotBody,
+  tickWeeklyStatsSnapshot
+};

@@ -20,7 +20,7 @@ function xTerminalSectionGap() {
 }
 
 function xTerminalFooterLine() {
-  return '🔹 Dashboard + Live Calls - Link in Bio';
+  return '🔹 Dashboard + Live Calls - Link in Bio 🔹';
 }
 
 /** Hard ceiling for long-form X posts (raise via env if APIs change). */
@@ -154,7 +154,7 @@ async function buildAttributionLine(trackedCall, multipleX) {
     return `Credit · @${handle}`;
   }
 
-  return 'Credit · McGBot Terminal community';
+  return 'Credit · McGBot Community';
 }
 
 function includeGmgnLink() {
@@ -255,14 +255,16 @@ async function buildXPostText(trackedCall, opts = {}) {
         : `🔥 ${milestoneX}× · first call`
       : '📡 Live call';
 
-  const channelBrand =
-    trackedCall?.callSourceType === 'bot_call' ? 'McGBot Calls' : 'User Calls';
+  const channelKicker =
+    trackedCall?.callSourceType === 'bot_call'
+      ? '🔹 McGBot Calls 🔹'
+      : '🔹 Member Call 🔹';
   const sub =
     athX > 0
       ? `$${ticker} · ${athX.toFixed(2)}× ATH  ·  spot ${spotX.toFixed(2)}×`
       : `$${ticker} · ${spotX.toFixed(2)}×`;
 
-  const heroBlock = [`🚀 ${channelBrand}`, headline].join('\n');
+  const heroBlock = [channelKicker, headline].join('\n');
 
   const statsBlock = sub;
 

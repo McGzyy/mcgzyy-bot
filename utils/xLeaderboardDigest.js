@@ -25,11 +25,8 @@ const {
   resolveWeeklyStatsTweetMaxChars
 } = require('./buildXPostText');
 
-/**
- * List-row marker for X: U+25AB "▫️" often renders as a solid/black square on Android/X clients.
- * U+203A (›) stays readable everywhere.
- */
-const X_LIST_MARK = '\u203A ';
+/** Bullet for list rows — works on every X client (avoid emoji squares). */
+const BUL = '\u2022 ';
 
 /**
  * One-line print for X. No leading `$` on the ticker — X allows only **one** cashtag
@@ -45,11 +42,6 @@ function formatCallOneLiner(call) {
 
 function weeklySectionGap() {
   return xTerminalSectionGap();
-}
-
-/** Heavy horizontal rule — reads stronger on X than the short `·` divider. */
-function digestSectionGap() {
-  return `\n${'\u2501'.repeat(26)}\n`;
 }
 
 /**
@@ -69,10 +61,10 @@ function weeklyCohortBlock(emoji, title, subtitle, s) {
   return [
     head,
     '',
-    `${X_LIST_MARK}Calls — ${s.count}`,
-    `${X_LIST_MARK}Median ATH × — ${med}`,
-    `${X_LIST_MARK}Share at ≥ 2× — ${p2}`,
-    `${X_LIST_MARK}Share at ≥ 3× — ${p3}`
+    `${BUL}Calls — ${s.count}`,
+    `${BUL}Median ATH × — ${med}`,
+    `${BUL}Share at ≥ 2× — ${p2}`,
+    `${BUL}Share at ≥ 3× — ${p3}`
   ].join('\n');
 }
 
@@ -86,17 +78,13 @@ function buildLeaderboardDigestBody(p) {
   const rows = getCallerLeaderboardInTimeframe(p.days, topN);
   const bestHuman = getBestCallInTimeframe(p.days);
   const bestBot = getBestBotCallInTimeframe(p.days);
-  const gap = digestSectionGap();
+  const gap = weeklySectionGap();
   const footer = xTerminalFooterLine();
 
   const rawLabel = String(p.windowLabel || '').trim();
-  const head = ['\u2501'.repeat(26), `  🚀  ${rawLabel.toUpperCase()}`, '\u2501'.repeat(26)].join('\n');
+  const head = `🚀 ${rawLabel}`;
 
-  const deskLines = [
-    '  ◆  CALLER LEADERBOARD',
-    `      (top ${topN} by avg ATH ×)`,
-    ''
-  ];
+  const deskLines = [`💎 Caller leaderboard (top ${topN} by avg ATH ×)`, ''];
   if (rows.length) {
     for (let i = 0; i < rows.length; i += 1) {
       const r = rows[i];
@@ -108,19 +96,19 @@ function buildLeaderboardDigestBody(p) {
     deskLines.push('(quiet window)');
   }
 
-  const hiLines = ['  ◆  HIGHLIGHTS', ''];
+  const hiLines = ['⭐️ Highlights', ''];
   let anyHi = false;
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
     if (h) {
-      hiLines.push(`${X_LIST_MARK}Best member call — ${h}`);
+      hiLines.push(`${BUL}Best member call — ${h}`);
       anyHi = true;
     }
   }
   if (bestBot) {
     const b = formatCallOneLiner(bestBot);
     if (b) {
-      hiLines.push(`${X_LIST_MARK}Best McGBot call — ${b}`);
+      hiLines.push(`${BUL}Best McGBot call — ${b}`);
       anyHi = true;
     }
   }
@@ -181,18 +169,13 @@ function formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive) {
  */
 function buildWeeklyStatsSnapshotBody(snap) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
-  const gap = digestSectionGap();
+  const gap = weeklySectionGap();
   const { startInclusive, endExclusive } = snap;
   const range = formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive);
   const callerTopN = Math.min(15, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_CALLER_TOP_N) || 8));
   const printTopN = Math.min(12, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_PRINT_TOP_N) || 6));
 
-  const hero = [
-    '\u2501'.repeat(26),
-    '  🚀  WEEKLY SNAPSHOT',
-    `      ${range}`,
-    '\u2501'.repeat(26)
-  ].join('\n');
+  const hero = `🚀 Weekly snapshot — ${range}`;
 
   const sections = [hero];
 
@@ -203,16 +186,16 @@ function buildWeeklyStatsSnapshotBody(snap) {
       [
         '📊 Summary',
         '',
-        `${X_LIST_MARK}Member calls — ${snap.user.count}`,
-        `${X_LIST_MARK}McGBot calls — ${snap.bot.count}`,
-        `${X_LIST_MARK}Combined calls — ${snap.totalPrints}`,
-        `${X_LIST_MARK}Active callers (distinct) — ${snap.uniqueCallers}`
+        `${BUL}Member calls — ${snap.user.count}`,
+        `${BUL}McGBot calls — ${snap.bot.count}`,
+        `${BUL}Combined calls — ${snap.totalPrints}`,
+        `${BUL}Active callers (distinct) — ${snap.uniqueCallers}`
       ].join('\n')
     );
 
     sections.push(weeklyCohortBlock('🔺', 'Member desk', null, snap.user));
 
-    sections.push(weeklyCohortBlock('*', 'McGBot desk', null, snap.bot));
+    sections.push(weeklyCohortBlock('🔻', 'McGBot desk', null, snap.bot));
 
     const desk = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, callerTopN);
     const deskLines = [`💎 Caller leaderboard (top ${callerTopN} by avg ATH ×)`, ''];
@@ -258,8 +241,8 @@ function buildWeeklyStatsSnapshotBody(snap) {
       [
         '⭐️ Best of the week',
         '',
-        `${X_LIST_MARK}Best member call — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
-        `${X_LIST_MARK}Best McGBot call — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
+        `${BUL}Best member call — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
+        `${BUL}Best McGBot call — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
       ].join('\n')
     );
   }

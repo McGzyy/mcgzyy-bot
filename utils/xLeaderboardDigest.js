@@ -20,8 +20,8 @@ const {
   resolveWeeklyStatsTweetMaxChars
 } = require('./buildXPostText');
 
-/** Light horizontal rule (Box Drawings) — reads cleanly on X mobile. */
-const WEEKLY_RULE = '\u2500'.repeat(28);
+/** Short rule so narrow X clients do not wrap a “full width” bar into two ugly lines. */
+const WEEKLY_RULE = `${'\u2500'.repeat(4)} \u22C5 ${'\u2500'.repeat(4)}`;
 
 /**
  * One-line print for X. No leading `$` on the ticker — X allows only **one** cashtag
@@ -42,7 +42,7 @@ function dashboardLinkLine() {
       process.env.MCBOT_DASHBOARD_URL ||
       ''
   ).trim();
-  return u ? `Full boards — ${u.replace(/\/$/, '')}` : '';
+  return u ? `🔗 Full boards — ${u.replace(/\/$/, '')}` : '';
 }
 
 function weeklySectionGap() {
@@ -50,12 +50,15 @@ function weeklySectionGap() {
 }
 
 /**
+ * @param {string} emoji single leading marker for the section
+ * @param {string} title without emoji
+ * @param {string} [subtitle]
  * @param {{ count: number, medianX: number|null, pctGe2: number|null, pctGe3: number|null }} s
  */
-function weeklyCohortBlock(title, subtitle, s) {
-  const head = subtitle ? `${title}\n${subtitle}` : title;
+function weeklyCohortBlock(emoji, title, subtitle, s) {
+  const head = subtitle ? `${emoji} ${title}\n${subtitle}` : `${emoji} ${title}`;
   if (!s.count) {
-    return `${head}\n\n(no qualifying prints in this window)`;
+    return `${head}\n(no qualifying prints this week)`;
   }
   const med = s.medianX == null ? '—' : `${Number(s.medianX).toFixed(2)}×`;
   const p2 = s.pctGe2 == null ? '—' : `${Number(s.pctGe2).toFixed(1)}%`;
@@ -63,10 +66,10 @@ function weeklyCohortBlock(title, subtitle, s) {
   return [
     head,
     '',
-    `• Calls — ${s.count}`,
-    `• Median ATH × — ${med}`,
-    `• Share at ≥ 2× — ${p2}`,
-    `• Share at ≥ 3× — ${p3}`
+    `▪ Calls — ${s.count}`,
+    `▪ Median ATH × — ${med}`,
+    `▪ Share at ≥ 2× — ${p2}`,
+    `▪ Share at ≥ 3× — ${p3}`
   ].join('\n');
 }
 
@@ -160,12 +163,12 @@ function buildWeeklyStatsSnapshotBody(snap) {
   const gap = weeklySectionGap();
   const { startInclusive, endExclusive } = snap;
   const range = formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive);
-  const callerTopN = Math.min(25, Math.max(5, Number(process.env.X_WEEKLY_SNAPSHOT_CALLER_TOP_N) || 15));
-  const printTopN = Math.min(25, Math.max(5, Number(process.env.X_WEEKLY_SNAPSHOT_PRINT_TOP_N) || 12));
+  const callerTopN = Math.min(15, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_CALLER_TOP_N) || 8));
+  const printTopN = Math.min(12, Math.max(3, Number(process.env.X_WEEKLY_SNAPSHOT_PRINT_TOP_N) || 6));
 
   const hero = [
     xBrandKicker(),
-    `◆ Weekly snapshot — ${range}`,
+    `🚀 Weekly snapshot — ${range}`,
     '',
     'Rolled-up performance for qualifying prints the terminal tracked this week (completed Mon–Sun, UTC).'
   ].join('\n');
@@ -173,39 +176,41 @@ function buildWeeklyStatsSnapshotBody(snap) {
   const sections = [hero];
 
   if (!snap.totalPrints) {
-    sections.push('No qualifying prints landed in this UTC week window.');
+    sections.push('📭 No qualifying prints landed in this UTC week window.');
   } else {
     sections.push(
       [
-        'Summary',
+        '📊 Summary',
         '',
-        `• User-attributed prints — ${snap.user.count}`,
-        `• Auto-scanned prints — ${snap.bot.count}`,
-        `• Combined — ${snap.totalPrints}`,
-        `• Active callers (distinct) — ${snap.uniqueCallers}`
+        `▪ User-attributed prints — ${snap.user.count}`,
+        `▪ Auto-scanned prints — ${snap.bot.count}`,
+        `▪ Combined — ${snap.totalPrints}`,
+        `▪ Active callers (distinct) — ${snap.uniqueCallers}`
       ].join('\n')
     );
 
     sections.push(
       weeklyCohortBlock(
+        '🔺',
         'User desk',
-        'Community calls. ATH × compares peak market cap to the market cap at the first tracked print (entry).',
+        'Community calls · ATH × = peak MC ÷ entry MC at first print.',
         snap.user
       )
     );
 
     sections.push(
       weeklyCohortBlock(
+        '◼️',
         'Auto desk',
-        'Scanner auto-calls. Same ATH × definition as user desk.',
+        'Scanner auto-calls · same ATH × definition as user desk.',
         snap.bot
       )
     );
 
     const desk = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, callerTopN);
     const deskLines = [
-      'Caller leaderboard',
-      `Average ATH × across prints this week — top ${callerTopN} by average.`,
+      `💎 Caller leaderboard (top ${callerTopN} by avg ATH ×)`,
+      'Ranked by average multiple across prints this week.',
       ''
     ];
     if (desk.length) {
@@ -222,8 +227,8 @@ function buildWeeklyStatsSnapshotBody(snap) {
 
     const topUser = getTopUserCallsInUtcWeekBounds(startInclusive, endExclusive, printTopN);
     const uLines = [
-      'Standout user prints',
-      `Highest ATH × vs entry — top ${printTopN} this week.`,
+      `📈 User standouts (top ${printTopN} by ATH ×)`,
+      'Highest multiple vs entry this week.',
       ''
     ];
     if (topUser.length) {
@@ -238,8 +243,8 @@ function buildWeeklyStatsSnapshotBody(snap) {
 
     const topBot = getTopBotCallsInUtcWeekBounds(startInclusive, endExclusive, printTopN);
     const bLines = [
-      'Standout auto prints',
-      `Highest ATH × vs entry — top ${printTopN} this week.`,
+      `⚡ Auto standouts (top ${printTopN} by ATH ×)`,
+      'Highest multiple vs entry this week.',
       ''
     ];
     if (topBot.length) {
@@ -256,18 +261,18 @@ function buildWeeklyStatsSnapshotBody(snap) {
     const bestB = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
     sections.push(
       [
-        'Best of the week',
+        '⭐️ Best of the week',
         '',
-        `• Best user print — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
-        `• Best auto print — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
+        `▪ Best user print — ${bestH ? formatCallOneLiner(bestH) || '—' : '—'}`,
+        `▪ Best auto print — ${bestB ? formatCallOneLiner(bestB) || '—' : '—'}`
       ].join('\n')
     );
 
     sections.push(
       [
-        'Notes',
+        '📎 Notes',
         '',
-        'Figures use the same validity filters as the in-app leaderboards (invalid extremes and excluded/denied flows omitted). Not financial advice.'
+        'Same validity filters as in-app leaderboards (invalid extremes & excluded/denied flows omitted). Not financial advice.'
       ].join('\n')
     );
   }

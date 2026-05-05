@@ -1,29 +1,73 @@
-I want to create a financial dashboard for myself and only myself. Assuming this will use plaid as the easiest setup, but I want to add additional features. The goal for the end product is going to be a website I can go to, it will be a locked screen where I will have to enter a password and a pin on a pinpad to enter, and then behind it will be my financial dashboard. I want it to be able to connect to all of my bank accounts, my roth IRA accounts, High Yeild Savings accounts, investing accounts, stock accounts, crypto accounts, my cold wallet if possible, etc. I want a FULL picture of my financial situation. The dashboard will of course list all of those accounts cleanly, but will also have every stat and measurable and comparison you can think of. I will have it all toggleable by a settings panel/page. That will also be where I will connect all of my accounts and enter any necessary back end information. I also want to se it up so that at the very least it will send me emails with financial alerts and periodical scheduled overviews. Ideally, would be really cool, if it could actually send me alerts on my phone. What else do you need from me to get started on this? I will provide any information needed and please ask if not certain about what direction to take something build wise, and I will clarify.. 
 
 
-Alright, now I want to double check the users trophy case on their profile.. There should be sections with different trophies. The first one is the obvious trophy for getting Gold/Silver/Bronze on the D/W/M Leaderboard. But we also are going to want others. I know for sure we want oness for milestone on calls.. for example one if their call reaches 10x, they should get a trophy. I dont want to do TOO many, but big and high milestones should have one.. We can brainstorm what else they could get a trophy for as well..
+users can change their profile background (blurred)
+
+
+
+
+host discord VCs instead of hosting my own.
+
+
+
+
+update profile..
 
 
 
 User settings
-Report system for coins (if its a rug/scam) (ADD LABELS TO COINS MARKED AS SPAM), and also report bug. Send to MOD approvals and get that wired in
 
 
-
-Make sure that users are automatically assigned a trophy if they end the period in a qualifying position. 
-
-
-Determine what should happen if someone already called a coin
-
-
-Determin if we still use !watch and define its exact usage and output
-
-
-Single page for calls that his a certain milestone.. Include call/caller and all necessary info
+Report system for coins (if its a rug/scam) (ADD LABELS TO COINS MARKED AS A RUG/SCAN), and also report bug. Send to MOD approvals and get that wired in. Maybe think about that if enough users report a coin, it gets auto tagged as scam/rug. Implement that later.  
 
 
 
 Share buttons for profiles and coin milestone pages
 
 
-Alright, now I want to create a sort of voucher system. How it should work is either myself or an admin goes in and can generate a token to give to a user for a either a percentage off of one of the packages or a free month.. This code should be able to redeemed at checkout, specified number of uses when the token is created, and for MODs creating token, it needs to be verified by me. For their tokens, when they request to generate one, they should include duration or percentage off (specific package or all packages) and how many uses, or both myself and the mods should be able to specify a username if the token can only be used by one specific user.. When the mods request to generate a token I want it to notify me in the Admin panel as well as a notification from the bell in the top right.. Do you have any questions to nail this down before we start implementing?
+ for now, what else? Any ideas of anything cool or useful that the dashboard is missing? Or that other "terminals" and dashboards have? What about the social feed and trending tokens and top performers today? Also, 
+
+
+I also think I messed it up, the weekly snapshot should have the chart for the past week.. the monthly one will show a chart for the past month.. then if we want to add a yearly one we can and it will show the whole past year.. lets change that. Lets also think of an image we can post with the chart.. it shows have to be a chart, maybe an image of two things; days change (avg ath compared to yesterday) and daily bot comparison (user avg ath vs bot avg ath for the day).. Make a nice clean image showing both those stats, like they are in modules or something..
+
+
+change top performers today to top 24 hr, remove daily leaderboard from right panel
+
+
+
+Optimize mobile version
+
+
+
+format X posts for milestones
+
+
+---------------------------------------------------------
+go back and tweak the tutorial
+--------------------------------------------------------
+
+fix chart best x on main dash
+
+
+force log out on new dash edits if selected in admin dash
+
+
+Git push as an alert (later on when im rarely editing things)
+
+
+Alright now I want to wire in a new page/menu item/feature. Its going to be called "Outside Calls". In the menu, it will live right under "trusted pro". What this feature is going to be is a place where we group activity/calls from people that are not in the discord or a part of the project at all. The idea behind this is we pull from places like X, telegram, discord, group chats, etc. For example, say someone on X makes very rare but very good calls in their free group chat.. we want McGBot to be able to pick up on that and make a call in this new page/feature.. The thinking is that there a lot of people that people really good and really early calls, with a lot of trust behind it, but they arent a part of our group to actually make the call. So we want to be able to take those, and put them in the dashboard (basically another "user call" category but for users not physically making calls in the discord/project).. We want to give these callers an ongoing score based on their previous call record, and we want to give info like where the call was posted originally. I dont want these calls to follow the same path as far as reaching a milestone and posting to X. these calls should not leave the group/project. They should only be displayed in the dashboard (MAYBE later the Discord as well. Does this make sense and do you have any questions BEFORE we start changing code??
+
+
+profile page pass
+
+
+change to $50/mo 
+
+
+webhook for each role so the chats work properly..
+
+
+
+Rebrand names:
+
+TopScan
+statpad.xyz

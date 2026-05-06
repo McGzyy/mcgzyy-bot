@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Admin owner DMs: 3 embeds (operations · performance · subscriptions/X audit).
+ * Admin owner DMs: 3 embeds (operations · revenue & X · performance).
  *
  * Schedule: calendar-based in `ADMIN_REPORT_TIMEZONE` at `ADMIN_REPORT_LOCAL_HOUR` (0–23),
  * within the first ~12 minutes of that hour: daily every day, weekly on Mondays,
@@ -358,16 +358,128 @@ function formatPerModApprovalDenialRatios(byMod) {
   return lines.length ? lines.join('\n') : '— *No appr/den activity in window*';
 }
 
+/** @param {Record<string, { ok: number, fail: number }>} byCat */
+function rollupHasActivity(byCat, keys) {
+  for (const k of keys) {
+    const row = byCat[k];
+    if (row && (row.ok > 0 || row.fail > 0)) return true;
+  }
+  return false;
+}
+
+/** @param {'daily' | 'weekly' | 'monthly'} kind */
+function perfWindowColumnHeader(kind) {
+  if (kind === 'daily') return 'Rolling 24h';
+  if (kind === 'weekly') return 'Rolling 7d';
+  return 'Month roll';
+}
+
+function mdCodeBlock(inner) {
+  const body = String(inner || '').trimEnd();
+  return `\`\`\`\n${body}\n\`\`\``;
+}
+
 /**
- * @param {ReturnType<computePerformanceStatsForCalls>} perf
+ * Aligned monospace table: performance window vs all-time (parentheses = MC-backed counts).
  */
-function formatPerformanceLines(perf) {
-  return [
-    `**Avg × (bot):** ${formatAvgX(perf.avgXBot)} _(${perf.botValidForAvg} calls ≤${MAX_VALID_X}×)_`,
-    `**Avg × (user):** ${formatAvgX(perf.avgXUser)}`,
-    `**Bot ≥2×:** ${perf.botReach2xPct} _(${perf.botTotalForMilestone} w/ MC data)_`,
-    `**Bot ≥5×:** ${perf.botReach5xPct}`
+function formatPerfMarkdownTable(kind, w, a) {
+  const cw = perfWindowColumnHeader(kind);
+  const pad = (s, n) => String(s).slice(0, n).padEnd(n);
+  const W = 18;
+  const A = 17;
+  const B = 17;
+  const row = (label, left, right) => `${pad(label, W)} ${pad(left, A)} ${pad(right, B)}`;
+  const lines = [
+    row('Metric', cw, 'All-time'),
+    `${pad('─'.repeat(16), W)} ${pad('─'.repeat(15), A)} ${pad('─'.repeat(15), B)}`,
+    row(
+      'Avg × bot',
+      `${formatAvgX(w.avgXBot)} (${w.botValidForAvg})`,
+      `${formatAvgX(a.avgXBot)} (${a.botValidForAvg})`
+    ),
+    row('Avg × user', formatAvgX(w.avgXUser), formatAvgX(a.avgXUser)),
+    row(
+      'Bot ≥2×',
+      `${w.botReach2xPct} (${w.botTotalForMilestone})`,
+      `${a.botReach2xPct} (${a.botTotalForMilestone})`
+    ),
+    row('Bot ≥5×', w.botReach5xPct, a.botReach5xPct)
+  ];
+  return mdCodeBlock(lines.join('\n'));
+}
+
+/** All-time pipeline + rejection counts (monospace). */
+function formatPipelineMarkdown(system, rejection) {
+  const lines = [
+    `Auto calls           ${system.totalAutoCalls}`,
+    `User calls           ${system.totalUserCalls}`,
+    ...(system.totalWatchOnly > 0 ? [`Watch-only           ${system.totalWatchOnly}`] : []),
+    `Coin approvals       ${system.totalApprovals}`,
+    `Rejections           ${system.totalRejections}`,
+    `Denied / excluded    ${rejection.denied} / ${rejection.excluded}`
+  ];
+  return mdCodeBlock(lines.join('\n'));
+}
+
+function formatModVolumeMarkdown(vol, counts) {
+  return mdCodeBlock(
+    [
+      `New tracked (window)   ${vol.total}`,
+      `  bot                  ${vol.bot}`,
+      `  user                 ${vol.user}`,
+      `  watch                ${vol.watch}`,
+      '',
+      `Coin  appr ${counts.coinApprovals}    deny ${counts.coinDenies}    excl ${counts.coinExcludes}`,
+      `X     appr ${counts.xApprovals}    deny ${counts.xDenies}`,
+      `Dev adds               ${counts.devAdds}`
+    ].join('\n')
+  );
+}
+
+/**
+ * @param {ReturnType<summarizeXPostAudit>} xs
+ * @param {string[]} opsKeys
+ * @param {string[]} engagementKeys
+ * @param {string[]} manualKeys
+ */
+function buildXAuditFieldValue(xs, ctx, opsKeys, engagementKeys, manualKeys) {
+  const head = [
+    `Audit rows **${ctx.xEventsLen}**`,
+    `Posted **${xs.totalOk}** · failed **${xs.totalFail}** · media **${xs.mediaOk}** · replies **${xs.repliesOk}**`
   ].join('\n');
+
+  const parts = [head];
+  const milestoneLines = [];
+  if (xs.milestoneUserSideOk || xs.milestoneUserSideFail) {
+    milestoneLines.push(`Community (user+watch): **${xs.milestoneUserSideOk}** ok · **${xs.milestoneUserSideFail}** fail`);
+  }
+  if (xs.milestoneBotOk || xs.milestoneBotFail) {
+    milestoneLines.push(`Bot: **${xs.milestoneBotOk}** ok · **${xs.milestoneBotFail}** fail`);
+  }
+  if (milestoneLines.length) {
+    parts.push('', '**Milestones**', milestoneLines.join('\n'));
+  }
+
+  const digestKeys = [...opsKeys, ...engagementKeys];
+  const rawKeys = Object.keys(xs.byCat).sort();
+  const detailChunks = [];
+  if (rollupHasActivity(xs.byCat, digestKeys)) {
+    detailChunks.push(`**Digests & snapshots**\n${formatCategoryRollup(xs.byCat, digestKeys)}`);
+  }
+  if (rollupHasActivity(xs.byCat, manualKeys)) {
+    detailChunks.push(`**Manual / tests**\n${formatCategoryRollup(xs.byCat, manualKeys)}`);
+  }
+  if (rollupHasActivity(xs.byCat, rawKeys)) {
+    detailChunks.push(`**Categories (raw)**\n${formatCategoryRollup(xs.byCat, rawKeys)}`);
+  }
+
+  if (detailChunks.length) {
+    parts.push('', ...detailChunks);
+  } else if (ctx.xEventsLen === 0) {
+    parts.push('', '_No X audit rows or category posts in this window._');
+  }
+
+  return truncateEmbedField(parts.join('\n'));
 }
 
 /** @param {Record<string, { ok: number, fail: number }>} byCat */
@@ -417,63 +529,17 @@ function perfWindowLabel(kind) {
  */
 function buildAdminReportEmbeds(kind, ctx) {
   const kt = kindTitle(kind);
+  const footerText = `McG Scanner · ${kt} · ${ctx.tz}`;
+  const stamp = new Date();
 
-  const systemLines = [
-    `**Auto-calls:** ${ctx.system.totalAutoCalls} · **User:** ${ctx.system.totalUserCalls}${
-      ctx.system.totalWatchOnly > 0 ? ` · **Watch-only:** ${ctx.system.totalWatchOnly}` : ''
-    }`,
-    `**Coin approvals** (tracked): ${ctx.system.totalApprovals} · **Rejections:** ${ctx.system.totalRejections}`
-  ].join('\n');
+  const attachFooter = e => e.setFooter({ text: footerText }).setTimestamp(stamp);
 
-  const rejLines = [
-    `**Denied:** ${ctx.rejection.denied} · **Excluded:** ${ctx.rejection.excluded}`,
+  const noteBlock =
     ctx.rejection.denied + ctx.rejection.excluded > 0
-      ? `**By mod notes** (top ${NOTE_BUCKET_MAX}):\n${ctx.rejection.noteSummary}`
-      : ''
-  ]
-    .filter(Boolean)
-    .join('\n');
+      ? `\n\n**By mod notes** _(top ${NOTE_BUCKET_MAX})_\n${ctx.rejection.noteSummary}`
+      : '';
 
   const counts = ctx.modWindow.counts;
-  const modLines = [
-    `**Range:** ${ctx.windowLabel}`,
-    '',
-    `**New tracked calls (window):** ${ctx.volWindow.total} · bot ${ctx.volWindow.bot} · user ${ctx.volWindow.user} · watch ${ctx.volWindow.watch}`,
-    '',
-    `**Coin appr:** ${counts.coinApprovals} · **deny:** ${counts.coinDenies} · **exclude:** ${counts.coinExcludes}`,
-    `**X appr:** ${counts.xApprovals} · **X deny:** ${counts.xDenies} · **Dev add:** ${counts.devAdds}`,
-    '',
-    '**Appr : den per mod** (coin+X)',
-    truncateEmbedField(ctx.modWindow.perModRatios)
-  ].join('\n');
-
-  const perfWindowLines = formatPerformanceLines(ctx.perfWindow);
-  const perfAllLines = formatPerformanceLines(ctx.perfAllTime);
-
-  const mrr = Number(ctx.billing.approxMrrUsd);
-  const gross = Number(ctx.billing.windowGrossUsdFromCents);
-  const billingLines = ctx.billing.ok
-    ? [
-        `**Active subscriptions:** ${ctx.billing.activeSubscriptions}`,
-        `**Approx MRR** _(plan price → monthly)_: **$${Number.isFinite(mrr) ? mrr.toFixed(2) : '—'}** USD`,
-        ctx.billing.planMixLines.length
-          ? `**Plan mix:** ${ctx.billing.planMixLines.join(' · ')}`
-          : '**Plan mix:** —',
-        `**Membership events** _(window)_: ${ctx.billing.windowEventCount} rows · **Σ USD** (recorded cents): **$${Number.isFinite(gross) ? gross.toFixed(2) : '0.00'}**`,
-        ctx.billing.pendingSolInvoices != null
-          ? `**Pending SOL quotes:** ${ctx.billing.pendingSolInvoices}`
-          : '',
-        Object.keys(ctx.billing.paymentChannelMix || {}).length
-          ? `**Channels:** ${Object.entries(ctx.billing.paymentChannelMix)
-              .map(([k, v]) => `${k} ${v}`)
-              .join(' · ')}`
-          : '',
-        '',
-        '_MRR is a dashboard-style approximation; Stripe fees/taxes not deducted._'
-      ]
-        .filter(Boolean)
-        .join('\n')
-    : `— **Billing unavailable:** ${ctx.billing.reason || 'unknown'}`;
 
   const xs = ctx.xSummary;
   const opsKeys = ['approval_publish', 'leaderboard_digest', 'weekly_terminal_snapshot'];
@@ -484,49 +550,54 @@ function buildAdminReportEmbeds(kind, ctx) {
     'manual_test_milestone'
   ];
 
-  const xLines = [
-    `**Audit rows in window:** ${ctx.xEventsLen}`,
-    `**Totals:** ${xs.totalOk} posted · **${xs.totalFail} failed** · ${xs.mediaOk} with media · ${xs.repliesOk} replies`,
-    '',
-    '**Milestones**',
-    `• Community (user+watch): **${xs.milestoneUserSideOk}** ok · **${xs.milestoneUserSideFail}** fail`,
-    `• Bot: **${xs.milestoneBotOk}** ok · **${xs.milestoneBotFail}** fail`,
-    '',
-    '**Digests & snapshots**',
-    truncateEmbedField(formatCategoryRollup(xs.byCat, [...opsKeys, ...engagementKeys])),
-    '',
-    '**Manual / tests**',
-    truncateEmbedField(formatCategoryRollup(xs.byCat, manualKeys)),
-    '',
-    '**Raw categories**',
-    truncateEmbedField(formatCategoryRollup(xs.byCat, Object.keys(xs.byCat).sort()))
-  ].join('\n');
+  const mrr = Number(ctx.billing.approxMrrUsd);
+  const gross = Number(ctx.billing.windowGrossUsdFromCents);
+
+  const billingLines = ctx.billing.ok
+    ? mdCodeBlock(
+        [
+          `Active subscriptions    ${ctx.billing.activeSubscriptions}`,
+          `Approx MRR (USD)        ${Number.isFinite(mrr) ? '$' + mrr.toFixed(2) : '—'}`,
+          ctx.billing.planMixLines.length ? `Plan mix                ${ctx.billing.planMixLines.join(', ')}` : null,
+          ctx.billing.pendingSolInvoices != null ? `Pending SOL quotes      ${ctx.billing.pendingSolInvoices}` : null,
+          Object.keys(ctx.billing.paymentChannelMix || {}).length
+            ? `Channels                ${Object.entries(ctx.billing.paymentChannelMix)
+                .map(([k, v]) => `${k} ${v}`)
+                .join(', ')}`
+            : null,
+          `Membership rows         ${ctx.billing.windowEventCount}`,
+          `Recorded gross (USD)    $${Number.isFinite(gross) ? gross.toFixed(2) : '0.00'}`
+        ]
+          .filter(Boolean)
+          .join('\n')
+      )
+    : `— **Billing unavailable:** ${ctx.billing.reason || 'unknown'}`;
+
+  const perfCaption = `_${perfWindowLabel(kind)}_ vs **all-time** · parentheses = calls with MC for that metric`;
 
   const embedOps = new EmbedBuilder()
     .setColor(0x10b981)
     .setTitle(`McG Scanner · ${kt} · Operations`)
-    .setDescription(`Timezone **${ctx.tz}** · moderation + window calls below.\n**${ctx.windowLabel}**`)
+    .setDescription(`**Timezone:** ${ctx.tz}`)
     .addFields(
+      {
+        name: 'Reporting window',
+        value: truncateEmbedField(ctx.windowLabel),
+        inline: false
+      },
       {
         name: 'Tracked pipeline (all-time)',
-        value: truncateEmbedField([systemLines, '', rejLines].join('\n')),
-        inline: false
-      },
-      { name: 'Moderation + volume (window)', value: truncateEmbedField(modLines), inline: false }
-    );
-
-  const embedPerf = new EmbedBuilder()
-    .setColor(0x6366f1)
-    .setTitle(`Performance · ${kt}`)
-    .addFields(
-      {
-        name: perfWindowLabel(kind),
-        value: truncateEmbedField(perfWindowLines),
+        value: truncateEmbedField(formatPipelineMarkdown(ctx.system, ctx.rejection) + noteBlock),
         inline: false
       },
       {
-        name: 'All-time',
-        value: truncateEmbedField(perfAllLines),
+        name: 'Moderation & volume (same window)',
+        value: truncateEmbedField(formatModVolumeMarkdown(ctx.volWindow, counts)),
+        inline: false
+      },
+      {
+        name: 'Appr ÷ den per mod (coin + X)',
+        value: truncateEmbedField(ctx.modWindow.perModRatios),
         inline: false
       }
     );
@@ -534,16 +605,35 @@ function buildAdminReportEmbeds(kind, ctx) {
   const embedRev = new EmbedBuilder()
     .setColor(0xf59e0b)
     .setTitle(`Revenue & X · ${kt}`)
+    .setDescription('_Billing uses dashboard-style estimates._')
     .addFields(
-      { name: 'Subscriptions & cash signals', value: truncateEmbedField(billingLines), inline: false },
-      { name: 'X posting (audit log)', value: truncateEmbedField(xLines), inline: false }
-    )
-    .setFooter({
-      text: `McG Scanner • ${kind} report • ${ctx.tz}`
-    })
-    .setTimestamp(new Date());
+      {
+        name: 'Subscriptions & cash',
+        value: truncateEmbedField(billingLines),
+        inline: false
+      },
+      {
+        name: 'X posting · audit',
+        value: buildXAuditFieldValue(xs, ctx, opsKeys, engagementKeys, manualKeys),
+        inline: false
+      }
+    );
 
-  return [embedOps, embedPerf, embedRev];
+  const embedPerf = new EmbedBuilder()
+    .setColor(0x6366f1)
+    .setTitle(`Performance · ${kt}`)
+    .setDescription(perfCaption)
+    .addFields({
+      name: 'Window vs all-time',
+      value: truncateEmbedField(formatPerfMarkdownTable(kind, ctx.perfWindow, ctx.perfAllTime)),
+      inline: false
+    });
+
+  attachFooter(embedOps);
+  attachFooter(embedRev);
+  attachFooter(embedPerf);
+
+  return [embedOps, embedRev, embedPerf];
 }
 
 async function loadScheduleState() {

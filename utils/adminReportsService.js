@@ -682,7 +682,9 @@ async function sendAdminReport(client, ownerId, kind) {
  * @param {import('discord.js').Client} client
  */
 function startAdminReports(client) {
-  const ownerId = String(process.env.BOT_OWNER_ID ?? '').trim();
+  const ownerId = String(process.env.BOT_OWNER_ID ?? '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
   if (!ownerId) {
     console.log('[AdminReports] BOT_OWNER_ID not set; scheduled reports disabled');
     return;

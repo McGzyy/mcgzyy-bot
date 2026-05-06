@@ -88,7 +88,12 @@ async function postTestMilestoneToX(p) {
     }
   }
 
-  const result = await createPost(postText, isReply ? replyTo : null, chartBuf || undefined);
+  const result = await createPost(postText, isReply ? replyTo : null, chartBuf || undefined, {
+    audit: {
+      category: 'manual_test_milestone',
+      callSourceType: tracked.callSourceType || null
+    }
+  });
   return {
     success: !!result.success,
     id: result.id || null,

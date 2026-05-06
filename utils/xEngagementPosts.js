@@ -256,7 +256,9 @@ async function postWeeklyRunnerToX(opts = {}) {
   }).catch(() => null);
 
   const png = hero ? normalizePngUploadBuffer(hero) : null;
-  const result = await createPost(text, null, png || undefined);
+  const result = await createPost(text, null, png || undefined, {
+    audit: { category: 'engagement_weekly_runner', callSourceType: 'user_call' }
+  });
 
   if (!result.success) {
     return { success: false, error: result.error };
@@ -356,7 +358,9 @@ async function postMonthlyTopCallerToX(client, opts = {}) {
     console.error('[XMonthlyTopCaller] card PNG:', e?.message || e);
   }
 
-  const result = await createPost(body, null, png || undefined);
+  const result = await createPost(body, null, png || undefined, {
+    audit: { category: 'engagement_monthly_top_caller', callSourceType: 'user_call' }
+  });
   if (!result.success) {
     return { success: false, error: result.error };
   }

@@ -247,11 +247,17 @@ async function maybePublishApprovedMilestoneToX(trackedCall, latestScan = null) 
       }
     }
 
-    const result = await createPost(
-      postText,
-      hasOriginal ? trackedCall.xOriginalPostId : null,
-      chartBuf || undefined
-    );
+    const srcForAudit = String(trackedCall.callSourceType || 'user_call').toLowerCase();
+    const milestoneAuditCat =
+      srcForAudit === 'bot_call'
+        ? 'milestone_bot'
+        : srcForAudit === 'watch_only'
+          ? 'milestone_watch'
+          : 'milestone_user';
+
+    const result = await createPost(postText, hasOriginal ? trackedCall.xOriginalPostId : null, chartBuf || undefined, {
+      audit: { category: milestoneAuditCat, callSourceType: trackedCall.callSourceType || null }
+    });
 
     if (!result.success || !result.id) {
       return {

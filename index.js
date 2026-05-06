@@ -66,7 +66,7 @@ const {
 } = require('./utils/approvalMessageLifecycle');
 
 const { recordModAction } = require('./utils/modActionsService');
-const { startAdminReports } = require('./utils/adminReportsService');
+const { startAdminReports, sendAdminReport } = require('./utils/adminReportsService');
 const {
   createPendingDevSubmission,
   takePendingDevSubmission,
@@ -2968,7 +2968,10 @@ if (lowerContent === '!scanner off') {
               'McGBot · X posting verified.'
             ].join('\n'),
             280
-          )
+          ),
+          null,
+          null,
+          { audit: { category: 'manual_connection_test' } }
         );
 
         if (result.success) {
@@ -2977,6 +2980,27 @@ if (lowerContent === '!scanner off') {
           await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
         }
 
+        return;
+      }
+
+      if (lowerContent === '!dadminreport' || lowerContent === '!wadminreport' || lowerContent === '!madminreport') {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+        const kind =
+          lowerContent === '!dadminreport'
+            ? 'daily'
+            : lowerContent === '!wadminreport'
+              ? 'weekly'
+              : 'monthly';
+        await replyText(message, `📨 Sending **${kind}** admin report (calendar-to-now)…`);
+        try {
+          await sendAdminReport(client, String(process.env.BOT_OWNER_ID || ''), /** @type {'daily'|'weekly'|'monthly'} */ (kind));
+          await replyText(message, `✅ Sent **${kind}** admin report DM.`);
+        } catch (e) {
+          console.error('[AdminReports] manual command failed:', e?.message || e);
+          await replyText(message, `❌ Failed to send **${kind}** report. Check logs.`);
+        }
         return;
       }
 
@@ -3188,7 +3212,9 @@ if (lowerContent === '!scanner off') {
           } catch (e) {
             console.error('[!testweeklysnapshot] panel PNG:', e);
           }
-          const result = await createPost(text, null, png);
+          const result = await createPost(text, null, png, {
+            audit: { category: 'manual_weekly_snapshot_test' }
+          });
 
           if (result.success) {
             await replyText(

@@ -1,12 +1,35 @@
 'use strict';
 
+/**
+ * Admin owner DMs: 3 embeds (operations · performance · subscriptions/X audit).
+ *
+ * Schedule: calendar-based in `ADMIN_REPORT_TIMEZONE` at `ADMIN_REPORT_LOCAL_HOUR` (0–23),
+ * within the first ~12 minutes of that hour: daily every day, weekly on Mondays,
+ * monthly on the 1st. State: `data/adminReportScheduleState.json`.
+ *
+ * Env: `BOT_OWNER_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (billing + membership_events),
+ * `ADMIN_REPORT_TIMEZONE` (default America/Chicago), `ADMIN_REPORT_LOCAL_HOUR` (default 9).
+ */
+
+const path = require('path');
 const { EmbedBuilder } = require('discord.js');
-const { readJson } = require('./jsonStore');
+const { readJson, writeJson } = require('./jsonStore');
 const { MOD_ACTIONS_PATH } = require('./modActionsService');
 const { getAllTrackedCalls } = require('./trackedCallsService');
+const { fetchAdminBillingSnapshot } = require('./adminBillingStats');
+const {
+  loadXPostAuditEventsSince,
+  summarizeXPostAudit
+} = require('./xPostAudit');
+const {
+  resolveAdminTimeZone,
+  resolveLocalReportHour,
+  resolveReportWindow,
+  zonedWallParts
+} = require('./adminReportTime');
 
-const MS_DAY = 24 * 60 * 60 * 1000;
-const MS_WEEK = 7 * MS_DAY;
+const SCHEDULE_STATE_PATH = path.join(__dirname, '../data/adminReportScheduleState.json');
+
 const MAX_VALID_X = 500;
 const NOTE_BUCKET_MAX = 6;
 const PER_MOD_RATIO_LINES = 10;
@@ -64,6 +87,12 @@ function formatAvgX(n) {
   return `${n.toFixed(2)}x`;
 }
 
+/** @param {unknown} call */
+function callFirstMs(call) {
+  const t = Date.parse(String(call.firstCalledAt || call.calledAt || call.createdAt || ''));
+  return Number.isFinite(t) ? t : 0;
+}
+
 /**
  * @returns {{
  *   totalAutoCalls: number,
@@ -102,17 +131,9 @@ function computeSystemStats() {
 }
 
 /**
- * @returns {{
- *   avgXBot: number | null,
- *   avgXUser: number | null,
- *   botReach2xPct: string,
- *   botReach5xPct: string,
- *   botValidForAvg: number,
- *   botTotalForMilestone: number
- * } | null}
+ * @param {unknown[]} calls
  */
-function computePerformanceStats() {
-  const calls = getAllTrackedCalls();
+function computePerformanceStatsForCalls(calls) {
   let sumBot = 0;
   let nBotValid = 0;
   let sumUser = 0;
@@ -156,6 +177,41 @@ function computePerformanceStats() {
     botValidForAvg: nBotValid,
     botTotalForMilestone: nBotMilestone
   };
+}
+
+function computePerformanceStats() {
+  return computePerformanceStatsForCalls(getAllTrackedCalls());
+}
+
+/**
+ * @param {number} sinceMs
+ * @param {number} untilMs
+ */
+function computePerformanceStatsWindow(sinceMs, untilMs) {
+  const calls = getAllTrackedCalls().filter(c => {
+    const t = callFirstMs(c);
+    return t > 0 && t >= sinceMs && t <= untilMs;
+  });
+  return computePerformanceStatsForCalls(calls);
+}
+
+/**
+ * @param {number} sinceMs
+ * @param {number} untilMs
+ */
+function computeCallVolumeWindow(sinceMs, untilMs) {
+  let bot = 0;
+  let user = 0;
+  let watch = 0;
+  for (const c of getAllTrackedCalls()) {
+    const t = callFirstMs(c);
+    if (!t || t < sinceMs || t > untilMs) continue;
+    const src = String(c.callSourceType || '').toLowerCase();
+    if (src === 'bot_call') bot += 1;
+    else if (src === 'watch_only') watch += 1;
+    else user += 1;
+  }
+  return { bot, user, watch, total: bot + user + watch };
 }
 
 /**
@@ -303,84 +359,219 @@ function formatPerModApprovalDenialRatios(byMod) {
 }
 
 /**
- * @param {'daily' | 'weekly'} kind
+ * @param {ReturnType<computePerformanceStatsForCalls>} perf
  */
-function buildAdminReportEmbed(kind, system, performance, rejection, modWindow, windowLabel) {
-  const title =
-    kind === 'daily' ? '📊 Daily admin report' : '📊 Weekly admin report';
+function formatPerformanceLines(perf) {
+  return [
+    `**Avg × (bot):** ${formatAvgX(perf.avgXBot)} _(${perf.botValidForAvg} calls ≤${MAX_VALID_X}×)_`,
+    `**Avg × (user):** ${formatAvgX(perf.avgXUser)}`,
+    `**Bot ≥2×:** ${perf.botReach2xPct} _(${perf.botTotalForMilestone} w/ MC data)_`,
+    `**Bot ≥5×:** ${perf.botReach5xPct}`
+  ].join('\n');
+}
+
+/** @param {Record<string, { ok: number, fail: number }>} byCat */
+function formatCategoryRollup(byCat, keys) {
+  const lines = [];
+  for (const k of keys) {
+    const row = byCat[k];
+    if (!row || (row.ok === 0 && row.fail === 0)) continue;
+    lines.push(`• **${k}** — ${row.ok} ok · ${row.fail} fail`);
+  }
+  return lines.length ? lines.join('\n') : '— *(no posted events in window)*';
+}
+
+/**
+ * @param {'daily' | 'weekly' | 'monthly'} kind
+ */
+function kindTitle(kind) {
+  if (kind === 'daily') return 'Daily';
+  if (kind === 'weekly') return 'Weekly';
+  return 'Monthly';
+}
+
+/**
+ * @param {'daily' | 'weekly' | 'monthly'} kind
+ */
+function perfWindowLabel(kind) {
+  if (kind === 'daily') return 'Rolling 24h (calls by first-called time)';
+  if (kind === 'weekly') return 'Rolling 7d (calls by first-called time)';
+  return 'Month-to-date (calls by first-called time)';
+}
+
+/**
+ * @param {'daily' | 'weekly' | 'monthly'} kind
+ * @param {{
+ *   tz: string,
+ *   windowLabel: string,
+ *   system: ReturnType<computeSystemStats>,
+ *   rejection: ReturnType<computeRejectionBreakdown>,
+ *   modWindow: { counts: ReturnType<summarizeModerationCounts>, perModRatios: string },
+ *   volWindow: ReturnType<computeCallVolumeWindow>,
+ *   perfWindow: ReturnType<computePerformanceStatsForCalls>,
+ *   perfAllTime: ReturnType<computePerformanceStatsForCalls>,
+ *   billing: import('./adminBillingStats').AdminBillingSnapshot,
+ *   xSummary: ReturnType<summarizeXPostAudit>,
+ *   xEventsLen: number
+ * }} ctx
+ */
+function buildAdminReportEmbeds(kind, ctx) {
+  const kt = kindTitle(kind);
 
   const systemLines = [
-    `**Auto-calls:** ${system.totalAutoCalls} · **User:** ${system.totalUserCalls}${
-      system.totalWatchOnly > 0 ? ` · **Watch-only:** ${system.totalWatchOnly}` : ''
+    `**Auto-calls:** ${ctx.system.totalAutoCalls} · **User:** ${ctx.system.totalUserCalls}${
+      ctx.system.totalWatchOnly > 0 ? ` · **Watch-only:** ${ctx.system.totalWatchOnly}` : ''
     }`,
-    `**Coin approvals** (tracked): ${system.totalApprovals} · **Rejections:** ${system.totalRejections}`
+    `**Coin approvals** (tracked): ${ctx.system.totalApprovals} · **Rejections:** ${ctx.system.totalRejections}`
   ].join('\n');
 
   const rejLines = [
-    `**Denied:** ${rejection.denied} · **Excluded:** ${rejection.excluded}`,
-    rejection.denied + rejection.excluded > 0
-      ? `**By mod notes** (top ${NOTE_BUCKET_MAX}):\n${rejection.noteSummary}`
+    `**Denied:** ${ctx.rejection.denied} · **Excluded:** ${ctx.rejection.excluded}`,
+    ctx.rejection.denied + ctx.rejection.excluded > 0
+      ? `**By mod notes** (top ${NOTE_BUCKET_MAX}):\n${ctx.rejection.noteSummary}`
       : ''
   ]
     .filter(Boolean)
     .join('\n');
 
-  const perfLines = performance
-    ? [
-        `**Avg X (bot):** ${formatAvgX(performance.avgXBot)} _(${performance.botValidForAvg} calls ≤${MAX_VALID_X}x)_`,
-        `**Avg X (user):** ${formatAvgX(performance.avgXUser)}`,
-        `**Bot ≥2x:** ${performance.botReach2xPct} _(${performance.botTotalForMilestone} w/ MC data)_`,
-        `**Bot ≥5x:** ${performance.botReach5xPct}`
-      ].join('\n')
-    : '— *performance unavailable*';
-
-  const counts = modWindow.counts;
-  const modHeader =
-    kind === 'daily'
-      ? `**Window:** last 24h (\`${windowLabel}\`)`
-      : `**Window:** last 7d (\`${windowLabel}\`)`;
-
+  const counts = ctx.modWindow.counts;
   const modLines = [
-    modHeader,
+    `**Range:** ${ctx.windowLabel}`,
+    '',
+    `**New tracked calls (window):** ${ctx.volWindow.total} · bot ${ctx.volWindow.bot} · user ${ctx.volWindow.user} · watch ${ctx.volWindow.watch}`,
     '',
     `**Coin appr:** ${counts.coinApprovals} · **deny:** ${counts.coinDenies} · **exclude:** ${counts.coinExcludes}`,
     `**X appr:** ${counts.xApprovals} · **X deny:** ${counts.xDenies} · **Dev add:** ${counts.devAdds}`,
     '',
     '**Appr : den per mod** (coin+X)',
-    truncateEmbedField(modWindow.perModRatios)
+    truncateEmbedField(ctx.modWindow.perModRatios)
   ].join('\n');
 
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle(title)
+  const perfWindowLines = formatPerformanceLines(ctx.perfWindow);
+  const perfAllLines = formatPerformanceLines(ctx.perfAllTime);
+
+  const mrr = Number(ctx.billing.approxMrrUsd);
+  const gross = Number(ctx.billing.windowGrossUsdFromCents);
+  const billingLines = ctx.billing.ok
+    ? [
+        `**Active subscriptions:** ${ctx.billing.activeSubscriptions}`,
+        `**Approx MRR** _(plan price → monthly)_: **$${Number.isFinite(mrr) ? mrr.toFixed(2) : '—'}** USD`,
+        ctx.billing.planMixLines.length
+          ? `**Plan mix:** ${ctx.billing.planMixLines.join(' · ')}`
+          : '**Plan mix:** —',
+        `**Membership events** _(window)_: ${ctx.billing.windowEventCount} rows · **Σ USD** (recorded cents): **$${Number.isFinite(gross) ? gross.toFixed(2) : '0.00'}**`,
+        ctx.billing.pendingSolInvoices != null
+          ? `**Pending SOL quotes:** ${ctx.billing.pendingSolInvoices}`
+          : '',
+        Object.keys(ctx.billing.paymentChannelMix || {}).length
+          ? `**Channels:** ${Object.entries(ctx.billing.paymentChannelMix)
+              .map(([k, v]) => `${k} ${v}`)
+              .join(' · ')}`
+          : '',
+        '',
+        '_MRR is a dashboard-style approximation; Stripe fees/taxes not deducted._'
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : `— **Billing unavailable:** ${ctx.billing.reason || 'unknown'}`;
+
+  const xs = ctx.xSummary;
+  const opsKeys = ['approval_publish', 'leaderboard_digest', 'weekly_terminal_snapshot'];
+  const engagementKeys = ['engagement_weekly_runner', 'engagement_monthly_top_caller'];
+  const manualKeys = [
+    'manual_connection_test',
+    'manual_weekly_snapshot_test',
+    'manual_test_milestone'
+  ];
+
+  const xLines = [
+    `**Audit rows in window:** ${ctx.xEventsLen}`,
+    `**Totals:** ${xs.totalOk} posted · **${xs.totalFail} failed** · ${xs.mediaOk} with media · ${xs.repliesOk} replies`,
+    '',
+    '**Milestones**',
+    `• Community (user+watch): **${xs.milestoneUserSideOk}** ok · **${xs.milestoneUserSideFail}** fail`,
+    `• Bot: **${xs.milestoneBotOk}** ok · **${xs.milestoneBotFail}** fail`,
+    '',
+    '**Digests & snapshots**',
+    truncateEmbedField(formatCategoryRollup(xs.byCat, [...opsKeys, ...engagementKeys])),
+    '',
+    '**Manual / tests**',
+    truncateEmbedField(formatCategoryRollup(xs.byCat, manualKeys)),
+    '',
+    '**Raw categories**',
+    truncateEmbedField(formatCategoryRollup(xs.byCat, Object.keys(xs.byCat).sort()))
+  ].join('\n');
+
+  const embedOps = new EmbedBuilder()
+    .setColor(0x10b981)
+    .setTitle(`McG Scanner · ${kt} · Operations`)
+    .setDescription(`Timezone **${ctx.tz}** · moderation + window calls below.\n**${ctx.windowLabel}**`)
     .addFields(
       {
-        name: 'System (all-time)',
+        name: 'Tracked pipeline (all-time)',
         value: truncateEmbedField([systemLines, '', rejLines].join('\n')),
         inline: false
       },
-      { name: 'Performance (all-time)', value: truncateEmbedField(perfLines), inline: false },
-      { name: 'Moderation (window)', value: truncateEmbedField(modLines), inline: false }
+      { name: 'Moderation + volume (window)', value: truncateEmbedField(modLines), inline: false }
+    );
+
+  const embedPerf = new EmbedBuilder()
+    .setColor(0x6366f1)
+    .setTitle(`Performance · ${kt}`)
+    .addFields(
+      {
+        name: perfWindowLabel(kind),
+        value: truncateEmbedField(perfWindowLines),
+        inline: false
+      },
+      {
+        name: 'All-time',
+        value: truncateEmbedField(perfAllLines),
+        inline: false
+      }
+    );
+
+  const embedRev = new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setTitle(`Revenue & X · ${kt}`)
+    .addFields(
+      { name: 'Subscriptions & cash signals', value: truncateEmbedField(billingLines), inline: false },
+      { name: 'X posting (audit log)', value: truncateEmbedField(xLines), inline: false }
     )
-    .setFooter({ text: `McG Scanner • ${kind} report` })
+    .setFooter({
+      text: `McG Scanner • ${kind} report • ${ctx.tz}`
+    })
     .setTimestamp(new Date());
 
-  return embed;
+  return [embedOps, embedPerf, embedRev];
+}
+
+async function loadScheduleState() {
+  try {
+    const j = await readJson(SCHEDULE_STATE_PATH);
+    return j && typeof j === 'object' ? j : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveScheduleState(state) {
+  await writeJson(SCHEDULE_STATE_PATH, state);
 }
 
 /**
  * @param {import('discord.js').Client} client
  * @param {string} ownerId
- * @param {'daily' | 'weekly'} kind
+ * @param {'daily' | 'weekly' | 'monthly'} kind
  */
 async function sendAdminReport(client, ownerId, kind) {
   const owner = String(ownerId || '').trim();
   if (!owner) return;
 
   try {
-    const now = Date.now();
-    const sinceMs = kind === 'daily' ? now - MS_DAY : now - MS_WEEK;
-    const windowLabel = `${new Date(sinceMs).toISOString().slice(0, 16)}Z → now`;
+    const tz = resolveAdminTimeZone();
+    const untilMs = Date.now();
+    const { sinceMs, untilMs: untilResolved, label } = resolveReportWindow(kind, untilMs, tz);
 
     let system = {
       totalAutoCalls: 0,
@@ -395,11 +586,15 @@ async function sendAdminReport(client, ownerId, kind) {
       console.error('[AdminReports] System stats failed:', e.message || e);
     }
 
-    let performance = null;
+    let perfAllTime;
+    let perfWindow;
     try {
-      performance = computePerformanceStats();
+      perfAllTime = computePerformanceStats();
+      perfWindow = computePerformanceStatsWindow(sinceMs, untilResolved);
     } catch (e) {
       console.error('[AdminReports] Performance stats failed:', e.message || e);
+      perfAllTime = computePerformanceStatsForCalls(getAllTrackedCalls());
+      perfWindow = computePerformanceStatsForCalls([]);
     }
 
     let rejection = { denied: 0, excluded: 0, noteSummary: '—' };
@@ -407,6 +602,13 @@ async function sendAdminReport(client, ownerId, kind) {
       rejection = computeRejectionBreakdown();
     } catch (e) {
       console.error('[AdminReports] Rejection breakdown failed:', e.message || e);
+    }
+
+    let volWindow = { bot: 0, user: 0, watch: 0, total: 0 };
+    try {
+      volWindow = computeCallVolumeWindow(sinceMs, untilResolved);
+    } catch (e) {
+      console.error('[AdminReports] Volume window failed:', e.message || e);
     }
 
     let modWindow = {
@@ -425,18 +627,49 @@ async function sendAdminReport(client, ownerId, kind) {
       console.error('[AdminReports] Moderation window failed:', e.message || e);
     }
 
-    const embed = buildAdminReportEmbed(
-      kind,
+    /** @type {import('./adminBillingStats').AdminBillingSnapshot} */
+    let billing = {
+      ok: false,
+      activeSubscriptions: 0,
+      approxMrrUsd: 0,
+      planMixLines: [],
+      windowEventCount: 0,
+      windowGrossUsdFromCents: 0,
+      pendingSolInvoices: null,
+      paymentChannelMix: {}
+    };
+    try {
+      billing = await fetchAdminBillingSnapshot(sinceMs, untilResolved);
+    } catch (e) {
+      console.error('[AdminReports] Billing snapshot failed:', e.message || e);
+    }
+
+    let xEvents = [];
+    try {
+      xEvents = await loadXPostAuditEventsSince(sinceMs, untilResolved);
+    } catch (e) {
+      console.error('[AdminReports] X audit load failed:', e.message || e);
+    }
+    const xSummary = summarizeXPostAudit(xEvents);
+
+    const embeds = buildAdminReportEmbeds(kind, {
+      tz,
+      windowLabel: label,
       system,
-      performance,
       rejection,
       modWindow,
-      windowLabel
-    );
+      volWindow,
+      perfWindow,
+      perfAllTime,
+      billing,
+      xSummary,
+      xEventsLen: xEvents.length
+    });
 
     try {
       const user = await client.users.fetch(owner);
-      await user.send({ embeds: [embed] });
+      await user.send({ embeds });
+      console.log(`[AdminReports] Sent ${kind} report (${embeds.length} embeds) · ${label}`);
     } catch (e) {
       console.error('[AdminReports] DM to owner failed:', e.message || e);
     }
@@ -455,19 +688,56 @@ function startAdminReports(client) {
     return;
   }
 
-  const scheduleEvery = (kind, ms) => {
-    const tick = () => {
-      Promise.resolve(sendAdminReport(client, ownerId, kind)).finally(() => {
-        setTimeout(tick, ms);
-      });
-    };
-    setTimeout(tick, ms);
+  const tz = resolveAdminTimeZone();
+  const hour = resolveLocalReportHour();
+  console.log(
+    `[AdminReports] Calendar sends enabled · TZ=${tz} · localHour=${hour} · owner=${ownerId.slice(0, 6)}…`
+  );
+
+  const tick = async () => {
+    try {
+      const wall = zonedWallParts(Date.now(), tz);
+      if (wall.hour !== hour || wall.minute > 12) {
+        return;
+      }
+
+      /** @type {{ lastDailyYmd?: string, lastWeeklyYmd?: string, lastMonthlyYm?: string }} */
+      const state = await loadScheduleState();
+      const next = {
+        lastDailyYmd: String(state.lastDailyYmd || ''),
+        lastWeeklyYmd: String(state.lastWeeklyYmd || ''),
+        lastMonthlyYm: String(state.lastMonthlyYm || '')
+      };
+
+      if (next.lastDailyYmd !== wall.ymd) {
+        next.lastDailyYmd = wall.ymd;
+        await saveScheduleState(next);
+        await sendAdminReport(client, ownerId, 'daily');
+      }
+
+      if (wall.weekday === 'Monday' && next.lastWeeklyYmd !== wall.ymd) {
+        next.lastWeeklyYmd = wall.ymd;
+        await saveScheduleState(next);
+        await sendAdminReport(client, ownerId, 'weekly');
+      }
+
+      if (wall.day === 1 && next.lastMonthlyYm !== wall.ym) {
+        next.lastMonthlyYm = wall.ym;
+        await saveScheduleState(next);
+        await sendAdminReport(client, ownerId, 'monthly');
+      }
+    } catch (e) {
+      console.error('[AdminReports] scheduler:', e?.message || e);
+    }
   };
 
-  scheduleEvery('daily', MS_DAY);
-  scheduleEvery('weekly', MS_WEEK);
+  setInterval(() => {
+    void tick();
+  }, 60 * 1000);
 
-  console.log('[AdminReports] Scheduled daily (24h) and weekly (7d) DMs to bot owner');
+  void tick();
+
+  console.log('[AdminReports] Scheduler: daily · weekly (Mon) · monthly (1st) at local hour');
 }
 
 module.exports = {

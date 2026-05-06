@@ -54,11 +54,9 @@ async function publishApprovedCoinToX(contractAddress) {
     }
   }
 
-  const result = await createPost(
-    postText,
-    hasOriginal ? trackedCall.xOriginalPostId : null,
-    chartBuf || undefined
-  );
+  const result = await createPost(postText, hasOriginal ? trackedCall.xOriginalPostId : null, chartBuf || undefined, {
+    audit: { category: 'approval_publish', callSourceType: trackedCall.callSourceType || null }
+  });
 
   if (!result.success || !result.id) {
     return {

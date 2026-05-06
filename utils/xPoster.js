@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const axios = require('axios');
+const { appendXPostAuditEvent, shortenError } = require('./xPostAudit');
 
 const X_API_BASE = 'https://api.x.com/2';
 
@@ -284,9 +285,26 @@ async function uploadMediaPng(buffer) {
  * @param {string} text
  * @param {string | null} [replyToId]
  * @param {Buffer | Uint8Array | null} [mediaPngBuffer] uploaded when set (unless `options.preUploadedMediaId` is set)
- * @param {{ preUploadedMediaId?: string } | null} [options] pass `preUploadedMediaId` when the caller already called `uploadMediaPng`
+ * @param {{ preUploadedMediaId?: string, audit?: { category: string, callSourceType?: string|null } } | null} [options] pass `preUploadedMediaId` when the caller already called `uploadMediaPng`
  */
 async function createPost(text, replyToId = null, mediaPngBuffer = null, options = null) {
+  const audit =
+    options && typeof options === 'object' && options.audit && typeof options.audit === 'object'
+      ? options.audit
+      : null;
+
+  const finalizeAudit = (success, mediaAttached, resultForErr) => {
+    if (!audit || !audit.category) return;
+    void appendXPostAuditEvent({
+      success,
+      category: String(audit.category),
+      reply: Boolean(replyToId),
+      media: Boolean(mediaAttached),
+      callSourceType: audit.callSourceType != null ? String(audit.callSourceType) : null,
+      errorSnippet: success ? null : shortenError(resultForErr?.error ?? resultForErr)
+    });
+  };
+
   const url = `${X_API_BASE}/tweets`;
 
   const body = {
@@ -340,19 +358,23 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null, options
       console.log('[XPoster] Tweet created with media_ids=', body.media.media_ids, 'id=', postId);
     }
 
-    return {
+    const ok = {
       success: true,
       id: postId,
       text: postText,
       raw: response.data
     };
+    finalizeAudit(true, Boolean(mediaId && body.media?.media_ids?.length), ok);
+    return ok;
   } catch (error) {
     console.error('[XPoster] Post failed:', error?.response?.data || error.message);
 
-    return {
+    const fail = {
       success: false,
       error: error?.response?.data || error.message
     };
+    finalizeAudit(false, false, fail);
+    return fail;
   }
 }
 

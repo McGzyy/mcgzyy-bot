@@ -315,7 +315,7 @@ async function postDigest(p, options = {}) {
     text = maxChars >= 2000 ? fitTweet(text, maxChars) : fitTweetWholeLines(text, maxChars);
   }
 
-  const result = await createPost(text, null, png);
+  const result = await createPost(text, null, png, { audit: { category: 'leaderboard_digest' } });
   if (!result.success) {
     console.error('[XLeaderboardDigest] post failed:', result.error || 'unknown');
   } else {
@@ -436,7 +436,7 @@ async function tickWeeklyStatsSnapshot() {
     console.error('[XWeeklyStatsSnapshot] panel image failed:', err?.message || err);
   }
 
-  const result = await createPost(text, null, png);
+  const result = await createPost(text, null, png, { audit: { category: 'weekly_terminal_snapshot' } });
   if (!result.success) {
     console.error('[XWeeklyStatsSnapshot] post failed:', result.error || 'unknown');
     return;

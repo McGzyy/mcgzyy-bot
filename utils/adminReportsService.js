@@ -12,8 +12,15 @@
  * `ADMIN_REPORT_LOCAL_HOUR` (default 9). These must be set in the **Node/bot** env (PM2 / `.env` next to
  * `index.js`); Vercel env does not affect the Discord process unless that process runs on Vercel.
  *
- * Mod team reports: `MOD_REPORT_RECIPIENT_IDS` (comma-separated Discord user IDs) for scheduled DMs
- * (same calendar windows as admin). Manual: `!dmodreport` / `!wmodreport` / `!mmodreport` (Manage Server).
+ * Scheduled **owner** admin DMs go to: **`BOT_OWNER_ID`** (if set) ∪ everyone with **`ADMIN_REPORT_ROLE_ID`**
+ * ∪ **`ADMIN_REPORT_RECIPIENT_IDS`** (comma-separated user IDs). Same member-cache rules as mod reports:
+ * **`ADMIN_REPORT_FETCH_ROLE_MEMBERS=1`** + Server Members intent when needed.
+ *
+ * Mod team reports (scheduled): set **`MOD_REPORT_ROLE_ID`** (Discord role snowflake) to DM everyone
+ * with that role in the primary guild (`DISCORD_GUILD_ID`, else first guild). Optional comma list
+ * **`MOD_REPORT_RECIPIENT_IDS`** for extra recipients. If the role has holders but none are cached,
+ * set **`MOD_REPORT_FETCH_ROLE_MEMBERS=1`** once per run triggers `guild.members.fetch()` (needs
+ * **Server Members intent**). Manual: `!dmodreport` / `!wmodreport` / `!mmodreport` (Manage Server).
  */
 
 const path = require('path');
@@ -873,6 +880,157 @@ function parseModReportRecipientIds() {
   return [...new Set(raw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean))];
 }
 
+/**
+ * @param {import('discord.js').Client} client
+ */
+function getPrimaryGuildForReports(client) {
+  if (!client?.guilds?.cache) return null;
+  const envId = String(process.env.DISCORD_GUILD_ID ?? '').trim();
+  if (envId) {
+    const g = client.guilds.cache.get(envId);
+    if (g) return g;
+  }
+  const values = [...client.guilds.cache.values()];
+  if (values.length === 1) return values[0];
+  return values.sort((a, b) => a.id.localeCompare(b.id))[0] ?? null;
+}
+
+/**
+ * Everyone with `MOD_REPORT_ROLE_ID` (plus optional `MOD_REPORT_RECIPIENT_IDS`). Resolves at send time.
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<string[]>}
+ */
+async function resolveModReportRecipientIds(client) {
+  const extra = parseModReportRecipientIds();
+  const roleId = String(process.env.MOD_REPORT_ROLE_ID || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
+  if (!roleId) {
+    return extra;
+  }
+
+  const guild = getPrimaryGuildForReports(client);
+  if (!guild) {
+    if (extra.length) return extra;
+    console.warn('[ModReports] MOD_REPORT_ROLE_ID set but bot is in no guild (or cache empty).');
+    return [];
+  }
+
+  try {
+    let role = guild.roles.cache.get(roleId);
+    if (!role) {
+      role = await guild.roles.fetch(roleId).catch(() => null);
+    }
+    if (!role) {
+      console.warn('[ModReports] Unknown MOD_REPORT_ROLE_ID:', roleId);
+      return extra;
+    }
+
+    const fetchAll = String(process.env.MOD_REPORT_FETCH_ROLE_MEMBERS || '').trim() === '1';
+    if (fetchAll) {
+      await guild.members.fetch().catch(err => {
+        console.warn('[ModReports] guild.members.fetch failed:', err?.message || err);
+      });
+    }
+
+    const fromRole = [];
+    for (const m of guild.members.cache.values()) {
+      if (m.user?.bot) continue;
+      if (!m.roles.cache.has(roleId)) continue;
+      fromRole.push(m.id);
+    }
+
+    const approx = typeof role.memberCount === 'number' ? role.memberCount : null;
+    if (!fromRole.length && approx != null && approx > 0 && !fetchAll) {
+      console.warn(
+        `[ModReports] 0 members with role "${role.name}" in cache (${approx} on role). Set MOD_REPORT_FETCH_ROLE_MEMBERS=1 and enable Server Members intent, or wait until members are cached.`
+      );
+    }
+
+    return [...new Set([...extra, ...fromRole])];
+  } catch (e) {
+    console.error('[ModReports] resolveModReportRecipientIds:', e.message || e);
+    return extra;
+  }
+}
+
+function parseAdminReportRecipientIds() {
+  const raw = String(process.env.ADMIN_REPORT_RECIPIENT_IDS || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
+  if (!raw) return [];
+  return [...new Set(raw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean))];
+}
+
+/**
+ * `BOT_OWNER_ID` ∪ `ADMIN_REPORT_RECIPIENT_IDS` ∪ members with `ADMIN_REPORT_ROLE_ID`.
+ * @param {import('discord.js').Client} client
+ * @returns {Promise<string[]>}
+ */
+async function resolveAdminReportRecipientIds(client) {
+  const owner = String(process.env.BOT_OWNER_ID ?? '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
+  const extra = parseAdminReportRecipientIds();
+  /** @type {Set<string>} */
+  const ids = new Set();
+  if (owner) ids.add(owner);
+  for (const x of extra) ids.add(x);
+
+  const roleId = String(process.env.ADMIN_REPORT_ROLE_ID || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
+  if (!roleId) {
+    return [...ids];
+  }
+
+  const guild = getPrimaryGuildForReports(client);
+  if (!guild) {
+    if (!ids.size) {
+      console.warn('[AdminReports] ADMIN_REPORT_ROLE_ID set but bot is in no guild (or cache empty).');
+    }
+    return [...ids];
+  }
+
+  try {
+    let role = guild.roles.cache.get(roleId);
+    if (!role) {
+      role = await guild.roles.fetch(roleId).catch(() => null);
+    }
+    if (!role) {
+      console.warn('[AdminReports] Unknown ADMIN_REPORT_ROLE_ID:', roleId);
+      return [...ids];
+    }
+
+    const fetchAll = String(process.env.ADMIN_REPORT_FETCH_ROLE_MEMBERS || '').trim() === '1';
+    if (fetchAll) {
+      await guild.members.fetch().catch(err => {
+        console.warn('[AdminReports] guild.members.fetch failed:', err?.message || err);
+      });
+    }
+
+    const fromRole = [];
+    for (const m of guild.members.cache.values()) {
+      if (m.user?.bot) continue;
+      if (!m.roles.cache.has(roleId)) continue;
+      fromRole.push(m.id);
+    }
+
+    const approx = typeof role.memberCount === 'number' ? role.memberCount : null;
+    if (!fromRole.length && approx != null && approx > 0 && !fetchAll) {
+      console.warn(
+        `[AdminReports] 0 members with role "${role.name}" in cache (${approx} on role). Set ADMIN_REPORT_FETCH_ROLE_MEMBERS=1 and enable Server Members intent, or wait until members are cached.`
+      );
+    }
+
+    for (const id of fromRole) ids.add(id);
+    return [...ids];
+  } catch (e) {
+    console.error('[AdminReports] resolveAdminReportRecipientIds:', e.message || e);
+    return [...ids];
+  }
+}
+
 async function loadModReportScheduleState() {
   try {
     const j = await readJson(MOD_SCHEDULE_STATE_PATH);
@@ -887,14 +1045,20 @@ async function saveModReportScheduleState(state) {
 }
 
 /**
- * Same calendar schedule as admin reports; DMs each ID in `MOD_REPORT_RECIPIENT_IDS`.
+ * Same calendar schedule as admin reports; DMs everyone matching `MOD_REPORT_ROLE_ID` (and optional extra IDs).
  * @param {import('discord.js').Client} client
  */
 function startModReports(client) {
-  const ids = parseModReportRecipientIds();
-  if (!ids.length) {
+  const roleConfigured = Boolean(
+    String(process.env.MOD_REPORT_ROLE_ID || '')
+      .trim()
+      .replace(/^['"]+|['"]+$/g, '')
+  );
+  const hasExtraIds = parseModReportRecipientIds().length > 0;
+
+  if (!roleConfigured && !hasExtraIds) {
     console.log(
-      '[ModReports] MOD_REPORT_RECIPIENT_IDS not set; scheduled mod reports disabled (manual !dmodreport / !wmodreport / !mmodreport still work for Manage Server)'
+      '[ModReports] Set MOD_REPORT_ROLE_ID (role snowflake) and/or MOD_REPORT_RECIPIENT_IDS; scheduled sends disabled (manual !dmodreport / !wmodreport / !mmodreport still work for Manage Server)'
     );
     return;
   }
@@ -902,13 +1066,18 @@ function startModReports(client) {
   const tz = resolveAdminTimeZone();
   const hour = resolveLocalReportHour();
   console.log(
-    `[ModReports] Scheduled sends enabled · TZ=${tz} · localHour=${hour} · recipients=${ids.length}`
+    `[ModReports] Scheduled sends enabled · TZ=${tz} · localHour=${hour} · byRole=${roleConfigured ? 'yes' : 'no'} · extraIds=${hasExtraIds ? 'yes' : 'no'}`
   );
 
   const tick = async () => {
     try {
       const wall = zonedWallParts(Date.now(), tz);
       if (wall.hour !== hour || wall.minute > 12) {
+        return;
+      }
+
+      const ids = await resolveModReportRecipientIds(client);
+      if (!ids.length) {
         return;
       }
 
@@ -961,24 +1130,38 @@ function startModReports(client) {
  * @param {import('discord.js').Client} client
  */
 function startAdminReports(client) {
-  const ownerId = String(process.env.BOT_OWNER_ID ?? '')
+  const ownerNorm = String(process.env.BOT_OWNER_ID ?? '')
     .trim()
     .replace(/^['"]+|['"]+$/g, '');
-  if (!ownerId) {
-    console.log('[AdminReports] BOT_OWNER_ID not set; scheduled reports disabled');
+  const roleConfigured = Boolean(
+    String(process.env.ADMIN_REPORT_ROLE_ID || '')
+      .trim()
+      .replace(/^['"]+|['"]+$/g, '')
+  );
+  const hasExtraAdminIds = parseAdminReportRecipientIds().length > 0;
+
+  if (!ownerNorm && !roleConfigured && !hasExtraAdminIds) {
+    console.log(
+      '[AdminReports] Set BOT_OWNER_ID and/or ADMIN_REPORT_ROLE_ID and/or ADMIN_REPORT_RECIPIENT_IDS; scheduled reports disabled'
+    );
     return;
   }
 
   const tz = resolveAdminTimeZone();
   const hour = resolveLocalReportHour();
   console.log(
-    `[AdminReports] Calendar sends enabled · TZ=${tz} · localHour=${hour} · owner=${ownerId.slice(0, 6)}…`
+    `[AdminReports] Calendar sends enabled · TZ=${tz} · localHour=${hour} · owner=${ownerNorm ? `${ownerNorm.slice(0, 6)}…` : '—'} · byRole=${roleConfigured ? 'yes' : 'no'} · extraIds=${hasExtraAdminIds ? 'yes' : 'no'}`
   );
 
   const tick = async () => {
     try {
       const wall = zonedWallParts(Date.now(), tz);
       if (wall.hour !== hour || wall.minute > 12) {
+        return;
+      }
+
+      const recipients = await resolveAdminReportRecipientIds(client);
+      if (!recipients.length) {
         return;
       }
 
@@ -993,19 +1176,25 @@ function startAdminReports(client) {
       if (next.lastDailyYmd !== wall.ymd) {
         next.lastDailyYmd = wall.ymd;
         await saveScheduleState(next);
-        await sendAdminReport(client, ownerId, 'daily');
+        for (const id of recipients) {
+          await sendAdminReport(client, id, 'daily');
+        }
       }
 
       if (wall.weekday === 'Monday' && next.lastWeeklyYmd !== wall.ymd) {
         next.lastWeeklyYmd = wall.ymd;
         await saveScheduleState(next);
-        await sendAdminReport(client, ownerId, 'weekly');
+        for (const id of recipients) {
+          await sendAdminReport(client, id, 'weekly');
+        }
       }
 
       if (wall.day === 1 && next.lastMonthlyYm !== wall.ym) {
         next.lastMonthlyYm = wall.ym;
         await saveScheduleState(next);
-        await sendAdminReport(client, ownerId, 'monthly');
+        for (const id of recipients) {
+          await sendAdminReport(client, id, 'monthly');
+        }
       }
     } catch (e) {
       console.error('[AdminReports] scheduler:', e?.message || e);

@@ -8,7 +8,12 @@
  * monthly on the 1st. State: `data/adminReportScheduleState.json`.
  *
  * Env: `BOT_OWNER_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (billing + membership_events),
- * `ADMIN_REPORT_TIMEZONE` (default America/Chicago), `ADMIN_REPORT_LOCAL_HOUR` (default 9).
+ * `ADMIN_REPORT_TIMEZONE` or `ADMIN_REPORT_TZ` (IANA, e.g. `America/Los_Angeles`; default America/Chicago),
+ * `ADMIN_REPORT_LOCAL_HOUR` (default 9). These must be set in the **Node/bot** env (PM2 / `.env` next to
+ * `index.js`); Vercel env does not affect the Discord process unless that process runs on Vercel.
+ *
+ * Mod team reports: `MOD_REPORT_RECIPIENT_IDS` (comma-separated Discord user IDs) for scheduled DMs
+ * (same calendar windows as admin). Manual: `!dmodreport` / `!wmodreport` / `!mmodreport` (Manage Server).
  */
 
 const path = require('path');
@@ -29,6 +34,7 @@ const {
 } = require('./adminReportTime');
 
 const SCHEDULE_STATE_PATH = path.join(__dirname, '../data/adminReportScheduleState.json');
+const MOD_SCHEDULE_STATE_PATH = path.join(__dirname, '../data/modReportScheduleState.json');
 
 const MAX_VALID_X = 500;
 const NOTE_BUCKET_MAX = 6;
@@ -636,6 +642,171 @@ function buildAdminReportEmbeds(kind, ctx) {
   return [embedOps, embedRev, embedPerf];
 }
 
+/**
+ * Shared data load for owner admin reports and mod-team reports (no DM).
+ * @param {'daily' | 'weekly' | 'monthly'} kind
+ */
+async function loadOwnerReportContext(kind) {
+  const tz = resolveAdminTimeZone();
+  const untilMs = Date.now();
+  const { sinceMs, untilMs: untilResolved, label } = resolveReportWindow(kind, untilMs, tz);
+
+  let system = {
+    totalAutoCalls: 0,
+    totalUserCalls: 0,
+    totalWatchOnly: 0,
+    totalApprovals: 0,
+    totalRejections: 0
+  };
+  try {
+    system = computeSystemStats();
+  } catch (e) {
+    console.error('[AdminReports] System stats failed:', e.message || e);
+  }
+
+  let perfAllTime;
+  let perfWindow;
+  try {
+    perfAllTime = computePerformanceStats();
+    perfWindow = computePerformanceStatsWindow(sinceMs, untilResolved);
+  } catch (e) {
+    console.error('[AdminReports] Performance stats failed:', e.message || e);
+    perfAllTime = computePerformanceStatsForCalls(getAllTrackedCalls());
+    perfWindow = computePerformanceStatsForCalls([]);
+  }
+
+  let rejection = { denied: 0, excluded: 0, noteSummary: '—' };
+  try {
+    rejection = computeRejectionBreakdown();
+  } catch (e) {
+    console.error('[AdminReports] Rejection breakdown failed:', e.message || e);
+  }
+
+  let volWindow = { bot: 0, user: 0, watch: 0, total: 0 };
+  try {
+    volWindow = computeCallVolumeWindow(sinceMs, untilResolved);
+  } catch (e) {
+    console.error('[AdminReports] Volume window failed:', e.message || e);
+  }
+
+  let modWindow = {
+    counts: summarizeModerationCounts(emptyTotalsByType()),
+    perModRatios: '—'
+  };
+  try {
+    const allModActions = await loadModActions();
+    const windowActions = filterActionsSince(allModActions, sinceMs);
+    const modAgg = aggregateModeration(windowActions);
+    modWindow = {
+      counts: summarizeModerationCounts(modAgg.totalsByType),
+      perModRatios: formatPerModApprovalDenialRatios(modAgg.byMod)
+    };
+  } catch (e) {
+    console.error('[AdminReports] Moderation window failed:', e.message || e);
+  }
+
+  /** @type {import('./adminBillingStats').AdminBillingSnapshot} */
+  let billing = {
+    ok: false,
+    activeSubscriptions: 0,
+    approxMrrUsd: 0,
+    planMixLines: [],
+    windowEventCount: 0,
+    windowGrossUsdFromCents: 0,
+    pendingSolInvoices: null,
+    paymentChannelMix: {}
+  };
+  try {
+    billing = await fetchAdminBillingSnapshot(sinceMs, untilResolved);
+  } catch (e) {
+    console.error('[AdminReports] Billing snapshot failed:', e.message || e);
+  }
+
+  let xEvents = [];
+  try {
+    xEvents = await loadXPostAuditEventsSince(sinceMs, untilResolved);
+  } catch (e) {
+    console.error('[AdminReports] X audit load failed:', e.message || e);
+  }
+  const xSummary = summarizeXPostAudit(xEvents);
+
+  return {
+    tz,
+    windowLabel: label,
+    sinceMs,
+    untilResolved,
+    system,
+    rejection,
+    modWindow,
+    volWindow,
+    perfWindow,
+    perfAllTime,
+    billing,
+    xSummary,
+    xEventsLen: xEvents.length
+  };
+}
+
+/**
+ * Mod-team view: pipeline + moderation + performance (no billing / X audit).
+ * @param {'daily' | 'weekly' | 'monthly'} kind
+ * @param {Awaited<ReturnType<typeof loadOwnerReportContext>>} ctx
+ */
+function buildModTeamReportEmbeds(kind, ctx) {
+  const kt = kindTitle(kind);
+  const footerText = `McG Scanner · Mod team · ${kt} · ${ctx.tz}`;
+  const stamp = new Date();
+  const attachFooter = e => e.setFooter({ text: footerText }).setTimestamp(stamp);
+
+  const noteBlock =
+    ctx.rejection.denied + ctx.rejection.excluded > 0
+      ? `\n\n**By mod notes** _(top ${NOTE_BUCKET_MAX})_\n${ctx.rejection.noteSummary}`
+      : '';
+
+  const perfCaption = `_${perfWindowLabel(kind)}_ vs **all-time** · parentheses = calls with MC for that metric`;
+
+  const embedMod = new EmbedBuilder()
+    .setColor(0x8b5cf6)
+    .setTitle(`McG Scanner · ${kt} · Mod team`)
+    .setDescription(`**Timezone:** ${ctx.tz}`)
+    .addFields(
+      {
+        name: 'Reporting window',
+        value: truncateEmbedField(ctx.windowLabel),
+        inline: false
+      },
+      {
+        name: 'Tracked pipeline (all-time)',
+        value: truncateEmbedField(formatPipelineMarkdown(ctx.system, ctx.rejection) + noteBlock),
+        inline: false
+      },
+      {
+        name: 'Moderation & volume (same window)',
+        value: truncateEmbedField(formatModVolumeMarkdown(ctx.volWindow, ctx.modWindow.counts)),
+        inline: false
+      },
+      {
+        name: 'Appr ÷ den per mod (coin + X)',
+        value: truncateEmbedField(ctx.modWindow.perModRatios),
+        inline: false
+      }
+    );
+
+  const embedPerf = new EmbedBuilder()
+    .setColor(0x6366f1)
+    .setTitle(`Performance · ${kt}`)
+    .setDescription(perfCaption)
+    .addFields({
+      name: 'Window vs all-time',
+      value: truncateEmbedField(formatPerfMarkdownTable(kind, ctx.perfWindow, ctx.perfAllTime)),
+      inline: false
+    });
+
+  attachFooter(embedMod);
+  attachFooter(embedPerf);
+  return [embedMod, embedPerf];
+}
+
 async function loadScheduleState() {
   try {
     const j = await readJson(SCHEDULE_STATE_PATH);
@@ -659,113 +830,131 @@ async function sendAdminReport(client, ownerId, kind) {
   if (!owner) return;
 
   try {
-    const tz = resolveAdminTimeZone();
-    const untilMs = Date.now();
-    const { sinceMs, untilMs: untilResolved, label } = resolveReportWindow(kind, untilMs, tz);
-
-    let system = {
-      totalAutoCalls: 0,
-      totalUserCalls: 0,
-      totalWatchOnly: 0,
-      totalApprovals: 0,
-      totalRejections: 0
-    };
-    try {
-      system = computeSystemStats();
-    } catch (e) {
-      console.error('[AdminReports] System stats failed:', e.message || e);
-    }
-
-    let perfAllTime;
-    let perfWindow;
-    try {
-      perfAllTime = computePerformanceStats();
-      perfWindow = computePerformanceStatsWindow(sinceMs, untilResolved);
-    } catch (e) {
-      console.error('[AdminReports] Performance stats failed:', e.message || e);
-      perfAllTime = computePerformanceStatsForCalls(getAllTrackedCalls());
-      perfWindow = computePerformanceStatsForCalls([]);
-    }
-
-    let rejection = { denied: 0, excluded: 0, noteSummary: '—' };
-    try {
-      rejection = computeRejectionBreakdown();
-    } catch (e) {
-      console.error('[AdminReports] Rejection breakdown failed:', e.message || e);
-    }
-
-    let volWindow = { bot: 0, user: 0, watch: 0, total: 0 };
-    try {
-      volWindow = computeCallVolumeWindow(sinceMs, untilResolved);
-    } catch (e) {
-      console.error('[AdminReports] Volume window failed:', e.message || e);
-    }
-
-    let modWindow = {
-      counts: summarizeModerationCounts(emptyTotalsByType()),
-      perModRatios: '—'
-    };
-    try {
-      const allModActions = await loadModActions();
-      const windowActions = filterActionsSince(allModActions, sinceMs);
-      const modAgg = aggregateModeration(windowActions);
-      modWindow = {
-        counts: summarizeModerationCounts(modAgg.totalsByType),
-        perModRatios: formatPerModApprovalDenialRatios(modAgg.byMod)
-      };
-    } catch (e) {
-      console.error('[AdminReports] Moderation window failed:', e.message || e);
-    }
-
-    /** @type {import('./adminBillingStats').AdminBillingSnapshot} */
-    let billing = {
-      ok: false,
-      activeSubscriptions: 0,
-      approxMrrUsd: 0,
-      planMixLines: [],
-      windowEventCount: 0,
-      windowGrossUsdFromCents: 0,
-      pendingSolInvoices: null,
-      paymentChannelMix: {}
-    };
-    try {
-      billing = await fetchAdminBillingSnapshot(sinceMs, untilResolved);
-    } catch (e) {
-      console.error('[AdminReports] Billing snapshot failed:', e.message || e);
-    }
-
-    let xEvents = [];
-    try {
-      xEvents = await loadXPostAuditEventsSince(sinceMs, untilResolved);
-    } catch (e) {
-      console.error('[AdminReports] X audit load failed:', e.message || e);
-    }
-    const xSummary = summarizeXPostAudit(xEvents);
-
-    const embeds = buildAdminReportEmbeds(kind, {
-      tz,
-      windowLabel: label,
-      system,
-      rejection,
-      modWindow,
-      volWindow,
-      perfWindow,
-      perfAllTime,
-      billing,
-      xSummary,
-      xEventsLen: xEvents.length
-    });
+    const ctx = await loadOwnerReportContext(kind);
+    const embeds = buildAdminReportEmbeds(kind, ctx);
 
     try {
       const user = await client.users.fetch(owner);
       await user.send({ embeds });
-      console.log(`[AdminReports] Sent ${kind} report (${embeds.length} embeds) · ${label}`);
+      console.log(`[AdminReports] Sent ${kind} report (${embeds.length} embeds) · ${ctx.windowLabel}`);
     } catch (e) {
       console.error('[AdminReports] DM to owner failed:', e.message || e);
     }
   } catch (e) {
     console.error('[AdminReports] Report failed:', e.message || e);
   }
+}
+
+/**
+ * @param {import('discord.js').Client} client
+ * @param {string} userId Discord user snowflake
+ * @param {'daily' | 'weekly' | 'monthly'} kind
+ */
+async function sendModReport(client, userId, kind) {
+  const uid = String(userId || '').trim();
+  if (!uid) return;
+
+  try {
+    const ctx = await loadOwnerReportContext(kind);
+    const embeds = buildModTeamReportEmbeds(kind, ctx);
+    const user = await client.users.fetch(uid);
+    await user.send({ embeds });
+    console.log(`[ModReports] Sent ${kind} mod team report (${embeds.length} embeds) · ${ctx.windowLabel} → ${uid.slice(0, 8)}…`);
+  } catch (e) {
+    console.error('[ModReports] DM failed:', e.message || e);
+  }
+}
+
+function parseModReportRecipientIds() {
+  const raw = String(process.env.MOD_REPORT_RECIPIENT_IDS || process.env.MOD_REPORT_DM_IDS || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
+  if (!raw) return [];
+  return [...new Set(raw.split(/[\s,]+/).map(s => s.trim()).filter(Boolean))];
+}
+
+async function loadModReportScheduleState() {
+  try {
+    const j = await readJson(MOD_SCHEDULE_STATE_PATH);
+    return j && typeof j === 'object' ? j : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveModReportScheduleState(state) {
+  await writeJson(MOD_SCHEDULE_STATE_PATH, state);
+}
+
+/**
+ * Same calendar schedule as admin reports; DMs each ID in `MOD_REPORT_RECIPIENT_IDS`.
+ * @param {import('discord.js').Client} client
+ */
+function startModReports(client) {
+  const ids = parseModReportRecipientIds();
+  if (!ids.length) {
+    console.log(
+      '[ModReports] MOD_REPORT_RECIPIENT_IDS not set; scheduled mod reports disabled (manual !dmodreport / !wmodreport / !mmodreport still work for Manage Server)'
+    );
+    return;
+  }
+
+  const tz = resolveAdminTimeZone();
+  const hour = resolveLocalReportHour();
+  console.log(
+    `[ModReports] Scheduled sends enabled · TZ=${tz} · localHour=${hour} · recipients=${ids.length}`
+  );
+
+  const tick = async () => {
+    try {
+      const wall = zonedWallParts(Date.now(), tz);
+      if (wall.hour !== hour || wall.minute > 12) {
+        return;
+      }
+
+      /** @type {{ lastDailyYmd?: string, lastWeeklyYmd?: string, lastMonthlyYm?: string }} */
+      const state = await loadModReportScheduleState();
+      const next = {
+        lastDailyYmd: String(state.lastDailyYmd || ''),
+        lastWeeklyYmd: String(state.lastWeeklyYmd || ''),
+        lastMonthlyYm: String(state.lastMonthlyYm || '')
+      };
+
+      if (next.lastDailyYmd !== wall.ymd) {
+        next.lastDailyYmd = wall.ymd;
+        await saveModReportScheduleState(next);
+        for (const id of ids) {
+          await sendModReport(client, id, 'daily');
+        }
+      }
+
+      if (wall.weekday === 'Monday' && next.lastWeeklyYmd !== wall.ymd) {
+        next.lastWeeklyYmd = wall.ymd;
+        await saveModReportScheduleState(next);
+        for (const id of ids) {
+          await sendModReport(client, id, 'weekly');
+        }
+      }
+
+      if (wall.day === 1 && next.lastMonthlyYm !== wall.ym) {
+        next.lastMonthlyYm = wall.ym;
+        await saveModReportScheduleState(next);
+        for (const id of ids) {
+          await sendModReport(client, id, 'monthly');
+        }
+      }
+    } catch (e) {
+      console.error('[ModReports] scheduler:', e?.message || e);
+    }
+  };
+
+  setInterval(() => {
+    void tick();
+  }, 60 * 1000);
+
+  void tick();
+
+  console.log('[ModReports] Scheduler: daily · weekly (Mon) · monthly (1st) at same local hour as admin reports');
 }
 
 /**
@@ -835,5 +1024,8 @@ function startAdminReports(client) {
 module.exports = {
   startAdminReports,
   sendAdminReport,
+  startModReports,
+  sendModReport,
+  loadOwnerReportContext,
   computeSystemStats
 };

@@ -1,6 +1,15 @@
-require('dotenv').config({ path: __dirname + '/.env' });
-
 const path = require('path');
+const fs = require('fs');
+// Merge env files so bot picks up keys from repo root or mcgzyy-bot/.env (later files override).
+const dotenvPaths = [
+  path.join(__dirname, '.env'),
+  path.join(__dirname, 'mcgzyy-bot', '.env')
+];
+for (const p of dotenvPaths) {
+  if (fs.existsSync(p)) {
+    require('dotenv').config({ path: p, override: true });
+  }
+}
 const { readJson, writeJson } = require('./utils/jsonStore');
 const { createXOAuthAuthorizeUrl } = require('./utils/xOAuthService');
 
@@ -66,7 +75,12 @@ const {
 } = require('./utils/approvalMessageLifecycle');
 
 const { recordModAction } = require('./utils/modActionsService');
-const { startAdminReports, sendAdminReport } = require('./utils/adminReportsService');
+const {
+  startAdminReports,
+  sendAdminReport,
+  startModReports,
+  sendModReport
+} = require('./utils/adminReportsService');
 const {
   createPendingDevSubmission,
   takePendingDevSubmission,
@@ -523,7 +537,8 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
       `• \`!resetbotstats\` — Reset bot-call stat exclusions on tracked data\n` +
       `• \`!resetmonitor\` — **Destructive:** clear all tracked coins, stop scanner & loops\n` +
       `• \`!truestats @user\` — Caller stats including reset/excluded calls\n` +
-      `• \`!truebotstats\` — Bot stats including reset/excluded calls\n\n`;
+      `• \`!truebotstats\` — Bot stats including reset/excluded calls\n` +
+      `• \`!dmodreport\` / \`!wmodreport\` / \`!mmodreport\` — **Mod team** digest DM (pipeline + moderation + performance; no billing)\n\n`;
   }
 
   if (resolveStaffRole(message.author.id) === 'admin') {
@@ -2012,6 +2027,11 @@ client.once('clientReady', async () => {
     } catch (e) {
       console.error('[AdminReports] startAdminReports failed:', e.message || e);
     }
+    try {
+      startModReports(client);
+    } catch (e) {
+      console.error('[ModReports] startModReports failed:', e.message || e);
+    }
   });
 
   try {
@@ -2946,6 +2966,30 @@ client.on('messageCreate', async (message) => {
           await replyTextBestEffort(
             message,
             `❌ Failed to send **${kind}** report: ${e instanceof Error ? e.message : String(e)}`
+          );
+        }
+        return;
+      }
+
+      if (cmd === '!dmodreport' || cmd === '!wmodreport' || cmd === '!mmodreport') {
+        if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+          await replyTextBestEffort(message, '❌ Mods/admins only (Manage Server permission).');
+          return;
+        }
+        const kind =
+          cmd === '!dmodreport' ? 'daily' : cmd === '!wmodreport' ? 'weekly' : 'monthly';
+        console.log(
+          `[ModReports] manual ${kind} — requested by ${message.author.tag} (${message.author.id}) in #${channelName || '?'}`
+        );
+        await replyTextBestEffort(message, `📨 Sending **${kind}** mod team report to your DMs…`);
+        try {
+          await sendModReport(client, message.author.id, /** @type {'daily'|'weekly'|'monthly'} */ (kind));
+          await replyTextBestEffort(message, `✅ Sent **${kind}** mod team report DM.`);
+        } catch (e) {
+          console.error('[ModReports] manual command failed:', e?.message || e);
+          await replyTextBestEffort(
+            message,
+            `❌ Failed to send **${kind}** mod report: ${e instanceof Error ? e.message : String(e)}`
           );
         }
         return;

@@ -16,9 +16,48 @@ function isValidTimeZone(tz) {
   }
 }
 
+/** Strip quotes; map friendly names; fix spaces in IANA segments (e.g. America/Los Angeles). */
+function normalizeAdminTimezoneInput(raw) {
+  let s = String(raw || '')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '');
+  if (!s) return '';
+  const compact = s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const aliases = {
+    'los angeles': 'America/Los_Angeles',
+    la: 'America/Los_Angeles',
+    pacific: 'America/Los_Angeles',
+    'us/pacific': 'America/Los_Angeles',
+    pst: 'America/Los_Angeles',
+    pdt: 'America/Los_Angeles',
+    pt: 'America/Los_Angeles',
+    chicago: 'America/Chicago',
+    'new york': 'America/New_York',
+    eastern: 'America/New_York',
+    est: 'America/New_York',
+    edt: 'America/New_York',
+    et: 'America/New_York',
+    denver: 'America/Denver',
+    phoenix: 'America/Phoenix',
+    utc: 'UTC',
+    gmt: 'UTC'
+  };
+  if (aliases[compact]) return aliases[compact];
+  const slash = s.indexOf('/');
+  if (slash > 0) {
+    const region = s.slice(0, slash);
+    const loc = s.slice(slash + 1).replace(/\s+/g, '_');
+    const candidate = `${region}/${loc}`;
+    if (candidate !== s && isValidTimeZone(candidate)) return candidate;
+  }
+  return s;
+}
+
 function resolveAdminTimeZone() {
-  const raw = String(process.env.ADMIN_REPORT_TIMEZONE || '').trim();
-  const tz = raw || 'America/Chicago';
+  const rawEnv =
+    String(process.env.ADMIN_REPORT_TIMEZONE || process.env.ADMIN_REPORT_TZ || '').trim();
+  const normalized = normalizeAdminTimezoneInput(rawEnv);
+  const tz = normalized || 'America/Chicago';
   return isValidTimeZone(tz) ? tz : 'UTC';
 }
 

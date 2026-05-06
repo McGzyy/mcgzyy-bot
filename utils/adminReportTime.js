@@ -1,8 +1,5 @@
 'use strict';
 
-const { startOfDay, startOfWeek, startOfMonth } = require('date-fns');
-const { fromZonedTime, toZonedTime, formatInTimeZone } = require('date-fns-tz');
-
 const MS_DAY = 24 * 60 * 60 * 1000;
 const MS_WEEK = 7 * MS_DAY;
 
@@ -31,40 +28,185 @@ function resolveLocalReportHour() {
   return Math.min(23, Math.max(0, Math.floor(n)));
 }
 
+/** @returns {{ y: number, m: number, d: number, h: number, mi: number, s: number }} */
+function wallPartsAt(ms, timeZone) {
+  const f = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  const parts = f.formatToParts(new Date(ms));
+  const get = t => Number(parts.find(p => p.type === t)?.value || '0');
+  return {
+    y: get('year'),
+    m: get('month'),
+    d: get('day'),
+    h: get('hour'),
+    mi: get('minute'),
+    s: get('second')
+  };
+}
+
+function cmpWallTuple(w, y, m, d, h, mi, s) {
+  const xs = [w.y - y, w.m - m, w.d - d, w.h - h, w.mi - mi, w.s - s];
+  for (let i = 0; i < xs.length; i++) {
+    if (xs[i] !== 0) return xs[i] > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+function gregorianToJDN(year, month, day) {
+  const a = Math.floor((14 - month) / 12);
+  const y = year + 4800 - a;
+  const mo = month + 12 * a - 3;
+  return (
+    day +
+    Math.floor((153 * mo + 2) / 5) +
+    365 * y +
+    Math.floor(y / 4) -
+    Math.floor(y / 100) +
+    Math.floor(y / 400) -
+    32045
+  );
+}
+
+function jdnToGregorian(jdn) {
+  const a = jdn + 32044;
+  const b = Math.floor((4 * a + 3) / 146097);
+  const c = a - Math.floor((146097 * b) / 4);
+  const d = Math.floor((4 * c + 3) / 1461);
+  const e = c - Math.floor((1461 * d) / 4);
+  const m = Math.floor((5 * e + 2) / 153);
+  const day = e - Math.floor((153 * m + 2) / 5) + 1;
+  const month = m + 3 - 12 * Math.floor(m / 10);
+  const year = 100 * b + d - 4800 + Math.floor(m / 10);
+  return { year, month, day };
+}
+
+function calendarMinusDays(year, month, day, deltaDays) {
+  const jdn = gregorianToJDN(year, month, day) - deltaDays;
+  return jdnToGregorian(jdn);
+}
+
+/** Days to subtract from wall date to reach Monday (weekStartsOn Monday). */
+function daysSinceMonday(weekdayLong) {
+  const map = {
+    Monday: 0,
+    Tuesday: 1,
+    Wednesday: 2,
+    Thursday: 3,
+    Friday: 4,
+    Saturday: 5,
+    Sunday: 6
+  };
+  return map[String(weekdayLong)] ?? 0;
+}
+
+/**
+ * Earliest UTC instant whose wall clock in `timeZone` equals y-m-d hh:mi:ss.
+ */
+function utcMillisForZonedWallClock(y, m, d, hh, mi, ss, timeZone) {
+  let lo = Date.UTC(y, m - 1, d, hh, mi, ss) - 4 * MS_DAY;
+  let hi = Date.UTC(y, m - 1, d, hh, mi, ss) + 4 * MS_DAY;
+  let best = null;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const cmp = cmpWallTuple(wallPartsAt(mid, timeZone), y, m, d, hh, mi, ss);
+    if (cmp === 0) {
+      best = mid;
+      hi = mid - 1;
+    } else if (cmp < 0) {
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (best !== null) return best;
+
+  const anchor = Date.UTC(y, m - 1, d, 12, 0, 0);
+  for (let delta = -96 * 60 * 60 * 1000; delta <= 96 * 60 * 60 * 1000; delta += 60000) {
+    const ms = anchor + delta;
+    if (cmpWallTuple(wallPartsAt(ms, timeZone), y, m, d, hh, mi, ss) === 0) return ms;
+  }
+  return Date.UTC(y, m - 1, d, hh, mi, ss);
+}
+
+function formatInTimeZone(ms, timeZone, pattern) {
+  const d = new Date(ms);
+  if (pattern === 'yyyy-MM-dd') {
+    const f = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const parts = f.formatToParts(d);
+    const get = t => parts.find(p => p.type === t)?.value || '';
+    const y = get('year');
+    const mo = get('month');
+    const da = get('day');
+    return `${y}-${mo}-${da}`;
+  }
+  if (pattern === 'yyyy-MM-dd HH:mm') {
+    const f = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    const parts = f.formatToParts(d);
+    const get = t => parts.find(p => p.type === t)?.value || '';
+    const hh = String(get('hour')).padStart(2, '0');
+    const mm = String(get('minute')).padStart(2, '0');
+    return `${get('year')}-${get('month')}-${get('day')} ${hh}:${mm}`;
+  }
+  throw new Error(`unsupported pattern ${pattern}`);
+}
+
 /**
  * UTC ms for start of calendar month in `timeZone` (wall-clock 00:00).
- * @param {number} nowMs
- * @param {string} timeZone
  */
 function startOfZonedMonthUtcMs(nowMs, timeZone) {
-  const anchor = new Date(nowMs);
-  const zonedNow = toZonedTime(anchor, timeZone);
-  const somLocal = startOfMonth(zonedNow);
-  return fromZonedTime(somLocal, timeZone).getTime();
+  const w = wallPartsAt(nowMs, timeZone);
+  return utcMillisForZonedWallClock(w.y, w.m, 1, 0, 0, 0, timeZone);
 }
 
 /**
  * UTC ms for start of calendar day in `timeZone` (wall-clock 00:00).
- * @param {number} nowMs
- * @param {string} timeZone
  */
 function startOfZonedDayUtcMs(nowMs, timeZone) {
-  const anchor = new Date(nowMs);
-  const zonedNow = toZonedTime(anchor, timeZone);
-  const sodLocal = startOfDay(zonedNow);
-  return fromZonedTime(sodLocal, timeZone).getTime();
+  const w = wallPartsAt(nowMs, timeZone);
+  return utcMillisForZonedWallClock(w.y, w.m, w.d, 0, 0, 0, timeZone);
 }
 
 /**
  * UTC ms for start of calendar week in `timeZone` (wall-clock 00:00, Monday start).
- * @param {number} nowMs
- * @param {string} timeZone
  */
 function startOfZonedWeekUtcMs(nowMs, timeZone) {
-  const anchor = new Date(nowMs);
-  const zonedNow = toZonedTime(anchor, timeZone);
-  const sowLocal = startOfWeek(zonedNow, { weekStartsOn: 1 });
-  return fromZonedTime(sowLocal, timeZone).getTime();
+  const f = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'long'
+  });
+  const parts = f.formatToParts(new Date(nowMs));
+  const get = t => parts.find(p => p.type === t)?.value || '';
+  const weekday = String(get('weekday'));
+  const year = Number(get('year'));
+  const month = Number(get('month'));
+  const day = Number(get('day'));
+  const back = daysSinceMonday(weekday);
+  const mon = calendarMinusDays(year, month, day, back);
+  return utcMillisForZonedWallClock(mon.year, mon.month, mon.day, 0, 0, 0, timeZone);
 }
 
 /**
@@ -77,23 +219,21 @@ function resolveReportWindow(kind, nowMs, timeZone) {
   const untilMs = nowMs;
   if (kind === 'daily') {
     const sinceMs = startOfZonedDayUtcMs(nowMs, timeZone);
-    const label = `Today · ${formatInTimeZone(new Date(sinceMs), timeZone, 'yyyy-MM-dd')} 00:00 → ${formatInTimeZone(new Date(untilMs), timeZone, 'yyyy-MM-dd HH:mm')} (${timeZone})`;
+    const label = `Today · ${formatInTimeZone(sinceMs, timeZone, 'yyyy-MM-dd')} 00:00 → ${formatInTimeZone(untilMs, timeZone, 'yyyy-MM-dd HH:mm')} (${timeZone})`;
     return { sinceMs, untilMs, label };
   }
   if (kind === 'weekly') {
     const sinceMs = startOfZonedWeekUtcMs(nowMs, timeZone);
-    const label = `Week-to-date · ${formatInTimeZone(new Date(sinceMs), timeZone, 'yyyy-MM-dd')} 00:00 → ${formatInTimeZone(new Date(untilMs), timeZone, 'yyyy-MM-dd HH:mm')} (${timeZone})`;
+    const label = `Week-to-date · ${formatInTimeZone(sinceMs, timeZone, 'yyyy-MM-dd')} 00:00 → ${formatInTimeZone(untilMs, timeZone, 'yyyy-MM-dd HH:mm')} (${timeZone})`;
     return { sinceMs, untilMs, label };
   }
   const sinceMs = startOfZonedMonthUtcMs(nowMs, timeZone);
-  const label = `Month-to-date · ${formatInTimeZone(new Date(sinceMs), timeZone, 'yyyy-MM-dd')} 00:00 → ${formatInTimeZone(new Date(untilMs), timeZone, 'yyyy-MM-dd HH:mm')} (${timeZone})`;
+  const label = `Month-to-date · ${formatInTimeZone(sinceMs, timeZone, 'yyyy-MM-dd')} 00:00 → ${formatInTimeZone(untilMs, timeZone, 'yyyy-MM-dd HH:mm')} (${timeZone})`;
   return { sinceMs, untilMs, label };
 }
 
 /**
  * Wall-clock parts in timeZone for scheduling.
- * @param {number} ms
- * @param {string} timeZone
  */
 function zonedWallParts(ms, timeZone) {
   const d = new Date(ms);

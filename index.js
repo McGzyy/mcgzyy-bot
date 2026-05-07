@@ -217,6 +217,16 @@ const humanVerifyChallenges = new Map();
 
 // X linking is dashboard-first (OAuth). Discord verify channel removed.
 
+function resolveDashboardUrl() {
+  const raw =
+    String(process.env.NEXT_PUBLIC_SITE_URL ?? '').trim() ||
+    String(process.env.NEXTAUTH_URL ?? '').trim() ||
+    'https://mcgbot.xyz';
+  const base = raw.replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(base)) return `https://${base}`;
+  return base;
+}
+
 function findHumanVerifyTextChannel(guild) {
   if (!guild?.channels?.cache) return null;
   const want = HUMAN_VERIFY_CHANNEL_NAME.toLowerCase();
@@ -2662,7 +2672,20 @@ let updated = null;
         }
 
         await interaction.reply({
-          content: '✅ Verified. Welcome in.',
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Verified')
+              .setDescription('Welcome in. You can head back to the dashboard now.')
+              .setColor(0x22c55e)
+          ],
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setStyle(ButtonStyle.Link)
+                .setLabel('Go to Dashboard')
+                .setURL(`${resolveDashboardUrl()}/`)
+            )
+          ],
           ephemeral: true
         });
         return;

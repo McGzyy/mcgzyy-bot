@@ -56,7 +56,13 @@ function getApiBase() {
 }
 
 /**
- * @param {{ chatId: number, messageThreadId?: number|null, text: string, logLabel?: string }} opts
+ * @param {{
+ *   chatId: number,
+ *   messageThreadId?: number|null,
+ *   text: string,
+ *   replyMarkup?: any,
+ *   logLabel?: string
+ * }} opts
  * @returns {Promise<boolean>}
  */
 async function sendTelegramMessage(opts) {
@@ -72,6 +78,9 @@ async function sendTelegramMessage(opts) {
   if (opts.messageThreadId != null && Number.isFinite(opts.messageThreadId)) {
     body.message_thread_id = opts.messageThreadId;
   }
+  if (opts.replyMarkup != null) {
+    body.reply_markup = opts.replyMarkup;
+  }
   try {
     await axios.post(`${apiBase}/sendMessage`, body, { timeout: 15000 });
     return true;
@@ -80,6 +89,52 @@ async function sendTelegramMessage(opts) {
     console.warn(`[TelegramAlerts] ${opts.logLabel || 'sendMessage'}:`, desc);
     return false;
   }
+}
+
+function parseTelegramButtons(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+
+  // Preferred: JSON (array of rows), e.g.:
+  // [[{"text":"DexScreener","url":"https://dexscreener.com/solana/{ca}"}],[{"text":"Trade","url":"https://..."}]]
+  if (s.startsWith('[')) {
+    try {
+      const v = JSON.parse(s);
+      if (Array.isArray(v)) return v;
+    } catch {
+      // fall through
+    }
+  }
+
+  // Fallback: "Label|Url,Label|Url" (single row)
+  const row = [];
+  for (const part of s.split(',').map(x => x.trim()).filter(Boolean)) {
+    const [text, url] = part.split('|').map(x => (x ?? '').trim());
+    if (!text || !url) continue;
+    row.push({ text: text.slice(0, 64), url: url.slice(0, 2048) });
+  }
+  return row.length ? [row] : null;
+}
+
+function buildInlineKeyboardFromButtons(buttonRows, templateVars = {}) {
+  if (!Array.isArray(buttonRows) || buttonRows.length === 0) return null;
+  const rows = [];
+  for (const row of buttonRows) {
+    if (!Array.isArray(row) || row.length === 0) continue;
+    const outRow = [];
+    for (const btn of row) {
+      const text = String(btn?.text ?? '').trim();
+      let url = String(btn?.url ?? '').trim();
+      if (!text || !url) continue;
+      for (const [k, v] of Object.entries(templateVars || {})) {
+        url = url.replaceAll(`{${k}}`, String(v));
+      }
+      outRow.push({ text: text.slice(0, 64), url: url.slice(0, 2048) });
+    }
+    if (outRow.length) rows.push(outRow);
+  }
+  if (!rows.length) return null;
+  return { inline_keyboard: rows };
 }
 
 function botCallsTelegramTarget() {
@@ -176,11 +231,30 @@ async function mirrorBotCallToTelegram(scan) {
   ]
     .filter(Boolean)
     .join('\n');
+
+  const buttonsRaw = process.env.TELEGRAM_BOT_CALLS_BUTTONS;
+  const buttons = buildInlineKeyboardFromButtons(parseTelegramButtons(buttonsRaw), { ca });
   await sendTelegramMessage({
     chatId,
     messageThreadId: topicId,
     text,
+    replyMarkup: buttons || undefined,
     logLabel: 'bot-calls TG'
+  });
+}
+
+/** If scan fails, still post CA + link (so you never miss a call). */
+async function mirrorBotMintFallbackToTelegram(contractAddress) {
+  const { chatId, topicId } = botCallsTelegramTarget();
+  if (chatId == null) return;
+  const ca = String(contractAddress || '').trim();
+  if (!ca) return;
+  const text = ['🤖 Bot call (fallback)', ca, dexScreenerSolUrl(ca)].join('\n');
+  await sendTelegramMessage({
+    chatId,
+    messageThreadId: topicId,
+    text,
+    logLabel: 'bot-calls TG fallback'
   });
 }
 
@@ -206,7 +280,10 @@ async function mirrorUserCallToTelegram(scan, callerLabel) {
 
 module.exports = {
   sendTelegramMessage,
+  parseTelegramButtons,
+  buildInlineKeyboardFromButtons,
   mirrorBotCallToTelegram,
+  mirrorBotMintFallbackToTelegram,
   mirrorUserCallToTelegram,
   mirrorMilestoneToTelegram,
   botCallsTelegramTarget,

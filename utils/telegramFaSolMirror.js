@@ -14,11 +14,13 @@
  * McGBot Telegram: BotFather → Group privacy OFF so the bot receives all messages in the group.
  */
 const axios = require('axios');
-const { generateRealScan } = require('./scannerEngine');
 const { postBotCallScan } = require('./autoCallEngine');
 const { autoCallConfig } = require('../config/autoCallConfig');
 const { getTrackedCall } = require('./trackedCallsService');
-const { mirrorBotCallToTelegram, botCallsTelegramTarget } = require('./telegramAlerts');
+const {
+  mirrorBotCallToTelegram,
+  botCallsTelegramTarget
+} = require('./telegramAlerts');
 
 // Pump.fun alerts sometimes append literal "pump" after the mint.
 // Capture group 1 is the actual mint; suffix is ignored.
@@ -95,6 +97,211 @@ function senderUsernameFromMessage(message) {
     .trim()
     .replace(/^@/, '')
     .toLowerCase();
+}
+
+function parseUsdLike(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const m = s.match(/\$?\s*([0-9]+(?:\.[0-9]+)?)\s*([kKmMbB])?\b/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
+  const mult = (() => {
+    const suf = String(m[2] || '').toLowerCase();
+    if (suf === 'k') return 1_000;
+    if (suf === 'm') return 1_000_000;
+    if (suf === 'b') return 1_000_000_000;
+    return 1;
+  })();
+  return n * mult;
+}
+
+function parseAgeToMinutes(raw) {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s) return null;
+  const m = s.match(/([0-9]+(?:\.[0-9]+)?)\s*([smhd])\b/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
+  const unit = m[2];
+  const minutes =
+    unit === 's' ? n / 60 :
+    unit === 'm' ? n :
+    unit === 'h' ? n * 60 :
+    unit === 'd' ? n * 1440 :
+    null;
+  if (minutes == null) return null;
+  return minutes;
+}
+
+function parsePercentLike(raw) {
+  const m = String(raw ?? '').match(/(-?\d+(?:\.\d+)?)\s*%/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function cleanLine(line) {
+  return String(line ?? '')
+    .replace(/[│└├─]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseFaSolPost(message) {
+  const text = [message?.text, message?.caption].filter(Boolean).join('\n');
+  const lines = String(text || '')
+    .split('\n')
+    .map(cleanLine)
+    .filter(Boolean);
+
+  const first = lines[0] || '';
+  // Example: "SHALO - HarmonizedAiLifecycleOperation"
+  let ticker = '';
+  let tokenName = '';
+  if (first) {
+    const parts = first.split(' - ');
+    ticker = String(parts[0] || '').trim();
+    tokenName = String(parts.slice(1).join(' - ') || '').trim();
+  }
+
+  const getAfter = (prefixes) => {
+    const ps = Array.isArray(prefixes) ? prefixes : [prefixes];
+    for (const ln of lines) {
+      for (const p of ps) {
+        if (ln.toLowerCase().startsWith(String(p).toLowerCase())) {
+          return ln.slice(String(p).length).trim();
+        }
+      }
+    }
+    return null;
+  };
+
+  const mc = parseUsdLike(getAfter(['MC:', 'MC']));
+  const ath = parseUsdLike(getAfter(['ATH:', 'ATH']));
+  const liq = parseUsdLike(getAfter(['LIQ:', 'LIQ']));
+  const ageMinutes = parseAgeToMinutes(getAfter(['Age:', 'Age']));
+  const vol = parseUsdLike(getAfter(['Vol:', 'Vol']));
+
+  const txLine = getAfter(['TXs:', 'TXS:', 'Txs:']);
+  const b = (() => {
+    const m = String(txLine ?? '').match(/\bB\s*([0-9]+)\b/i);
+    return m ? Number(m[1]) : null;
+  })();
+  const s = (() => {
+    const m = String(txLine ?? '').match(/\bS\s*([0-9]+)\b/i);
+    return m ? Number(m[1]) : null;
+  })();
+
+  const fiveMinLine = lines.find((ln) => /\b5m\b/i.test(ln)) || '';
+  const fiveMinChangePct = parsePercentLike(fiveMinLine);
+  const fiveMinVol = parseUsdLike((fiveMinLine.match(/\bVol\s*([^·]+)\b/i) || [])[1]);
+  const makers = (() => {
+    const m = fiveMinLine.match(/\bMakers\s*([0-9]+)\b/i);
+    return m ? Number(m[1]) : null;
+  })();
+
+  const holdersLine = lines.find((ln) => /^Holders\b/i.test(ln)) || '';
+  const holders = (() => {
+    const m = holdersLine.match(/^Holders\s*([0-9]+)/i);
+    return m ? Number(m[1]) : null;
+  })();
+  const top10Pct = parsePercentLike((holdersLine.match(/TOP\s*10:\s*([0-9.]+%)/i) || [])[1]);
+
+  const botsLine = lines.find((ln) => /^Bots:\b/i.test(ln)) || '';
+  const botsCount = (() => {
+    const m = botsLine.match(/^Bots:\s*([0-9]+)/i);
+    return m ? Number(m[1]) : null;
+  })();
+  const botsPct = parsePercentLike(botsLine);
+
+  const snipersLine = lines.find((ln) => /^Snipers:\b/i.test(ln)) || '';
+  const snipersCount = (() => {
+    const m = snipersLine.match(/^Snipers:\s*([0-9]+)/i);
+    return m ? Number(m[1]) : null;
+  })();
+  const snipersPct = parsePercentLike(snipersLine);
+
+  const taxLine = lines.find((ln) => /\bTax\b/i.test(ln)) || '';
+  const taxPct = parsePercentLike(taxLine);
+  const lpPct = parsePercentLike((lines.find((ln) => /^LP:\b/i.test(ln)) || ''));
+  const dexUnpaid = /\bDEX\s*Unpaid\b/i.test(lines.join(' '));
+
+  return {
+    ticker: ticker || null,
+    tokenName: tokenName || null,
+    stats: {
+      marketCap: mc,
+      ath,
+      liquidity: liq,
+      ageMinutes,
+      volume: vol,
+      fiveMinChangePct,
+      fiveMinVol,
+      makers,
+      txBuys: Number.isFinite(b) ? b : null,
+      txSells: Number.isFinite(s) ? s : null
+    },
+    holders: {
+      holders,
+      top10Pct,
+      botsCount,
+      botsPct,
+      snipersCount,
+      snipersPct
+    },
+    security: {
+      lpPct,
+      dexUnpaid,
+      taxPct
+    }
+  };
+}
+
+function formatFaSolTelegramText(parsed, contractAddress) {
+  const t = parsed?.ticker ? `$${String(parsed.ticker).toUpperCase()}` : 'Token';
+  const n = parsed?.tokenName ? String(parsed.tokenName) : '';
+  const header = n ? `🤖 McGBot Call · ${t}\n${n}` : `🤖 McGBot Call · ${t}`;
+
+  const st = parsed?.stats || {};
+  const bits = [];
+  if (st.marketCap != null) bits.push(`MC: $${Math.round(st.marketCap).toLocaleString('en-US')}`);
+  if (st.liquidity != null) bits.push(`Liq: $${Math.round(st.liquidity).toLocaleString('en-US')}`);
+  const volNum = st.fiveMinVol ?? st.volume;
+  if (volNum != null) bits.push(`Vol: $${Math.round(volNum).toLocaleString('en-US')}`);
+  if (st.ageMinutes != null) {
+    const sec = Math.round(st.ageMinutes * 60);
+    bits.push(`Age: ${sec < 60 ? `${sec}s` : `${Math.round(sec / 60)}m`}`);
+  }
+  if (st.fiveMinChangePct != null) bits.push(`5m: ${st.fiveMinChangePct > 0 ? '+' : ''}${st.fiveMinChangePct.toFixed(2)}%`);
+  if (st.makers != null) bits.push(`Makers: ${st.makers}`);
+  if (st.txBuys != null || st.txSells != null) bits.push(`TXs: B ${st.txBuys ?? '—'} / S ${st.txSells ?? '—'}`);
+
+  const h = parsed?.holders || {};
+  const hBits = [];
+  if (h.holders != null) hBits.push(`Holders: ${h.holders}`);
+  if (h.top10Pct != null) hBits.push(`Top10: ${h.top10Pct.toFixed(2)}%`);
+  if (h.botsCount != null) hBits.push(`Bots: ${h.botsCount}${h.botsPct != null ? ` (${h.botsPct.toFixed(2)}%)` : ''}`);
+  if (h.snipersCount != null) hBits.push(`Snipers: ${h.snipersCount}${h.snipersPct != null ? ` (${h.snipersPct.toFixed(2)}%)` : ''}`);
+
+  const sec = parsed?.security || {};
+  const sBits = [];
+  if (sec.lpPct != null) sBits.push(`LP: ${sec.lpPct.toFixed(2)}%`);
+  if (sec.dexUnpaid === true) sBits.push('DEX: Unpaid');
+  if (sec.taxPct != null) sBits.push(`Tax: ${sec.taxPct.toFixed(2)}%`);
+
+  return [
+    header,
+    '',
+    bits.length ? `Stats\n${bits.map(x => `- ${x}`).join('\n')}` : null,
+    hBits.length ? `\nHolders\n${hBits.map(x => `- ${x}`).join('\n')}` : null,
+    sBits.length ? `\nSecurity\n${sBits.map(x => `- ${x}`).join('\n')}` : null,
+    '',
+    contractAddress,
+    `https://dexscreener.com/solana/${encodeURIComponent(String(contractAddress || '').trim())}`
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**
@@ -199,21 +406,38 @@ function startTelegramFaSolMirror(opts) {
         continue;
       }
 
-      let scan;
-      try {
-        scan = await generateRealScan(mint);
-      } catch (e) {
-        console.error('[TelegramFaSol] generateRealScan failed:', mint.slice(0, 8), e?.message || e);
-        continue;
-      }
-      if (!scan || !scan.contractAddress || scan.__monitorProviderSkip === true) {
-        console.warn('[TelegramFaSol] Skip — no scan for', mint.slice(0, 8));
-        continue;
-      }
+      const parsed = parseFaSolPost(message);
+      const scan = {
+        alertType: 'FaSol Call',
+        contractAddress: mint,
+        tokenName: parsed?.tokenName || parsed?.ticker || mint.slice(0, 6),
+        ticker: parsed?.ticker || '',
+        marketCap: parsed?.stats?.marketCap ?? null,
+        liquidity: parsed?.stats?.liquidity ?? null,
+        volume5m: parsed?.stats?.fiveMinVol ?? parsed?.stats?.volume ?? null,
+        ageMinutes: parsed?.stats?.ageMinutes ?? null,
+        holders: parsed?.holders?.holders ?? null
+      };
 
       console.log(`[TelegramFaSol] Mirror post ${scan.ticker || mint.slice(0, 6)} (${profileName})`);
       await postBotCallScan(channel, scan, profileName);
-      await mirrorBotCallToTelegram(scan);
+
+      // Send a richer TG mirror using the FaSol-provided stats (with your custom buttons).
+      const { chatId: outChatId, topicId: outTopicId } = botCallsTelegramTarget();
+      if (outChatId != null) {
+        const { parseTelegramButtons, buildInlineKeyboardFromButtons, sendTelegramMessage } = require('./telegramAlerts');
+        const buttonsRaw = process.env.TELEGRAM_BOT_CALLS_BUTTONS;
+        const replyMarkup = buildInlineKeyboardFromButtons(parseTelegramButtons(buttonsRaw), { ca: mint });
+        await sendTelegramMessage({
+          chatId: outChatId,
+          messageThreadId: outTopicId,
+          text: formatFaSolTelegramText(parsed, mint),
+          replyMarkup: replyMarkup || undefined,
+          logLabel: 'bot-calls TG fasol'
+        });
+      } else {
+        await mirrorBotCallToTelegram(scan);
+      }
     }
   }
 

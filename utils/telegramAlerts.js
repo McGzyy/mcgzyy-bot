@@ -15,6 +15,15 @@ function dexScreenerSolUrl(ca) {
   return `https://dexscreener.com/solana/${encodeURIComponent(String(ca || '').trim())}`;
 }
 
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function formatUsdCompact(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return 'N/A';
@@ -60,7 +69,9 @@ function getApiBase() {
  *   chatId: number,
  *   messageThreadId?: number|null,
  *   text: string,
+ *   parseMode?: 'HTML'|'MarkdownV2'|null,
  *   replyMarkup?: any,
+ *   disableWebPreview?: boolean,
  *   logLabel?: string
  * }} opts
  * @returns {Promise<boolean>}
@@ -73,10 +84,13 @@ async function sendTelegramMessage(opts) {
   const body = {
     chat_id: chatId,
     text: opts.text,
-    disable_web_page_preview: false
+    disable_web_page_preview: opts.disableWebPreview !== false
   };
   if (opts.messageThreadId != null && Number.isFinite(opts.messageThreadId)) {
     body.message_thread_id = opts.messageThreadId;
+  }
+  if (opts.parseMode) {
+    body.parse_mode = opts.parseMode;
   }
   if (opts.replyMarkup != null) {
     body.reply_markup = opts.replyMarkup;
@@ -282,6 +296,10 @@ module.exports = {
   sendTelegramMessage,
   parseTelegramButtons,
   buildInlineKeyboardFromButtons,
+  escapeHtml,
+  formatUsdCompact,
+  formatAgeSeconds,
+  dexScreenerSolUrl,
   mirrorBotCallToTelegram,
   mirrorBotMintFallbackToTelegram,
   mirrorUserCallToTelegram,

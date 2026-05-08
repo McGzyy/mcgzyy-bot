@@ -19,7 +19,14 @@ const { autoCallConfig } = require('../config/autoCallConfig');
 const { getTrackedCall } = require('./trackedCallsService');
 const {
   mirrorBotCallToTelegram,
-  botCallsTelegramTarget
+  botCallsTelegramTarget,
+  parseTelegramButtons,
+  buildInlineKeyboardFromButtons,
+  sendTelegramMessage,
+  escapeHtml,
+  formatUsdCompact,
+  formatAgeSeconds,
+  dexScreenerSolUrl
 } = require('./telegramAlerts');
 
 // Pump.fun alerts sometimes append literal "pump" after the mint.
@@ -258,50 +265,67 @@ function parseFaSolPost(message) {
   };
 }
 
-function formatFaSolTelegramText(parsed, contractAddress) {
-  const t = parsed?.ticker ? `$${String(parsed.ticker).toUpperCase()}` : 'Token';
+function formatFaSolTelegramHtml(parsed, contractAddress) {
+  const ca = String(contractAddress || '').trim();
+  const t = parsed?.ticker ? `$${String(parsed.ticker).toUpperCase()}` : 'TOKEN';
   const n = parsed?.tokenName ? String(parsed.tokenName) : '';
-  const header = n ? `🤖 McGBot Call · ${t}\n${n}` : `🤖 McGBot Call · ${t}`;
 
   const st = parsed?.stats || {};
-  const bits = [];
-  if (st.marketCap != null) bits.push(`MC: $${Math.round(st.marketCap).toLocaleString('en-US')}`);
-  if (st.liquidity != null) bits.push(`Liq: $${Math.round(st.liquidity).toLocaleString('en-US')}`);
-  const volNum = st.fiveMinVol ?? st.volume;
-  if (volNum != null) bits.push(`Vol: $${Math.round(volNum).toLocaleString('en-US')}`);
-  if (st.ageMinutes != null) {
-    const sec = Math.round(st.ageMinutes * 60);
-    bits.push(`Age: ${sec < 60 ? `${sec}s` : `${Math.round(sec / 60)}m`}`);
-  }
-  if (st.fiveMinChangePct != null) bits.push(`5m: ${st.fiveMinChangePct > 0 ? '+' : ''}${st.fiveMinChangePct.toFixed(2)}%`);
-  if (st.makers != null) bits.push(`Makers: ${st.makers}`);
-  if (st.txBuys != null || st.txSells != null) bits.push(`TXs: B ${st.txBuys ?? '—'} / S ${st.txSells ?? '—'}`);
-
-  const h = parsed?.holders || {};
-  const hBits = [];
-  if (h.holders != null) hBits.push(`Holders: ${h.holders}`);
-  if (h.top10Pct != null) hBits.push(`Top10: ${h.top10Pct.toFixed(2)}%`);
-  if (h.botsCount != null) hBits.push(`Bots: ${h.botsCount}${h.botsPct != null ? ` (${h.botsPct.toFixed(2)}%)` : ''}`);
-  if (h.snipersCount != null) hBits.push(`Snipers: ${h.snipersCount}${h.snipersPct != null ? ` (${h.snipersPct.toFixed(2)}%)` : ''}`);
-
   const sec = parsed?.security || {};
-  const sBits = [];
-  if (sec.lpPct != null) sBits.push(`LP: ${sec.lpPct.toFixed(2)}%`);
-  if (sec.dexUnpaid === true) sBits.push('DEX: Unpaid');
-  if (sec.taxPct != null) sBits.push(`Tax: ${sec.taxPct.toFixed(2)}%`);
+  const h = parsed?.holders || {};
+
+  const mc = st.marketCap != null ? formatUsdCompact(st.marketCap) : null;
+  const liq = st.liquidity != null ? formatUsdCompact(st.liquidity) : null;
+  const ath = st.ath != null ? formatUsdCompact(st.ath) : null;
+  const v5 = st.fiveMinVol != null ? formatUsdCompact(st.fiveMinVol) : (st.volume != null ? formatUsdCompact(st.volume) : null);
+  const age = st.ageMinutes != null ? formatAgeSeconds(st.ageMinutes) : null;
+
+  const headline = [
+    `🤖 <b>McGBot Call</b> <b>${escapeHtml(t)}</b>`,
+    n ? `<i>${escapeHtml(n)}</i>` : null
+  ].filter(Boolean).join('\n');
+
+  const topLineBits = [
+    mc ? `<b>MC</b> ${escapeHtml(mc)}` : null,
+    liq ? `<b>Liq</b> ${escapeHtml(liq)}` : null,
+    v5 ? `<b>Vol</b> ${escapeHtml(v5)}` : null,
+    age ? `<b>Age</b> ${escapeHtml(age)}` : null
+  ].filter(Boolean);
+
+  const pulseBits = [
+    st.fiveMinChangePct != null ? `<b>5m</b> ${escapeHtml(`${st.fiveMinChangePct > 0 ? '+' : ''}${st.fiveMinChangePct.toFixed(2)}%`)}` : null,
+    (st.txBuys != null || st.txSells != null) ? `<b>TX</b> B ${escapeHtml(st.txBuys ?? '—')} / S ${escapeHtml(st.txSells ?? '—')}` : null,
+    st.makers != null ? `<b>Makers</b> ${escapeHtml(st.makers)}` : null,
+    ath ? `<b>ATH</b> ${escapeHtml(ath)}` : null
+  ].filter(Boolean);
+
+  const holdersBits = [
+    h.holders != null ? `<b>Holders</b> ${escapeHtml(h.holders)}` : null,
+    h.top10Pct != null ? `<b>Top10</b> ${escapeHtml(`${h.top10Pct.toFixed(2)}%`)}` : null,
+    h.botsCount != null ? `<b>Bots</b> ${escapeHtml(h.botsCount)}${h.botsPct != null ? ` (${escapeHtml(h.botsPct.toFixed(2))}%)` : ''}` : null,
+    h.snipersCount != null ? `<b>Snipers</b> ${escapeHtml(h.snipersCount)}${h.snipersPct != null ? ` (${escapeHtml(h.snipersPct.toFixed(2))}%)` : ''}` : null
+  ].filter(Boolean);
+
+  const securityBits = [
+    sec.lpPct != null ? `<b>LP</b> ${escapeHtml(`${sec.lpPct.toFixed(2)}%`)}` : null,
+    sec.dexUnpaid === true ? `<b>DEX</b> Unpaid` : null,
+    sec.taxPct != null ? `<b>Tax</b> ${escapeHtml(`${sec.taxPct.toFixed(2)}%`)}` : null
+  ].filter(Boolean);
+
+  const sections = [];
+  if (topLineBits.length) sections.push(topLineBits.join('  •  '));
+  if (pulseBits.length) sections.push(pulseBits.join('  •  '));
+  if (holdersBits.length) sections.push(`\n<b>Holders</b>\n${holdersBits.map(x => `• ${x}`).join('\n')}`);
+  if (securityBits.length) sections.push(`\n<b>Security</b>\n${securityBits.map(x => `• ${x}`).join('\n')}`);
 
   return [
-    header,
+    headline,
     '',
-    bits.length ? `Stats\n${bits.map(x => `- ${x}`).join('\n')}` : null,
-    hBits.length ? `\nHolders\n${hBits.map(x => `- ${x}`).join('\n')}` : null,
-    sBits.length ? `\nSecurity\n${sBits.map(x => `- ${x}`).join('\n')}` : null,
+    sections.join('\n'),
     '',
-    contractAddress,
-    `https://dexscreener.com/solana/${encodeURIComponent(String(contractAddress || '').trim())}`
-  ]
-    .filter(Boolean)
-    .join('\n');
+    `<code>${escapeHtml(ca)}</code>`,
+    `<a href="${escapeHtml(dexScreenerSolUrl(ca))}">View chart</a>`
+  ].filter(Boolean).join('\n');
 }
 
 /**
@@ -425,14 +449,15 @@ function startTelegramFaSolMirror(opts) {
       // Send a richer TG mirror using the FaSol-provided stats (with your custom buttons).
       const { chatId: outChatId, topicId: outTopicId } = botCallsTelegramTarget();
       if (outChatId != null) {
-        const { parseTelegramButtons, buildInlineKeyboardFromButtons, sendTelegramMessage } = require('./telegramAlerts');
         const buttonsRaw = process.env.TELEGRAM_BOT_CALLS_BUTTONS;
         const replyMarkup = buildInlineKeyboardFromButtons(parseTelegramButtons(buttonsRaw), { ca: mint });
         await sendTelegramMessage({
           chatId: outChatId,
           messageThreadId: outTopicId,
-          text: formatFaSolTelegramText(parsed, mint),
+          text: formatFaSolTelegramHtml(parsed, mint),
+          parseMode: 'HTML',
           replyMarkup: replyMarkup || undefined,
+          disableWebPreview: true,
           logLabel: 'bot-calls TG fasol'
         });
       } else {

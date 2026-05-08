@@ -81,10 +81,12 @@ function startTelegramFaSolMirror(opts) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   const enabled = truthyEnv(process.env.TELEGRAM_FASOL_MIRROR);
   const chatIdRaw = String(process.env.TELEGRAM_FASOL_CHAT_ID ?? '').trim();
-  const wantUser = String(process.env.TELEGRAM_FASOL_USERNAME ?? 'fasolcallbot')
+  // If TELEGRAM_FASOL_USERNAME is empty, accept any sender (useful for debugging).
+  const wantUserRaw = String(process.env.TELEGRAM_FASOL_USERNAME ?? '')
     .trim()
     .replace(/^@/, '')
     .toLowerCase();
+  const wantUser = wantUserRaw || null;
 
   const tgBotCalls = botCallsTelegramTarget();
 
@@ -125,7 +127,9 @@ function startTelegramFaSolMirror(opts) {
       ? ` + TG bot-alerts ${tgBotCalls.chatId}${tgBotCalls.topicId != null ? ` topic ${tgBotCalls.topicId}` : ''}`
       : '';
   console.log(
-    `[TelegramFaSol] Mirror ON — TG ingest ${chatId}, @${wantUser} → Discord #${channel.name}${tgBotExtra}`
+    `[TelegramFaSol] Mirror ON — TG ingest ${chatId}, ` +
+      (wantUser ? `@${wantUser}` : '(any sender)') +
+      ` → Discord #${channel.name}${tgBotExtra}`
   );
 
   async function clearWebhookOnce() {
@@ -145,7 +149,9 @@ function startTelegramFaSolMirror(opts) {
     if (Number(message.chat.id) !== chatId) return;
 
     const uname = senderUsernameFromMessage(message);
-    if (!uname || uname !== wantUser) return;
+    if (wantUser) {
+      if (!uname || uname !== wantUser) return;
+    }
 
     const mints = extractMintsFromTelegramMessage(message);
     if (mints.length === 0) return;

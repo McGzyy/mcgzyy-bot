@@ -413,6 +413,77 @@ function createAutoCallEmbed(scan, profileName = 'balanced', options = {}) {
   return embed;
 }
 
+function createMirrorCallEmbed(scan, profileName = 'balanced') {
+  const tokenNameUpper = formatValue(scan?.tokenName, 'UNKNOWN TOKEN').toUpperCase();
+  const tickerUpper = formatValue(scan?.ticker, 'UNKNOWN').toUpperCase();
+  const ca = formatValue(scan?.contractAddress, 'Unknown');
+
+  const parts = [
+    `**MC** ${formatUsd(scan?.marketCap)}`,
+    `**ATH** ${formatUsd(scan?.ath)}`,
+    `**Liq** ${formatUsd(scan?.liquidity)}`,
+    `**Vol 5m** ${formatUsd(scan?.volume5m)}`,
+    `**Age** ${formatAgeMinutes(scan?.ageMinutes)}`
+  ].filter(Boolean);
+
+  const extra = [];
+  if (scan?.fiveMinChangePct != null && Number.isFinite(Number(scan.fiveMinChangePct))) {
+    const v = Number(scan.fiveMinChangePct);
+    extra.push(`**5m** ${v > 0 ? '+' : ''}${v.toFixed(2)}%`);
+  }
+  if (scan?.txBuys != null || scan?.txSells != null) {
+    extra.push(`**TX** B ${formatValue(scan.txBuys, '—')} / S ${formatValue(scan.txSells, '—')}`);
+  }
+  if (scan?.makers != null) {
+    extra.push(`**Makers** ${formatValue(scan.makers, '—')}`);
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(0x10b981)
+    .setTitle(`🚀 ${tokenNameUpper} • $${tickerUpper}`)
+    .setDescription(
+      [
+        `Caller: **McGBot**`,
+        '',
+        parts.join('  •  '),
+        extra.length ? extra.join('  •  ') : null
+      ]
+        .filter(Boolean)
+        .join('\n')
+    )
+    .addFields({ name: '🧾 Contract', value: `\`${shortenCa(ca)}\`\nFull: \`${ca}\``, inline: false })
+    .setFooter({ text: 'McGBot • Call' })
+    .setTimestamp();
+
+  const holdersBits = [];
+  if (scan?.holders != null) holdersBits.push(`Holders **${formatValue(scan.holders, '—')}**`);
+  if (scan?.top10Pct != null && Number.isFinite(Number(scan.top10Pct))) {
+    holdersBits.push(`Top10 **${Number(scan.top10Pct).toFixed(2)}%**`);
+  }
+  if (scan?.botsCount != null) holdersBits.push(`Bots **${formatValue(scan.botsCount, '—')}**`);
+  if (scan?.snipersCount != null) holdersBits.push(`Snipers **${formatValue(scan.snipersCount, '—')}**`);
+  if (holdersBits.length) {
+    embed.addFields({ name: '👥 Holders', value: holdersBits.join(' · '), inline: false });
+  }
+
+  const securityBits = [];
+  if (scan?.lpPct != null && Number.isFinite(Number(scan.lpPct))) {
+    securityBits.push(`LP **${Number(scan.lpPct).toFixed(2)}%**`);
+  }
+  if (scan?.dexUnpaid === true) securityBits.push('DEX **Unpaid**');
+  if (scan?.taxPct != null && Number.isFinite(Number(scan.taxPct))) {
+    securityBits.push(`Tax **${Number(scan.taxPct).toFixed(2)}%**`);
+  }
+  if (securityBits.length) {
+    embed.addFields({ name: '🛡️ Security', value: securityBits.join(' · '), inline: false });
+  }
+
+  applyScanThumbnailToEmbed(embed, scan);
+  const buttons = buildEliteCallLinkButtons(scan);
+  if (buttons) embed._eliteButtons = buttons;
+  return embed;
+}
+
 function createMilestoneEmbed(coin, scan, milestoneKey, performancePercent, realXFromCall = null) {
   const tokenName = getSafeCoinName(coin, scan);
   const ticker = getSafeTicker(coin, scan);
@@ -918,6 +989,7 @@ function createReferralLeaderboardEmbed(entries = []) {
 
 module.exports = {
   createAutoCallEmbed,
+  createMirrorCallEmbed,
   createMilestoneEmbed,
   createDumpEmbed,
   createDevAddedEmbed,

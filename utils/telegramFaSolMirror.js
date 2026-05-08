@@ -277,54 +277,62 @@ function formatFaSolTelegramHtml(parsed, contractAddress) {
   const mc = st.marketCap != null ? formatUsdCompact(st.marketCap) : null;
   const liq = st.liquidity != null ? formatUsdCompact(st.liquidity) : null;
   const ath = st.ath != null ? formatUsdCompact(st.ath) : null;
-  const v5 = st.fiveMinVol != null ? formatUsdCompact(st.fiveMinVol) : (st.volume != null ? formatUsdCompact(st.volume) : null);
+  const vol = st.fiveMinVol != null ? formatUsdCompact(st.fiveMinVol) : (st.volume != null ? formatUsdCompact(st.volume) : null);
   const age = st.ageMinutes != null ? formatAgeSeconds(st.ageMinutes) : null;
+  const ch5 =
+    st.fiveMinChangePct != null
+      ? `${st.fiveMinChangePct > 0 ? '+' : ''}${st.fiveMinChangePct.toFixed(2)}%`
+      : null;
+  const tx =
+    st.txBuys != null || st.txSells != null
+      ? `B ${st.txBuys ?? '—'}  S ${st.txSells ?? '—'}`
+      : null;
 
-  const headline = [
-    `🤖 <b>McGBot Call</b> <b>${escapeHtml(t)}</b>`,
-    n ? `<i>${escapeHtml(n)}</i>` : null
-  ].filter(Boolean).join('\n');
+  const titleLine = `🔔 <b>McGBot Call</b> · <b>${escapeHtml(t)}</b>`;
+  const nameLine = n ? `🪙 <i>${escapeHtml(n)}</i>` : null;
 
-  const topLineBits = [
-    mc ? `<b>MC</b> ${escapeHtml(mc)}` : null,
-    liq ? `<b>Liq</b> ${escapeHtml(liq)}` : null,
-    v5 ? `<b>Vol</b> ${escapeHtml(v5)}` : null,
-    age ? `<b>Age</b> ${escapeHtml(age)}` : null
-  ].filter(Boolean);
+  const statLines = [
+    ['MC', mc],
+    ['ATH', ath],
+    ['LIQ', liq],
+    ['AGE', age],
+    ['VOL', vol],
+    ['TX', tx],
+    ['5M', ch5],
+    ['MK', st.makers != null ? String(st.makers) : null]
+  ].filter(([, v]) => v != null);
 
-  const pulseBits = [
-    st.fiveMinChangePct != null ? `<b>5m</b> ${escapeHtml(`${st.fiveMinChangePct > 0 ? '+' : ''}${st.fiveMinChangePct.toFixed(2)}%`)}` : null,
-    (st.txBuys != null || st.txSells != null) ? `<b>TX</b> B ${escapeHtml(st.txBuys ?? '—')} / S ${escapeHtml(st.txSells ?? '—')}` : null,
-    st.makers != null ? `<b>Makers</b> ${escapeHtml(st.makers)}` : null,
-    ath ? `<b>ATH</b> ${escapeHtml(ath)}` : null
-  ].filter(Boolean);
+  const padKey = (k) => String(k).padEnd(3, ' ');
+  const statsPre = statLines.length
+    ? `<pre>${statLines.map(([k, v]) => `${padKey(k)}  ${escapeHtml(v)}`).join('\n')}</pre>`
+    : null;
 
-  const holdersBits = [
-    h.holders != null ? `<b>Holders</b> ${escapeHtml(h.holders)}` : null,
-    h.top10Pct != null ? `<b>Top10</b> ${escapeHtml(`${h.top10Pct.toFixed(2)}%`)}` : null,
-    h.botsCount != null ? `<b>Bots</b> ${escapeHtml(h.botsCount)}${h.botsPct != null ? ` (${escapeHtml(h.botsPct.toFixed(2))}%)` : ''}` : null,
-    h.snipersCount != null ? `<b>Snipers</b> ${escapeHtml(h.snipersCount)}${h.snipersPct != null ? ` (${escapeHtml(h.snipersPct.toFixed(2))}%)` : ''}` : null
-  ].filter(Boolean);
+  const holdersLine = (() => {
+    const parts = [];
+    if (h.holders != null) parts.push(`Holders ${h.holders}`);
+    if (h.top10Pct != null) parts.push(`Top10 ${h.top10Pct.toFixed(2)}%`);
+    if (h.botsCount != null) parts.push(`Bots ${h.botsCount}${h.botsPct != null ? ` (${h.botsPct.toFixed(2)}%)` : ''}`);
+    if (h.snipersCount != null) parts.push(`Snipers ${h.snipersCount}${h.snipersPct != null ? ` (${h.snipersPct.toFixed(2)}%)` : ''}`);
+    return parts.length ? `👥 <b>Holders</b> · ${escapeHtml(parts.join(' · '))}` : null;
+  })();
 
-  const securityBits = [
-    sec.lpPct != null ? `<b>LP</b> ${escapeHtml(`${sec.lpPct.toFixed(2)}%`)}` : null,
-    sec.dexUnpaid === true ? `<b>DEX</b> Unpaid` : null,
-    sec.taxPct != null ? `<b>Tax</b> ${escapeHtml(`${sec.taxPct.toFixed(2)}%`)}` : null
-  ].filter(Boolean);
-
-  const sections = [];
-  if (topLineBits.length) sections.push(topLineBits.join('  •  '));
-  if (pulseBits.length) sections.push(pulseBits.join('  •  '));
-  if (holdersBits.length) sections.push(`\n<b>Holders</b>\n${holdersBits.map(x => `• ${x}`).join('\n')}`);
-  if (securityBits.length) sections.push(`\n<b>Security</b>\n${securityBits.map(x => `• ${x}`).join('\n')}`);
+  const securityLine = (() => {
+    const parts = [];
+    if (sec.lpPct != null) parts.push(`LP ${sec.lpPct.toFixed(2)}%`);
+    if (sec.dexUnpaid === true) parts.push('DEX Unpaid');
+    if (sec.taxPct != null) parts.push(`Tax ${sec.taxPct.toFixed(2)}%`);
+    return parts.length ? `🛡️ <b>Security</b> · ${escapeHtml(parts.join(' · '))}` : null;
+  })();
 
   return [
-    headline,
+    titleLine,
+    nameLine,
+    statsPre,
+    holdersLine,
+    securityLine,
     '',
-    sections.join('\n'),
-    '',
-    `<code>${escapeHtml(ca)}</code>`,
-    `<a href="${escapeHtml(dexScreenerSolUrl(ca))}">View chart</a>`
+    `CA: <code>${escapeHtml(ca)}</code>`,
+    `<a href="${escapeHtml(dexScreenerSolUrl(ca))}">DexScreener</a>`
   ].filter(Boolean).join('\n');
 }
 
@@ -432,15 +440,26 @@ function startTelegramFaSolMirror(opts) {
 
       const parsed = parseFaSolPost(message);
       const scan = {
-        alertType: 'FaSol Call',
+        __mirrorSource: 'telegram',
         contractAddress: mint,
         tokenName: parsed?.tokenName || parsed?.ticker || mint.slice(0, 6),
         ticker: parsed?.ticker || '',
         marketCap: parsed?.stats?.marketCap ?? null,
+        ath: parsed?.stats?.ath ?? null,
         liquidity: parsed?.stats?.liquidity ?? null,
         volume5m: parsed?.stats?.fiveMinVol ?? parsed?.stats?.volume ?? null,
         ageMinutes: parsed?.stats?.ageMinutes ?? null,
-        holders: parsed?.holders?.holders ?? null
+        holders: parsed?.holders?.holders ?? null,
+        top10Pct: parsed?.holders?.top10Pct ?? null,
+        botsCount: parsed?.holders?.botsCount ?? null,
+        snipersCount: parsed?.holders?.snipersCount ?? null,
+        fiveMinChangePct: parsed?.stats?.fiveMinChangePct ?? null,
+        makers: parsed?.stats?.makers ?? null,
+        txBuys: parsed?.stats?.txBuys ?? null,
+        txSells: parsed?.stats?.txSells ?? null,
+        lpPct: parsed?.security?.lpPct ?? null,
+        dexUnpaid: parsed?.security?.dexUnpaid ?? null,
+        taxPct: parsed?.security?.taxPct ?? null
       };
 
       console.log(`[TelegramFaSol] Mirror post ${scan.ticker || mint.slice(0, 6)} (${profileName})`);

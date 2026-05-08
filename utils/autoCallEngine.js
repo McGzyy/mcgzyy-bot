@@ -2,7 +2,7 @@ const { generateRealScan } = require('./scannerEngine');
 const { autoCallConfig } = require('../config/autoCallConfig');
 const { scanFilterConfig } = require('../config/scanFilterConfig');
 const { AttachmentBuilder } = require('discord.js');
-const { createAutoCallEmbed } = require('./alertEmbeds');
+const { createAutoCallEmbed, createMirrorCallEmbed } = require('./alertEmbeds');
 const { buildOhlcvCandlestickBuffer } = require('./ohlcvCandlestickBuffer');
 const { getCandlestickOverlayProps } = require('./candlestickOverlayFromTracked');
 const { buildOhlcvTimeframeRows } = require('./ohlcvChartControls');
@@ -218,7 +218,10 @@ async function hydrateAutoCallChartMessage(message, scan, profileName) {
 
 async function postBotCallScan(channel, scan, profileName) {
   enqueueAlert(async () => {
-    const embed = createAutoCallEmbed(scan, profileName, { chartPending: true });
+    const isMirror = scan && (scan.__mirrorSource === 'telegram' || scan.__mirrorSource === 'mirror');
+    const embed = isMirror
+      ? createMirrorCallEmbed(scan, profileName)
+      : createAutoCallEmbed(scan, profileName, { chartPending: true });
     const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
     const sentMessage = await channel.send({
       embeds: [embed],

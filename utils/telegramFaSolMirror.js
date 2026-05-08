@@ -59,6 +59,21 @@ function extractMintsFromTelegramMessage(message) {
     }
     if (slice && isLikelySolanaMint(slice)) out.add(slice.trim());
   }
+
+  // Many alert channels include mint only in inline button URLs (reply_markup.inline_keyboard).
+  const kb = message?.reply_markup?.inline_keyboard;
+  if (Array.isArray(kb)) {
+    for (const row of kb) {
+      if (!Array.isArray(row)) continue;
+      for (const btn of row) {
+        const url = btn && typeof btn.url === 'string' ? btn.url : '';
+        if (!url) continue;
+        const mm = url.match(MINT_RE);
+        if (mm) for (const x of mm) out.add(x);
+      }
+    }
+  }
+
   return [...out];
 }
 

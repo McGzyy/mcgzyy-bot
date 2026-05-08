@@ -80,6 +80,7 @@ function senderUsernameFromMessage(message) {
 function startTelegramFaSolMirror(opts) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   const enabled = truthyEnv(process.env.TELEGRAM_FASOL_MIRROR);
+  const debug = truthyEnv(process.env.TELEGRAM_FASOL_DEBUG);
   const chatIdRaw = String(process.env.TELEGRAM_FASOL_CHAT_ID ?? '').trim();
   // If TELEGRAM_FASOL_USERNAME is empty, accept any sender (useful for debugging).
   const wantUserRaw = String(process.env.TELEGRAM_FASOL_USERNAME ?? '')
@@ -154,6 +155,13 @@ function startTelegramFaSolMirror(opts) {
     }
 
     const mints = extractMintsFromTelegramMessage(message);
+    if (debug) {
+      const preview = String(message?.text || message?.caption || '').replace(/\s+/g, ' ').slice(0, 160);
+      console.log(
+        `[TelegramFaSol DEBUG] chat=${message.chat.id} sender=${uname || '(none)'} mints=${mints.length}` +
+          (preview ? ` text="${preview}"` : '')
+      );
+    }
     if (mints.length === 0) return;
 
     for (const mint of mints) {
@@ -196,7 +204,7 @@ function startTelegramFaSolMirror(opts) {
             offset: nextOffset > 0 ? nextOffset : undefined,
             timeout: 25,
             // Some groups/forums/channels deliver bot posts as `channel_post` instead of `message`.
-            allowed_updates: JSON.stringify(['message', 'channel_post'])
+            allowed_updates: JSON.stringify(['message', 'channel_post', 'edited_message', 'edited_channel_post'])
           },
           timeout: 35000
         });
@@ -209,6 +217,8 @@ function startTelegramFaSolMirror(opts) {
           if (typeof u?.update_id === 'number') nextOffset = u.update_id + 1;
           if (u.message) await handleMessage(u.message);
           if (u.channel_post) await handleMessage(u.channel_post);
+          if (u.edited_message) await handleMessage(u.edited_message);
+          if (u.edited_channel_post) await handleMessage(u.edited_channel_post);
         }
       } catch (e) {
         console.error('[TelegramFaSol] poll:', e?.message || e);

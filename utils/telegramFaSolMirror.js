@@ -80,14 +80,12 @@ function senderUsernameFromMessage(message) {
 function startTelegramFaSolMirror(opts) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   const enabled = truthyEnv(process.env.TELEGRAM_FASOL_MIRROR);
-  const debug = truthyEnv(process.env.TELEGRAM_FASOL_DEBUG);
   const chatIdRaw = String(process.env.TELEGRAM_FASOL_CHAT_ID ?? '').trim();
-  // If TELEGRAM_FASOL_USERNAME is empty, accept any sender (useful for debugging).
-  const wantUserRaw = String(process.env.TELEGRAM_FASOL_USERNAME ?? '')
+  const wantUserRaw = String(process.env.TELEGRAM_FASOL_USERNAME ?? 'fasolcallbot')
     .trim()
     .replace(/^@/, '')
     .toLowerCase();
-  const wantUser = wantUserRaw || null;
+  const wantUser = wantUserRaw || 'fasolcallbot';
 
   const tgBotCalls = botCallsTelegramTarget();
 
@@ -122,7 +120,6 @@ function startTelegramFaSolMirror(opts) {
   const recentMintAt = new Map();
   const DEDUPE_MS = 10 * 60 * 1000;
   const profileName = String(autoCallConfig.defaultProfile || 'balanced').trim();
-  let lastPollDebugAt = 0;
 
   const tgBotExtra =
     tgBotCalls.chatId != null
@@ -130,7 +127,7 @@ function startTelegramFaSolMirror(opts) {
       : '';
   console.log(
     `[TelegramFaSol] Mirror ON — TG ingest ${chatId}, ` +
-      (wantUser ? `@${wantUser}` : '(any sender)') +
+      `@${wantUser}` +
       ` → Discord #${channel.name}${tgBotExtra}`
   );
 
@@ -151,25 +148,18 @@ function startTelegramFaSolMirror(opts) {
     if (Number(message.chat.id) !== chatId) return;
 
     const uname = senderUsernameFromMessage(message);
-    const mints = extractMintsFromTelegramMessage(message);
-    if (debug) {
-      const preview = String(message?.text || message?.caption || '').replace(/\s+/g, ' ').slice(0, 160);
-      const senderChatUname = String(message?.sender_chat?.username || '').trim().replace(/^@/, '').toLowerCase();
-      const senderChatTitle = String(message?.sender_chat?.title || '').trim();
-      const fromId = message?.from?.id != null ? String(message.from.id) : '';
-      const senderChatId = message?.sender_chat?.id != null ? String(message.sender_chat.id) : '';
-      const blockedBySender = wantUser ? !(uname && uname === wantUser) : false;
-      console.log(
-        `[TelegramFaSol DEBUG] chat=${message.chat.id} sender=${uname || '(none)'} ` +
-          `(fromId=${fromId || 'n/a'} sender_chat=${senderChatUname || senderChatTitle || 'n/a'} senderChatId=${senderChatId || 'n/a'}) ` +
-          `mints=${mints.length}` +
-          (wantUser ? ` want=@${wantUser} ${blockedBySender ? 'BLOCKED_SENDER' : 'OK_SENDER'}` : '') +
-          (preview ? ` text="${preview}"` : '')
-      );
-    }
-    if (wantUser) {
+    const senderChatId =
+      message?.sender_chat?.id != null ? Number(message.sender_chat.id) : null;
+    const isChannelPostFromIngest =
+      senderChatId != null && Number.isFinite(senderChatId) && senderChatId === chatId;
+
+    // In channels, Bot API updates arrive as `channel_post` and usually do NOT include `from.username`
+    // for the bot that created the post. So: if this is a channel post from the ingest channel,
+    // trust the chat_id match and do not require TELEGRAM_FASOL_USERNAME.
+    if (!isChannelPostFromIngest) {
       if (!uname || uname !== wantUser) return;
     }
+    const mints = extractMintsFromTelegramMessage(message);
     if (mints.length === 0) return;
 
     for (const mint of mints) {
@@ -221,15 +211,6 @@ function startTelegramFaSolMirror(opts) {
           throw new Error(data?.description || 'getUpdates not ok');
         }
         const updates = Array.isArray(data.result) ? data.result : [];
-        if (debug) {
-          const now = Date.now();
-          if (updates.length > 0 || now - lastPollDebugAt > 60_000) {
-            lastPollDebugAt = now;
-            console.log(
-              `[TelegramFaSol DEBUG] poll ok: updates=${updates.length} nextOffset=${nextOffset || 0}`
-            );
-          }
-        }
         for (const u of updates) {
           if (typeof u?.update_id === 'number') nextOffset = u.update_id + 1;
           if (u.message) await handleMessage(u.message);

@@ -20,7 +20,9 @@ const { autoCallConfig } = require('../config/autoCallConfig');
 const { getTrackedCall } = require('./trackedCallsService');
 const { mirrorBotCallToTelegram, botCallsTelegramTarget } = require('./telegramAlerts');
 
-const MINT_RE = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
+// Pump.fun alerts sometimes append literal "pump" after the mint.
+// Capture group 1 is the actual mint; suffix is ignored.
+const MINT_RE = /\b([1-9A-HJ-NP-Za-km-z]{32,44})(?:pump)?\b/g;
 
 function truthyEnv(v) {
   const s = String(v ?? '')
@@ -41,8 +43,10 @@ function extractMintsFromTelegramMessage(message) {
   const out = new Set();
   const text = [message?.text, message?.caption].filter(Boolean).join('\n');
   if (text) {
-    const m = text.match(MINT_RE);
-    if (m) for (const x of m) out.add(x);
+    for (const mm of text.matchAll(MINT_RE)) {
+      const mint = mm && mm[1] ? String(mm[1]).trim() : '';
+      if (mint) out.add(mint);
+    }
   }
 
   const entities = [...(message?.entities || []), ...(message?.caption_entities || [])];
@@ -53,8 +57,10 @@ function extractMintsFromTelegramMessage(message) {
     if (ent.type === 'url' || ent.type === 'text_link') {
       const url = ent.type === 'text_link' ? ent.url : slice;
       if (typeof url === 'string') {
-        const mm = url.match(MINT_RE);
-        if (mm) for (const x of mm) out.add(x);
+        for (const m2 of url.matchAll(MINT_RE)) {
+          const mint = m2 && m2[1] ? String(m2[1]).trim() : '';
+          if (mint) out.add(mint);
+        }
       }
     }
     if (slice && isLikelySolanaMint(slice)) out.add(slice.trim());
@@ -68,8 +74,10 @@ function extractMintsFromTelegramMessage(message) {
       for (const btn of row) {
         const url = btn && typeof btn.url === 'string' ? btn.url : '';
         if (!url) continue;
-        const mm = url.match(MINT_RE);
-        if (mm) for (const x of mm) out.add(x);
+        for (const m3 of url.matchAll(MINT_RE)) {
+          const mint = m3 && m3[1] ? String(m3[1]).trim() : '';
+          if (mint) out.add(mint);
+        }
       }
     }
   }

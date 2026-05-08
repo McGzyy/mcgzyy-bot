@@ -33,6 +33,11 @@ const {
 // Capture group 1 is the actual mint; suffix is ignored.
 const MINT_RE = /\b([1-9A-HJ-NP-Za-km-z]{32,44})(?:pump)?\b/g;
 
+// In-process "ask FaSol for stats" enrichment for user calls.
+// We piggyback on the same getUpdates poll loop: when a FaSol post containing a mint arrives,
+// we resolve any pending requests for that mint.
+const pendingEnrichment = new Map(); // mintLower -> [{ resolve, reject, expiresAt }]
+
 function truthyEnv(v) {
   const s = String(v ?? '')
     .trim()
@@ -265,6 +270,52 @@ function parseFaSolPost(message) {
   };
 }
 
+async function requestFaSolEnrichment(contractAddress, opts = {}) {
+  const ca = String(contractAddress || '').trim();
+  if (!isLikelySolanaMint(ca)) {
+    throw new Error('Invalid contract address');
+  }
+
+  const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
+  const chatIdRaw = String(process.env.TELEGRAM_FASOL_CHAT_ID ?? '').trim();
+  const chatId = Number(chatIdRaw);
+  if (!token || !Number.isFinite(chatId)) {
+    throw new Error('Telegram ingest not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_FASOL_CHAT_ID)');
+  }
+
+  const timeoutMs = Math.max(2_000, Math.min(60_000, Number(opts.timeoutMs || 15_000)));
+  const mintKey = ca.toLowerCase();
+  const expiresAt = Date.now() + timeoutMs;
+
+  const p = new Promise((resolve, reject) => {
+    const arr = pendingEnrichment.get(mintKey) || [];
+    arr.push({ resolve, reject, expiresAt });
+    pendingEnrichment.set(mintKey, arr);
+    setTimeout(() => {
+      const cur = pendingEnrichment.get(mintKey) || [];
+      const next = cur.filter((x) => x.expiresAt > Date.now() && x.resolve !== resolve);
+      if (next.length) pendingEnrichment.set(mintKey, next);
+      else pendingEnrichment.delete(mintKey);
+      reject(new Error('timeout'));
+    }, timeoutMs + 250);
+  });
+
+  // Trigger FaSol by posting the CA into the ingest channel/group.
+  const apiBase = `https://api.telegram.org/bot${encodeURIComponent(token)}`;
+  await axios
+    .post(
+      `${apiBase}/sendMessage`,
+      { chat_id: chatId, text: ca, disable_web_page_preview: true },
+      { timeout: 15000 }
+    )
+    .catch((e) => {
+      const desc = e?.response?.data?.description || e?.message || e;
+      throw new Error(`sendMessage failed: ${desc}`);
+    });
+
+  return p;
+}
+
 function formatFaSolTelegramHtml(parsed, contractAddress) {
   const ca = String(contractAddress || '').trim();
   const t = parsed?.ticker ? `$${String(parsed.ticker).toUpperCase()}` : 'TOKEN';
@@ -427,6 +478,31 @@ function startTelegramFaSolMirror(opts) {
     for (const mint of mints) {
       if (!isLikelySolanaMint(mint)) continue;
 
+      // If this message looks like a FaSol stats card, resolve any pending enrichment waits.
+      try {
+        const parsedMaybe = parseFaSolPost(message);
+        const hasStats =
+          parsedMaybe &&
+          (parsedMaybe?.stats?.marketCap != null ||
+            parsedMaybe?.stats?.liquidity != null ||
+            parsedMaybe?.stats?.volume != null ||
+            parsedMaybe?.stats?.fiveMinVol != null);
+        if (hasStats) {
+          const key = mint.toLowerCase();
+          const pending = pendingEnrichment.get(key);
+          if (pending && pending.length) {
+            pendingEnrichment.delete(key);
+            for (const waiter of pending) {
+              if (waiter.expiresAt > Date.now()) {
+                waiter.resolve({ mint, parsed: parsedMaybe, message });
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // ignore parse failures for enrichment resolution
+      }
+
       const now = Date.now();
       const last = recentMintAt.get(mint) || 0;
       if (now - last < DEDUPE_MS) continue;
@@ -526,4 +602,4 @@ function startTelegramFaSolMirror(opts) {
   };
 }
 
-module.exports = { startTelegramFaSolMirror };
+module.exports = { startTelegramFaSolMirror, requestFaSolEnrichment };

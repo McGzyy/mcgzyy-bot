@@ -30,6 +30,7 @@ const { buildOhlcvCandlestickBuffer } = require('../utils/ohlcvCandlestickBuffer
 const { getCandlestickOverlayProps } = require('../utils/candlestickOverlayFromTracked');
 const { buildOhlcvTimeframeRows } = require('../utils/ohlcvChartControls');
 const { mirrorUserCallToTelegram } = require('../utils/telegramAlerts');
+const { requestFaSolEnrichment } = require('../utils/telegramFaSolMirror');
 
 function memberCanManageGuild(member) {
   if (!member?.permissions) return false;
@@ -1639,8 +1640,31 @@ async function handleWatchFromDashboard(client, opts) {
 }
 
 async function handleCallCommand(message, contractAddress, source = 'command') {
+  let enrichment = null;
+  if (String(process.env.TELEGRAM_FASOL_ENRICH_USER_CALLS || '').trim()) {
+    try {
+      enrichment = await requestFaSolEnrichment(contractAddress, { timeoutMs: 18_000 });
+    } catch (_) {
+      enrichment = null;
+    }
+  }
+
   const realData = await runQuickCa(contractAddress);
   const scan = normalizeRealDataToScan(realData);
+
+  // If FaSol replied with a stats card, prefer those numbers for the user-call embed.
+  if (enrichment && enrichment.parsed) {
+    const p = enrichment.parsed;
+    scan.alertType = ''; // don't show "FaSol call" style labels
+    scan.tokenName = p?.tokenName || scan.tokenName;
+    scan.ticker = p?.ticker || scan.ticker;
+    scan.marketCap = p?.stats?.marketCap ?? scan.marketCap;
+    scan.ath = p?.stats?.ath ?? scan.ath;
+    scan.liquidity = p?.stats?.liquidity ?? scan.liquidity;
+    scan.volume5m = p?.stats?.fiveMinVol ?? p?.stats?.volume ?? scan.volume5m;
+    scan.ageMinutes = p?.stats?.ageMinutes ?? scan.ageMinutes;
+    scan.holders = p?.holders?.holders ?? scan.holders;
+  }
 
   const { trackedCall, wasNewCall, wasReactivated, wasUpgradedToUserCall } =
     await applyTrackedCallState(

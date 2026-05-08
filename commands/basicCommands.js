@@ -29,6 +29,7 @@ const { applyScanThumbnailToEmbed } = require('../utils/embedTokenThumbnail');
 const { buildOhlcvCandlestickBuffer } = require('../utils/ohlcvCandlestickBuffer');
 const { getCandlestickOverlayProps } = require('../utils/candlestickOverlayFromTracked');
 const { buildOhlcvTimeframeRows } = require('../utils/ohlcvChartControls');
+const { mirrorUserCallToTelegram } = require('../utils/telegramAlerts');
 
 function memberCanManageGuild(member) {
   if (!member?.permissions) return false;
@@ -1706,6 +1707,15 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     embeds: [embed],
     ...(eliteRow ? { components: [eliteRow] } : {})
   });
+
+  if (wasNewCall || wasReactivated || wasUpgradedToUserCall) {
+    const callerLabel =
+      message.member?.displayName ||
+      message.author?.globalName ||
+      message.author?.username ||
+      '';
+    void mirrorUserCallToTelegram(embedScan, callerLabel);
+  }
 
   const freshTracked = getTrackedCall(contractAddress) || trackedCall;
   const callerId = String(freshTracked?.firstCallerDiscordId || '').trim();

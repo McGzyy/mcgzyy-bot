@@ -1007,5 +1007,7 @@ module.exports = {
   stopAutoCallLoop,
   getAutoCallStatus,
   runAutoCallCycle,
-  evaluateAutoCallFiltersOnScan
+  evaluateAutoCallFiltersOnScan,
+  /** Used by Telegram FaSol mirror — same Discord embed + tracking as auto-calls. */
+  postBotCallScan
 };

@@ -2089,6 +2089,13 @@ console.log(
     startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
   }
 
+  try {
+    const { startTelegramFaSolMirror } = require('./utils/telegramFaSolMirror');
+    startTelegramFaSolMirror({ discordBotCallsChannel: botChannel });
+  } catch (e) {
+    console.error('[TelegramFaSol] Startup failed:', e?.message || e);
+  }
+
   await ensureHumanVerifyPrompt(firstGuild);
   await ensureDevIntelPrompt(firstGuild);
 

@@ -32,6 +32,7 @@ const {
   determineLifecycleStatus,
   getLifecycleChangeReason
 } = require('./lifecycleEngine');
+const { mirrorMilestoneToTelegram } = require('./telegramAlerts');
 
 let monitoringIntervalUser = null;
 let monitoringIntervalBot = null;
@@ -712,6 +713,14 @@ function queueMilestone(channel, coin, scan, key, perf, realXFromCall) {
     }
 
     await channel.send(payload);
+
+    void mirrorMilestoneToTelegram({
+      coin,
+      scan,
+      milestoneKey: key,
+      performancePercent: perf,
+      realXFromCall
+    });
   }, {
     type: 'milestone',
     contractAddress: coin.contractAddress,

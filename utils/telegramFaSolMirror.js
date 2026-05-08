@@ -195,7 +195,8 @@ function startTelegramFaSolMirror(opts) {
           params: {
             offset: nextOffset > 0 ? nextOffset : undefined,
             timeout: 25,
-            allowed_updates: JSON.stringify(['message'])
+            // Some groups/forums/channels deliver bot posts as `channel_post` instead of `message`.
+            allowed_updates: JSON.stringify(['message', 'channel_post'])
           },
           timeout: 35000
         });
@@ -207,6 +208,7 @@ function startTelegramFaSolMirror(opts) {
         for (const u of updates) {
           if (typeof u?.update_id === 'number') nextOffset = u.update_id + 1;
           if (u.message) await handleMessage(u.message);
+          if (u.channel_post) await handleMessage(u.channel_post);
         }
       } catch (e) {
         console.error('[TelegramFaSol] poll:', e?.message || e);

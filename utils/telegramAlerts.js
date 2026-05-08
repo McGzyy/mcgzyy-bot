@@ -15,6 +15,27 @@ function dexScreenerSolUrl(ca) {
   return `https://dexscreener.com/solana/${encodeURIComponent(String(ca || '').trim())}`;
 }
 
+function formatUsdCompact(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 'N/A';
+  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+function formatAgeSeconds(ageMinutes) {
+  const m = Number(ageMinutes);
+  if (!Number.isFinite(m) || m < 0) return null;
+  const s = Math.round(m * 60);
+  if (s < 60) return `${s}s`;
+  const mm = Math.round(s / 60);
+  if (mm < 60) return `${mm}m`;
+  const h = Math.floor(mm / 60);
+  const rem = mm % 60;
+  return `${h}h${rem ? ` ${rem}m` : ''}`;
+}
+
 function parseChatId(raw) {
   const n = Number(String(raw ?? '').trim());
   return Number.isFinite(n) ? n : null;
@@ -138,7 +159,23 @@ async function mirrorBotCallToTelegram(scan) {
     .filter(Boolean)
     .join(' ')
     .trim();
-  const text = ['🤖 Bot call', label || 'Token', ca, dexScreenerSolUrl(ca)].join('\n');
+  const mc = formatUsdCompact(scan?.marketCap);
+  const liq = formatUsdCompact(scan?.liquidity);
+  const v5 = formatUsdCompact(scan?.volume5m);
+  const v1h = formatUsdCompact(scan?.volume1h);
+  const age = formatAgeSeconds(scan?.ageMinutes);
+  const stats = [`MC ${mc}`, `Liq ${liq}`, `5m ${v5}`, `1h ${v1h}`, age ? `Age ${age}` : null]
+    .filter(Boolean)
+    .join(' · ');
+  const text = [
+    '🤖 Bot call',
+    label || 'Token',
+    ca,
+    stats,
+    dexScreenerSolUrl(ca)
+  ]
+    .filter(Boolean)
+    .join('\n');
   await sendTelegramMessage({
     chatId,
     messageThreadId: topicId,

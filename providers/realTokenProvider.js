@@ -523,25 +523,26 @@ function buildFallbackErrorObject(contractAddress) {
 
 /**
  * @param {string} contractAddress Solana mint
- * @param {{ lockedPairAddress?: string | null } | string | null} [opts] Optional `{ lockedPairAddress }` or legacy string pair id
+ * @param {{ lockedPairAddress?: string | null; interactive?: boolean } | string | null} [opts] Legacy string = locked pair id only
  */
 async function fetchRealTokenData(contractAddress, opts = null) {
   try {
     const ca = String(contractAddress || '').trim();
-    const lockedRaw =
-      typeof opts === 'string'
-        ? opts
-        : opts && typeof opts === 'object' && opts.lockedPairAddress
-          ? String(opts.lockedPairAddress)
-          : '';
-    const lockedPair = lockedRaw.trim();
+    let lockedPair = '';
+    let interactive = false;
+    if (typeof opts === 'string') {
+      lockedPair = String(opts || '').trim();
+    } else if (opts && typeof opts === 'object') {
+      lockedPair = String(opts.lockedPairAddress || '').trim();
+      interactive = !!opts.interactive;
+    }
 
     let dex = null;
     if (lockedPair) {
-      dex = await fetchDexScreenerLockedSolanaPair(lockedPair, ca);
+      dex = await fetchDexScreenerLockedSolanaPair(lockedPair, ca, { interactive });
     }
     if (!dex) {
-      dex = await fetchDexScreenerTokenData(ca);
+      dex = await fetchDexScreenerTokenData(ca, { interactive });
     }
 
     // NEW: handle null (no pairs case)

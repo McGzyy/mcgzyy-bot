@@ -1,6 +1,7 @@
 /**
  * DexScreener public HTTP API — requests are globally queued + spaced to reduce 429s from monitoring.
  * Env: DEXSCREENER_MIN_INTERVAL_MS (default 450), DEXSCREENER_MAX_RETRIES (default 4).
+ * Interactive fetches ({ interactive: true } from dashboard/!call) skip the bulk queue — mirror backlog won’t stall submits.
  */
 const axios = require('axios');
 const { computeMigrated } = require('../utils/solanaPoolMigrated');
@@ -55,53 +56,64 @@ function logDex429Once(backoffMs) {
   );
 }
 
-async function dexHttpGet(url, axiosConfig = {}) {
-  return enqueueDexRequest(async () => {
-    for (let attempt = 0; attempt < dexMaxRetries; attempt++) {
-      let response;
-      try {
-        response = await axios.get(url, {
-          timeout: 15000,
-          headers: { Accept: 'application/json' },
-          validateStatus: () => true,
-          ...axiosConfig
-        });
-      } catch (e) {
-        if (attempt < dexMaxRetries - 1) {
-          await sleep(Math.min(8000, 400 * 2 ** attempt));
-          continue;
-        }
-        throw e;
+/** Core GET with retries. Use via enqueue (monitoring) or direct (interactive) */
+async function dexExecuteGet(url, axiosConfig = {}) {
+  for (let attempt = 0; attempt < dexMaxRetries; attempt++) {
+    let response;
+    try {
+      response = await axios.get(url, {
+        timeout: 15000,
+        headers: { Accept: 'application/json' },
+        validateStatus: () => true,
+        ...axiosConfig
+      });
+    } catch (e) {
+      if (attempt < dexMaxRetries - 1) {
+        await sleep(Math.min(8000, 400 * 2 ** attempt));
+        continue;
       }
-
-      const status = response.status;
-      const retryAfterSec = parseInt(response.headers?.['retry-after'], 10);
-
-      if (status === 429 || status === 503) {
-        const backoffMs =
-          Number.isFinite(retryAfterSec) && retryAfterSec > 0
-            ? Math.min(60_000, retryAfterSec * 1000)
-            : Math.min(15_000, 800 * 2 ** attempt);
-        logDex429Once(backoffMs);
-        if (attempt < dexMaxRetries - 1) {
-          await sleep(backoffMs);
-          continue;
-        }
-        const err = new Error(`Request failed with status code ${status}`);
-        err.response = response;
-        throw err;
-      }
-
-      if (status >= 400) {
-        const err = new Error(`Request failed with status code ${status}`);
-        err.response = response;
-        throw err;
-      }
-
-      return response;
+      throw e;
     }
-    throw new Error('dexHttpGet: retries exhausted');
-  });
+
+    const status = response.status;
+    const retryAfterSec = parseInt(response.headers?.['retry-after'], 10);
+
+    if (status === 429 || status === 503) {
+      const backoffMs =
+        Number.isFinite(retryAfterSec) && retryAfterSec > 0
+          ? Math.min(60_000, retryAfterSec * 1000)
+          : Math.min(15_000, 800 * 2 ** attempt);
+      logDex429Once(backoffMs);
+      if (attempt < dexMaxRetries - 1) {
+        await sleep(backoffMs);
+        continue;
+      }
+      const err = new Error(`Request failed with status code ${status}`);
+      err.response = response;
+      throw err;
+    }
+
+    if (status >= 400) {
+      const err = new Error(`Request failed with status code ${status}`);
+      err.response = response;
+      throw err;
+    }
+
+    return response;
+  }
+  throw new Error('dexExecuteGet: retries exhausted');
+}
+
+/**
+ * @param {object} [requestOpts]
+ * @param {boolean} [requestOpts.interactive] — !call / dashboard: skip bulk queue so submit isn’t blocked by mirror backlog
+ */
+async function dexHttpGet(url, axiosConfig = {}, requestOpts = {}) {
+  const interactive = !!requestOpts.interactive;
+  if (interactive) {
+    return dexExecuteGet(url, axiosConfig);
+  }
+  return enqueueDexRequest(() => dexExecuteGet(url, axiosConfig));
 }
 
 function isAxios429(err) {
@@ -364,10 +376,10 @@ function buildDexScreenerTokenPayload(bestPair, pairCount, baseContractAddress) 
   };
 }
 
-async function fetchDexScreenerTokenData(contractAddress) {
+async function fetchDexScreenerTokenData(contractAddress, options = {}) {
   const url = `https://api.dexscreener.com/latest/dex/tokens/${contractAddress}`;
 
-  const response = await dexHttpGet(url);
+  const response = await dexHttpGet(url, {}, { interactive: !!options.interactive });
 
   const rawPairs = response.data?.pairs || [];
 
@@ -397,14 +409,14 @@ async function fetchDexScreenerTokenData(contractAddress) {
  * @param {string} baseMint token mint that must match baseToken.address
  * @returns {Promise<object|null>}
  */
-async function fetchDexScreenerLockedSolanaPair(pairAddress, baseMint) {
+async function fetchDexScreenerLockedSolanaPair(pairAddress, baseMint, options = {}) {
   const pairId = String(pairAddress || '').trim();
   const wantMint = String(baseMint || '').trim();
   if (!pairId || !wantMint) return null;
 
   try {
     const url = `https://api.dexscreener.com/latest/dex/pairs/solana/${encodeURIComponent(pairId)}`;
-    const response = await dexHttpGet(url);
+    const response = await dexHttpGet(url, {}, { interactive: !!options.interactive });
 
     const rawPairs = response.data?.pairs || [];
     const bestPair = rawPairs[0];

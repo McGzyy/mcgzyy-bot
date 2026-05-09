@@ -495,7 +495,7 @@ function normalizeRealDataToScan(realData) {
 
 async function refreshTrackedCallLive(contractAddress) {
   try {
-    const realData = await fetchRealTokenData(contractAddress);
+    const realData = await fetchRealTokenData(contractAddress, { interactive: true });
     const score = calculateQuickRealScore(realData);
 
     const img =
@@ -1341,8 +1341,8 @@ async function applyTrackedCallState(contractAddress, message, marketCap, liveSc
   };
 }
 
-async function runQuickCa(contractAddress) {
-  return fetchRealTokenData(contractAddress);
+async function runQuickCa(contractAddress, opts = {}) {
+  return fetchRealTokenData(contractAddress, opts);
 }
 
 async function runDeepScan(contractAddress) {
@@ -1350,7 +1350,7 @@ async function runDeepScan(contractAddress) {
 }
 
 async function handleQuickScanReply(message, contractAddress, withButtons = false) {
-  const realData = await runQuickCa(contractAddress);
+  const realData = await runQuickCa(contractAddress, { interactive: true });
 
   const embed = createCompactCaEmbed(realData);
 
@@ -1710,7 +1710,7 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     // Run in parallel: serial FaSol-then-Dex was ~28s + Dex; now ~max(FaSol, Dex) for dashboard latency.
     const [enrichSettled, quickSettled] = await Promise.allSettled([
       requestFaSolEnrichment(contractAddress, { timeoutMs: enrichTimeoutMs }),
-      runQuickCa(contractAddress)
+      runQuickCa(contractAddress, { interactive: true })
     ]);
     if (enrichSettled.status === 'fulfilled') {
       enrichment = enrichSettled.value;
@@ -1722,7 +1722,7 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     }
     realData = quickSettled.value;
   } else {
-    realData = await runQuickCa(contractAddress);
+    realData = await runQuickCa(contractAddress, { interactive: true });
   }
   const scan = normalizeRealDataToScan(realData);
   if (enrichment?.parsed) {
@@ -1912,7 +1912,7 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
 }
 
 async function handleWatchCommand(message, contractAddress, source = 'command') {
-  const realData = await runQuickCa(contractAddress);
+  const realData = await runQuickCa(contractAddress, { interactive: true });
   const scan = normalizeRealDataToScan(realData);
 
   const { trackedCall, wasNewCall, wasReactivated } = await applyTrackedCallState(
@@ -2110,7 +2110,7 @@ async function handleBasicCommands(message, options = {}) {
     }
 
     try {
-      const realData = await fetchRealTokenData(contractAddress);
+      const realData = await fetchRealTokenData(contractAddress, { interactive: true });
       const embed = createRealTestEmbed(realData);
       await message.reply({ embeds: [embed] });
       return true;

@@ -1656,6 +1656,42 @@ function truthyTelegramEnv(v) {
   return s === '1' || s === 'true' || s === 'yes' || s === 'on';
 }
 
+/**
+ * Overlay FaSol card onto the Dex-backed scan — **presentation** for Discord/TG on this post.
+ * Live pair, thumbnails, monitoring, dashboard MC still come from Dex + mirror loops afterward.
+ */
+function applyFaSolParsedToScan(scan, p) {
+  if (!scan || !p || typeof p !== 'object') return;
+  scan.alertType = '';
+  scan.tokenName = p.tokenName || scan.tokenName;
+  scan.ticker = p.ticker || scan.ticker;
+  scan.marketCap = p.stats?.marketCap ?? scan.marketCap;
+  scan.ath = p.stats?.ath ?? scan.ath;
+  scan.liquidity = p.stats?.liquidity ?? scan.liquidity;
+  if (p.stats?.fiveMinVol != null) {
+    scan.volume5m = p.stats.fiveMinVol;
+  }
+  if (p.stats?.volume != null) {
+    if (p.stats?.fiveMinVol != null) {
+      scan.volume1h = p.stats.volume;
+    } else {
+      scan.volume5m = p.stats.volume;
+    }
+  }
+  scan.ageMinutes = p.stats?.ageMinutes ?? scan.ageMinutes;
+  scan.holders = p.holders?.holders ?? scan.holders;
+  scan.top10Pct = p.holders?.top10Pct ?? scan.top10Pct;
+  scan.botsCount = p.holders?.botsCount ?? scan.botsCount;
+  scan.snipersCount = p.holders?.snipersCount ?? scan.snipersCount;
+  scan.fiveMinChangePct = p.stats?.fiveMinChangePct ?? scan.fiveMinChangePct;
+  scan.makers = p.stats?.makers ?? scan.makers;
+  scan.txBuys = p.stats?.txBuys ?? scan.txBuys;
+  scan.txSells = p.stats?.txSells ?? scan.txSells;
+  scan.lpPct = p.security?.lpPct ?? scan.lpPct;
+  scan.dexUnpaid = p.security?.dexUnpaid ?? scan.dexUnpaid;
+  scan.taxPct = p.security?.taxPct ?? scan.taxPct;
+}
+
 async function handleCallCommand(message, contractAddress, source = 'command') {
   let enrichment = null;
   // Same switch as FaSol mirror: one env — no extra TELEGRAM_FASOL_ENRICH_USER_CALLS required.
@@ -1674,38 +1710,8 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
 
   const realData = await runQuickCa(contractAddress);
   const scan = normalizeRealDataToScan(realData);
-
-  // If FaSol replied with a stats card, prefer those numbers for the user-call embed.
-  if (enrichment && enrichment.parsed) {
-    const p = enrichment.parsed;
-    scan.alertType = ''; // don't show scanner/FaSol branding in status strip
-    scan.tokenName = p?.tokenName || scan.tokenName;
-    scan.ticker = p?.ticker || scan.ticker;
-    scan.marketCap = p?.stats?.marketCap ?? scan.marketCap;
-    scan.ath = p?.stats?.ath ?? scan.ath;
-    scan.liquidity = p?.stats?.liquidity ?? scan.liquidity;
-    if (p?.stats?.fiveMinVol != null) {
-      scan.volume5m = p.stats.fiveMinVol;
-    }
-    if (p?.stats?.volume != null) {
-      if (p?.stats?.fiveMinVol != null) {
-        scan.volume1h = p.stats.volume;
-      } else {
-        scan.volume5m = p.stats.volume;
-      }
-    }
-    scan.ageMinutes = p?.stats?.ageMinutes ?? scan.ageMinutes;
-    scan.holders = p?.holders?.holders ?? scan.holders;
-    scan.top10Pct = p?.holders?.top10Pct ?? scan.top10Pct;
-    scan.botsCount = p?.holders?.botsCount ?? scan.botsCount;
-    scan.snipersCount = p?.holders?.snipersCount ?? scan.snipersCount;
-    scan.fiveMinChangePct = p?.stats?.fiveMinChangePct ?? scan.fiveMinChangePct;
-    scan.makers = p?.stats?.makers ?? scan.makers;
-    scan.txBuys = p?.stats?.txBuys ?? scan.txBuys;
-    scan.txSells = p?.stats?.txSells ?? scan.txSells;
-    scan.lpPct = p?.security?.lpPct ?? scan.lpPct;
-    scan.dexUnpaid = p?.security?.dexUnpaid ?? scan.dexUnpaid;
-    scan.taxPct = p?.security?.taxPct ?? scan.taxPct;
+  if (enrichment?.parsed) {
+    applyFaSolParsedToScan(scan, enrichment.parsed);
   }
 
   const { trackedCall, wasNewCall, wasReactivated, wasUpgradedToUserCall } =

@@ -42,6 +42,10 @@ let isRunning = false;
 let performanceMirrorInterval = null;
 let isPerformanceMirrorRunning = false;
 
+function sleepMonitoring(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 /**
  * =========================
  * CONFIG
@@ -1126,16 +1130,32 @@ function stopMonitoring() {
  * then mirror to Supabase. No Discord milestones / dumps.
  * Use when `SCANNER_ENABLED` is false so dashboard live X still updates.
  *
+ * Uses a single-threaded loop: **wait idleMs after each full pass completes** (not wall-clock interval).
+ * Avoids stacking ticks when DexScreener throttling makes one pass slower than idleMs — the old
+ * `setInterval(tick)` pattern overlapped dozens of scans and triggered mass 429s.
+ *
+ * Env: PERFORMANCE_MIRROR_INTERVAL_MS (min 10_000), overrides opts.intervalMs when set.
+ *
  * @param {{ intervalMs?: number }} [opts]
  */
 function startUserPerformanceSupabaseMirror(opts = {}) {
   if (isPerformanceMirrorRunning) return;
-  const ms = Number(opts.intervalMs);
-  const intervalMs = Number.isFinite(ms) && ms >= 10_000 ? ms : 30_000;
+
+  const fromOpts = Number(opts.intervalMs);
+  const fromEnv = Number(process.env.PERFORMANCE_MIRROR_INTERVAL_MS);
+  const intervalMs =
+    Number.isFinite(fromEnv) && fromEnv >= 10_000 ? fromEnv
+    : Number.isFinite(fromOpts) && fromOpts >= 10_000 ? fromOpts : 30_000;
+
+  if (performanceMirrorInterval) {
+    clearInterval(performanceMirrorInterval);
+    performanceMirrorInterval = null;
+  }
 
   isPerformanceMirrorRunning = true;
   console.log(
-    `[PerformanceMirror] Starting Supabase stats mirror every ${intervalMs / 1000}s (scanner alerts may be off)`
+    `[PerformanceMirror] Supabase MC mirror (scanner off): live Dex quotes + idle ${intervalMs / 1000}s after each full pass — ` +
+      `tune PERFORMANCE_MIRROR_INTERVAL_MS`
   );
 
   const tick = async () => {
@@ -1154,6 +1174,7 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
 
     let ok = 0;
     for (const coin of coins) {
+      if (!isPerformanceMirrorRunning) return;
       try {
         const scan = await generateRealScan(coin.contractAddress, null, lockedPairScanOpts(coin));
         if (!isSuccessfulMarketScan(scan)) continue;
@@ -1182,11 +1203,14 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
         queueUpdateUserCallPerformanceAth(coin.contractAddress);
         ok += 1;
       } catch (err) {
-        console.error(
-          '[PerformanceMirror]',
-          coin.contractAddress,
-          err && err.message ? err.message : err
-        );
+        const quiet429 = String(err?.message || '').includes('429');
+        if (!quiet429) {
+          console.error(
+            '[PerformanceMirror]',
+            coin.contractAddress,
+            err && err.message ? err.message : err
+          );
+        }
       }
     }
 
@@ -1195,10 +1219,17 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
     }
   };
 
-  void tick();
-  performanceMirrorInterval = setInterval(() => {
-    void tick();
-  }, intervalMs);
+  void (async () => {
+    while (isPerformanceMirrorRunning) {
+      try {
+        await tick();
+      } catch (err) {
+        console.error('[PerformanceMirror] tick failed:', err?.message || err);
+      }
+      if (!isPerformanceMirrorRunning) break;
+      await sleepMonitoring(intervalMs);
+    }
+  })();
 }
 
 function stopUserPerformanceSupabaseMirror() {

@@ -4,6 +4,8 @@
  * Env (mcgzyy-bot/.env or repo .env):
  *   TELEGRAM_BOT_TOKEN           — McGBot Telegram bot (@McGzyyBot) token
  *   TELEGRAM_FASOL_MIRROR        — set to "1" / "true" / "yes" to enable
+ *   TELEGRAM_FASOL_ENRICH_USER_CALLS — optional "1" = poll ingest when TELEGRAM_FASOL_MIRROR is off but you still want !call enrich
+ *   TELEGRAM_FASOL_INGEST_TOPIC_ID — optional forum topic id when posting the CA trigger (same chat as TELEGRAM_FASOL_CHAT_ID)
  *   TELEGRAM_FASOL_CHAT_ID       — numeric chat id of the private FaSol group (often negative for supergroups)
  *   TELEGRAM_FASOL_USERNAME      — optional, default "fasolcallbot" (no @)
  *   TELEGRAM_BOT_CALLS_CHANNEL_ID — members TG hub: bot-call lines after FaSol mirror (see utils/telegramAlerts.js)
@@ -23,10 +25,7 @@ const {
   parseTelegramButtons,
   buildInlineKeyboardFromButtons,
   sendTelegramMessage,
-  escapeHtml,
-  formatUsdCompact,
-  formatAgeSeconds,
-  dexScreenerSolUrl
+  formatFaSolTelegramHtml
 } = require('./telegramAlerts');
 
 // Pump.fun alerts sometimes append literal "pump" after the mint.
@@ -168,13 +167,23 @@ function parseFaSolPost(message) {
     .filter(Boolean);
 
   const first = lines[0] || '';
-  // Example: "SHALO - HarmonizedAiLifecycleOperation"
+  // Examples: "$FMJ - Flying Mayonnaise Jars", "🌙 $FMJ - Flying Mayonnaise Jars"
   let ticker = '';
   let tokenName = '';
   if (first) {
-    const parts = first.split(' - ');
-    ticker = String(parts[0] || '').trim();
-    tokenName = String(parts.slice(1).join(' - ') || '').trim();
+    const moon = first.match(/\$([A-Za-z0-9]{1,24})\s*[-–—]\s*(.+)$/);
+    if (moon) {
+      ticker = moon[1].trim();
+      tokenName = moon[2].trim();
+    } else {
+      const parts = first.split(/\s*[-–—]\s*/);
+      const head = String(parts[0] || '')
+        .replace(/^[\s🌙⌛🔔🪙📊]+/, '')
+        .replace(/^\$\s*/, '')
+        .trim();
+      ticker = head.replace(/^\$/, '').trim();
+      tokenName = String(parts.slice(1).join(' - ') || '').trim();
+    }
   }
 
   const getAfter = (prefixes) => {
@@ -213,9 +222,9 @@ function parseFaSolPost(message) {
     return m ? Number(m[1]) : null;
   })();
 
-  const holdersLine = lines.find((ln) => /^Holders\b/i.test(ln)) || '';
+  const holdersLine = lines.find((ln) => /\bHolders\b/i.test(ln)) || '';
   const holders = (() => {
-    const m = holdersLine.match(/^Holders\s*([0-9]+)/i);
+    const m = holdersLine.match(/\bHolders\s+(\d+)/i);
     return m ? Number(m[1]) : null;
   })();
   const top10Pct = parsePercentLike((holdersLine.match(/TOP\s*10:\s*([0-9.]+%)/i) || [])[1]);
@@ -270,10 +279,21 @@ function parseFaSolPost(message) {
   };
 }
 
+function normalizeMintCore(ca) {
+  const raw = String(ca || '').trim();
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}pump$/i.test(raw)) return raw.slice(0, -4);
+  return raw;
+}
+
+function canonicalMintKey(ca) {
+  return normalizeMintCore(ca).toLowerCase();
+}
+
 async function requestFaSolEnrichment(contractAddress, opts = {}) {
-  const ca = String(contractAddress || '').trim();
-  if (!isLikelySolanaMint(ca)) {
-    throw new Error('Invalid contract address');
+  const rawCa = String(contractAddress || '').trim();
+  const core = normalizeMintCore(rawCa);
+  if (!isLikelySolanaMint(core)) {
+    throw new Error('Invalid Solana contract address');
   }
 
   const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
@@ -284,7 +304,7 @@ async function requestFaSolEnrichment(contractAddress, opts = {}) {
   }
 
   const timeoutMs = Math.max(2_000, Math.min(60_000, Number(opts.timeoutMs || 15_000)));
-  const mintKey = ca.toLowerCase();
+  const mintKey = canonicalMintKey(rawCa);
   const expiresAt = Date.now() + timeoutMs;
 
   const p = new Promise((resolve, reject) => {
@@ -300,91 +320,27 @@ async function requestFaSolEnrichment(contractAddress, opts = {}) {
     }, timeoutMs + 250);
   });
 
-  // Trigger FaSol by posting the CA into the ingest channel/group.
+  // Trigger FaSol by posting the CA into the ingest channel/group (keep pump suffix if present).
   const apiBase = `https://api.telegram.org/bot${encodeURIComponent(token)}`;
-  await axios
-    .post(
-      `${apiBase}/sendMessage`,
-      { chat_id: chatId, text: ca, disable_web_page_preview: true },
-      { timeout: 15000 }
-    )
-    .catch((e) => {
-      const desc = e?.response?.data?.description || e?.message || e;
-      throw new Error(`sendMessage failed: ${desc}`);
-    });
+  const topicRaw = String(process.env.TELEGRAM_FASOL_INGEST_TOPIC_ID ?? '').trim();
+  const ingestTopicId = topicRaw ? Number(topicRaw) : null;
+  const body = {
+    chat_id: chatId,
+    text: rawCa,
+    disable_web_page_preview: true
+  };
+  if (ingestTopicId != null && Number.isFinite(ingestTopicId) && ingestTopicId > 0) {
+    body.message_thread_id = Math.floor(ingestTopicId);
+  }
+
+  await axios.post(`${apiBase}/sendMessage`, body, { timeout: 15000 }).catch((e) => {
+    const desc = e?.response?.data?.description || e?.message || e;
+    throw new Error(`sendMessage failed: ${desc}`);
+  });
+
+  console.log(`[UserCall/FaSolEnrich] Posted CA to ingest chat ${chatId}${body.message_thread_id ? ` topic ${body.message_thread_id}` : ''}`);
 
   return p;
-}
-
-function formatFaSolTelegramHtml(parsed, contractAddress) {
-  const ca = String(contractAddress || '').trim();
-  const t = parsed?.ticker ? `$${String(parsed.ticker).toUpperCase()}` : 'TOKEN';
-  const n = parsed?.tokenName ? String(parsed.tokenName) : '';
-
-  const st = parsed?.stats || {};
-  const sec = parsed?.security || {};
-  const h = parsed?.holders || {};
-
-  const mc = st.marketCap != null ? formatUsdCompact(st.marketCap) : null;
-  const liq = st.liquidity != null ? formatUsdCompact(st.liquidity) : null;
-  const ath = st.ath != null ? formatUsdCompact(st.ath) : null;
-  const vol = st.fiveMinVol != null ? formatUsdCompact(st.fiveMinVol) : (st.volume != null ? formatUsdCompact(st.volume) : null);
-  const age = st.ageMinutes != null ? formatAgeSeconds(st.ageMinutes) : null;
-  const ch5 =
-    st.fiveMinChangePct != null
-      ? `${st.fiveMinChangePct > 0 ? '+' : ''}${st.fiveMinChangePct.toFixed(2)}%`
-      : null;
-  const tx =
-    st.txBuys != null || st.txSells != null
-      ? `B ${st.txBuys ?? '—'}  S ${st.txSells ?? '—'}`
-      : null;
-
-  const titleLine = `🔔 <b>McGBot Call</b> · <b>${escapeHtml(t)}</b>`;
-  const nameLine = n ? `🪙 <i>${escapeHtml(n)}</i>` : null;
-
-  const statLines = [
-    ['MC', mc],
-    ['ATH', ath],
-    ['LIQ', liq],
-    ['AGE', age],
-    ['VOL', vol],
-    ['TX', tx],
-    ['5M', ch5],
-    ['MK', st.makers != null ? String(st.makers) : null]
-  ].filter(([, v]) => v != null);
-
-  const padKey = (k) => String(k).padEnd(3, ' ');
-  const statsPre = statLines.length
-    ? `<pre>${statLines.map(([k, v]) => `${padKey(k)}  ${escapeHtml(v)}`).join('\n')}</pre>`
-    : null;
-
-  const holdersLine = (() => {
-    const parts = [];
-    if (h.holders != null) parts.push(`Holders ${h.holders}`);
-    if (h.top10Pct != null) parts.push(`Top10 ${h.top10Pct.toFixed(2)}%`);
-    if (h.botsCount != null) parts.push(`Bots ${h.botsCount}${h.botsPct != null ? ` (${h.botsPct.toFixed(2)}%)` : ''}`);
-    if (h.snipersCount != null) parts.push(`Snipers ${h.snipersCount}${h.snipersPct != null ? ` (${h.snipersPct.toFixed(2)}%)` : ''}`);
-    return parts.length ? `👥 <b>Holders</b> · ${escapeHtml(parts.join(' · '))}` : null;
-  })();
-
-  const securityLine = (() => {
-    const parts = [];
-    if (sec.lpPct != null) parts.push(`LP ${sec.lpPct.toFixed(2)}%`);
-    if (sec.dexUnpaid === true) parts.push('DEX Unpaid');
-    if (sec.taxPct != null) parts.push(`Tax ${sec.taxPct.toFixed(2)}%`);
-    return parts.length ? `🛡️ <b>Security</b> · ${escapeHtml(parts.join(' · '))}` : null;
-  })();
-
-  return [
-    titleLine,
-    nameLine,
-    statsPre,
-    holdersLine,
-    securityLine,
-    '',
-    `CA: <code>${escapeHtml(ca)}</code>`,
-    `<a href="${escapeHtml(dexScreenerSolUrl(ca))}">DexScreener</a>`
-  ].filter(Boolean).join('\n');
 }
 
 /**
@@ -392,7 +348,9 @@ function formatFaSolTelegramHtml(parsed, contractAddress) {
  */
 function startTelegramFaSolMirror(opts) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
-  const enabled = truthyEnv(process.env.TELEGRAM_FASOL_MIRROR);
+  const mirrorEnabled = truthyEnv(process.env.TELEGRAM_FASOL_MIRROR);
+  const enrichListener = truthyEnv(process.env.TELEGRAM_FASOL_ENRICH_USER_CALLS);
+  const enabled = mirrorEnabled || enrichListener;
   const chatIdRaw = String(process.env.TELEGRAM_FASOL_CHAT_ID ?? '').trim();
   const wantUserRaw = String(process.env.TELEGRAM_FASOL_USERNAME ?? 'fasolcallbot')
     .trim()
@@ -403,22 +361,26 @@ function startTelegramFaSolMirror(opts) {
   const tgBotCalls = botCallsTelegramTarget();
 
   if (!enabled) {
-    console.log('[TelegramFaSol] Mirror disabled (set TELEGRAM_FASOL_MIRROR=1 to enable).');
+    console.log(
+      '[TelegramFaSol] Ingest idle — enable TELEGRAM_FASOL_MIRROR and/or TELEGRAM_FASOL_ENRICH_USER_CALLS.'
+    );
     return;
   }
   if (!token) {
-    console.warn('[TelegramFaSol] TELEGRAM_FASOL_MIRROR is on but TELEGRAM_BOT_TOKEN is empty.');
+    console.warn('[TelegramFaSol] TELEGRAM_BOT_TOKEN is empty — ingest listener not started.');
     return;
   }
   if (!chatIdRaw) {
-    console.warn('[TelegramFaSol] TELEGRAM_FASOL_MIRROR is on but TELEGRAM_FASOL_CHAT_ID is empty.');
+    console.warn('[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID is empty — ingest listener not started.');
     return;
   }
 
   const channel = opts?.discordBotCallsChannel;
-  if (!channel || typeof channel.send !== 'function') {
-    console.warn('[TelegramFaSol] No Discord #bot-calls channel — mirror not started.');
-    return;
+  if (mirrorEnabled && (!channel || typeof channel.send !== 'function')) {
+    console.warn(
+      '[TelegramFaSol] Mirror enabled but no Discord #bot-calls channel — FaSol→Discord mirror disabled.'
+    );
+    if (!enrichListener) return;
   }
 
   const chatId = Number(chatIdRaw);
@@ -438,10 +400,12 @@ function startTelegramFaSolMirror(opts) {
     tgBotCalls.chatId != null
       ? ` + TG bot-alerts ${tgBotCalls.chatId}${tgBotCalls.topicId != null ? ` topic ${tgBotCalls.topicId}` : ''}`
       : '';
+  const modeBits = [];
+  if (mirrorEnabled) modeBits.push('mirror→Discord');
+  if (enrichListener) modeBits.push('user-call enrich');
   console.log(
-    `[TelegramFaSol] Mirror ON — TG ingest ${chatId}, ` +
-      `@${wantUser}` +
-      ` → Discord #${channel.name}${tgBotExtra}`
+    `[TelegramFaSol] Ingest ON (${modeBits.join(' + ')}) — TG chat ${chatId}, @${wantUser}` +
+      (mirrorEnabled && channel ? ` → Discord #${channel.name}${tgBotExtra}` : '')
   );
 
   async function clearWebhookOnce() {
@@ -503,6 +467,10 @@ function startTelegramFaSolMirror(opts) {
         // ignore parse failures for enrichment resolution
       }
 
+      if (!mirrorEnabled || !channel || typeof channel.send !== 'function') {
+        continue;
+      }
+
       const now = Date.now();
       const last = recentMintAt.get(mint) || 0;
       if (now - last < DEDUPE_MS) continue;
@@ -549,7 +517,7 @@ function startTelegramFaSolMirror(opts) {
         await sendTelegramMessage({
           chatId: outChatId,
           messageThreadId: outTopicId,
-          text: formatFaSolTelegramHtml(parsed, mint),
+          text: formatFaSolTelegramHtml(parsed, mint, { variant: 'bot' }),
           parseMode: 'HTML',
           replyMarkup: replyMarkup || undefined,
           disableWebPreview: true,

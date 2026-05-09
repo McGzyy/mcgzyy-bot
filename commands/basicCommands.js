@@ -30,6 +30,7 @@ const { buildOhlcvCandlestickBuffer } = require('../utils/ohlcvCandlestickBuffer
 const { getCandlestickOverlayProps } = require('../utils/candlestickOverlayFromTracked');
 const { buildOhlcvTimeframeRows } = require('../utils/ohlcvChartControls');
 const { mirrorUserCallToTelegram } = require('../utils/telegramAlerts');
+const { createUserCallFaSolEmbed } = require('../utils/alertEmbeds');
 const { requestFaSolEnrichment } = require('../utils/telegramFaSolMirror');
 
 function memberCanManageGuild(member) {
@@ -1013,6 +1014,12 @@ async function hydrateCallWatchChartMessage(message, scan, embedOptions = {}) {
     return;
   }
   try {
+    const { embedFactory, ...restEmbedOptions } = embedOptions;
+    const buildEmbed =
+      typeof embedFactory === 'function'
+        ? embedFactory
+        : (s, opts) => createTraderScanEmbed(s, opts);
+
     let buf = null;
     let usedOhlcvCandlestick = false;
 
@@ -1052,8 +1059,8 @@ async function hydrateCallWatchChartMessage(message, scan, embedOptions = {}) {
       }
     }
 
-    const embed = createTraderScanEmbed(scan, {
-      ...embedOptions,
+    const embed = buildEmbed(scan, {
+      ...restEmbedOptions,
       chartPending: false,
       chartImageUrl: buf ? 'attachment://chart.png' : undefined
     });
@@ -1639,12 +1646,25 @@ async function handleWatchFromDashboard(client, opts) {
   return handleWatchCommand(messageStub, contractAddress, 'dashboard');
 }
 
+function truthyTelegramEnv(v) {
+  const s = String(v ?? '')
+    .trim()
+    .toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+}
+
 async function handleCallCommand(message, contractAddress, source = 'command') {
   let enrichment = null;
-  if (String(process.env.TELEGRAM_FASOL_ENRICH_USER_CALLS || '').trim()) {
+  // Same switch as FaSol mirror: one env — no extra TELEGRAM_FASOL_ENRICH_USER_CALLS required.
+  // Optional TELEGRAM_FASOL_ENRICH_USER_CALLS=1 if you want user-call enrich while mirror is off.
+  const faSolIngestOn =
+    truthyTelegramEnv(process.env.TELEGRAM_FASOL_MIRROR) ||
+    truthyTelegramEnv(process.env.TELEGRAM_FASOL_ENRICH_USER_CALLS);
+  if (faSolIngestOn) {
     try {
-      enrichment = await requestFaSolEnrichment(contractAddress, { timeoutMs: 18_000 });
-    } catch (_) {
+      enrichment = await requestFaSolEnrichment(contractAddress, { timeoutMs: 28_000 });
+    } catch (e) {
+      console.warn('[UserCall/FaSolEnrich]', e?.message || e);
       enrichment = null;
     }
   }
@@ -1655,7 +1675,7 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
   // If FaSol replied with a stats card, prefer those numbers for the user-call embed.
   if (enrichment && enrichment.parsed) {
     const p = enrichment.parsed;
-    scan.alertType = ''; // don't show "FaSol call" style labels
+    scan.alertType = ''; // don't show scanner/FaSol branding in status strip
     scan.tokenName = p?.tokenName || scan.tokenName;
     scan.ticker = p?.ticker || scan.ticker;
     scan.marketCap = p?.stats?.marketCap ?? scan.marketCap;
@@ -1664,6 +1684,16 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     scan.volume5m = p?.stats?.fiveMinVol ?? p?.stats?.volume ?? scan.volume5m;
     scan.ageMinutes = p?.stats?.ageMinutes ?? scan.ageMinutes;
     scan.holders = p?.holders?.holders ?? scan.holders;
+    scan.top10Pct = p?.holders?.top10Pct ?? scan.top10Pct;
+    scan.botsCount = p?.holders?.botsCount ?? scan.botsCount;
+    scan.snipersCount = p?.holders?.snipersCount ?? scan.snipersCount;
+    scan.fiveMinChangePct = p?.stats?.fiveMinChangePct ?? scan.fiveMinChangePct;
+    scan.makers = p?.stats?.makers ?? scan.makers;
+    scan.txBuys = p?.stats?.txBuys ?? scan.txBuys;
+    scan.txSells = p?.stats?.txSells ?? scan.txSells;
+    scan.lpPct = p?.security?.lpPct ?? scan.lpPct;
+    scan.dexUnpaid = p?.security?.dexUnpaid ?? scan.dexUnpaid;
+    scan.taxPct = p?.security?.taxPct ?? scan.taxPct;
   }
 
   const { trackedCall, wasNewCall, wasReactivated, wasUpgradedToUserCall } =
@@ -1685,6 +1715,8 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
 
   const { greenFlags, redFlags } = buildScanFlags(realData);
 
+  const usedFaSolEnrichment = Boolean(enrichment?.parsed);
+
   const embedScan = {
     ...scan,
     greenFlags,
@@ -1700,7 +1732,9 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     isReactivated: wasReactivated,
     performancePercent,
     milestoneHit,
-    isNewMilestone: false
+    isNewMilestone: false,
+    __faSolParsed: enrichment?.parsed || null,
+    __usedFaSolEnrichment: usedFaSolEnrichment
   };
 
   const callChartPending = wasNewCall || wasReactivated;
@@ -1710,11 +1744,19 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
       ? `${String(getPublicCaller(embedScan)).slice(0, 72)} · Call intel`
       : undefined;
 
-  const embed = createTraderScanEmbed(embedScan, {
-    showTrackedMeta: true,
-    chartPending: callChartPending,
-    ...(dashboardFooter ? { footerText: dashboardFooter } : {})
-  });
+  const callerDisplay = getPublicCaller(embedScan);
+
+  const embed = usedFaSolEnrichment
+    ? createUserCallFaSolEmbed(embedScan, {
+        callerDisplayName: callerDisplay,
+        chartPending: callChartPending,
+        ...(dashboardFooter ? { footerText: dashboardFooter } : {})
+      })
+    : createTraderScanEmbed(embedScan, {
+        showTrackedMeta: true,
+        chartPending: callChartPending,
+        ...(dashboardFooter ? { footerText: dashboardFooter } : {})
+      });
 
   const alreadyCalled = !wasNewCall && !wasReactivated && !wasUpgradedToUserCall;
   const replyContent = wasNewCall
@@ -1786,10 +1828,21 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     }
   }
 
-  hydrateCallWatchChartMessage(reply, embedScan, {
+  const hydrateOpts = {
     showTrackedMeta: true,
     ...(dashboardFooter ? { footerText: dashboardFooter } : {})
-  }).catch(err => {
+  };
+  if (usedFaSolEnrichment) {
+    hydrateOpts.embedFactory = (s, opts) =>
+      createUserCallFaSolEmbed(s, {
+        callerDisplayName: getPublicCaller(s),
+        chartPending: opts.chartPending,
+        chartImageUrl: opts.chartImageUrl,
+        ...(dashboardFooter ? { footerText: dashboardFooter } : {})
+      });
+  }
+
+  hydrateCallWatchChartMessage(reply, embedScan, hydrateOpts).catch(err => {
     console.error('[CallWatchChart]', embedScan?.contractAddress, err.message);
   });
 

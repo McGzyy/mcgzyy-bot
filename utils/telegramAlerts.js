@@ -11,6 +11,7 @@
  *   TELEGRAM_MILESTONES_TOPIC_ID    — optional forum topic inside that channel
  */
 const axios = require('axios');
+const { resolveScanThumbnailUrl } = require('./embedTokenThumbnail');
 
 function dexScreenerSolUrl(ca) {
   return `https://dexscreener.com/solana/${encodeURIComponent(String(ca || '').trim())}`;
@@ -130,35 +131,52 @@ function formatFaSolTelegramHtml(parsed, contractAddress, opts = {}) {
   const volRows =
     v5 && v1
       ? [
-          ['V5', v5],
-          ['1H', v1]
+          ['5m Vol', v5],
+          ['1h Vol', v1]
         ]
-      : [['VOL', v5 || v1]];
+      : [['Vol', v5 || v1]];
 
   const statLines = [
     ['MC', mc],
     ['ATH', ath],
-    ['LIQ', liq],
-    ['AGE', age],
+    ['Liq', liq],
+    ['Age', age],
     ...volRows,
-    ['TX', tx],
-    ['P5', ch5],
-    ['MK', st.makers != null ? String(st.makers) : null]
+    ...(tx ? [['TX', tx]] : []),
+    ...(ch5 != null ? [['5m %', ch5]] : []),
+    ...(st.makers != null ? [['Makers', String(st.makers)]] : [])
   ].filter(([, v]) => v != null);
 
-  const padKey = (k) => String(k).padEnd(3, ' ');
-  const statsPre = statLines.length
-    ? `<pre>${statLines.map(([k, v]) => `${padKey(k)}  ${escapeHtml(v)}`).join('\n')}</pre>`
-    : null;
+  const statsBlock =
+    statLines.length > 0
+      ? `<pre><code>${statLines
+          .map(([label, val], i) => {
+            const branch = i === statLines.length - 1 ? '└' : '├';
+            return `${branch} ${label}  ${String(val)}`;
+          })
+          .map(escapeHtml)
+          .join('\n')}</code></pre>`
+      : null;
 
   const holdersLine = (() => {
-    const parts = [];
-    if (h.holders != null) parts.push(`Holders ${h.holders}`);
-    if (h.top10Pct != null) parts.push(`Top10 ${h.top10Pct.toFixed(2)}%`);
-    if (h.botsCount != null) parts.push(`Bots ${h.botsCount}${h.botsPct != null ? ` (${h.botsPct.toFixed(2)}%)` : ''}`);
-    if (h.snipersCount != null)
-      parts.push(`Snipers ${h.snipersCount}${h.snipersPct != null ? ` (${h.snipersPct.toFixed(2)}%)` : ''}`);
-    return parts.length ? `👥 <b>Holders</b> · ${escapeHtml(parts.join(' · '))}` : null;
+    const rows = [];
+    if (h.holders != null) rows.push(`Holders  ${h.holders}`);
+    if (h.top10Pct != null) rows.push(`Top10  ${h.top10Pct.toFixed(2)}%`);
+    if (h.botsCount != null) {
+      rows.push(
+        `Bots  ${h.botsCount}${h.botsPct != null ? ` (${h.botsPct.toFixed(2)}%)` : ''}`
+      );
+    }
+    if (h.snipersCount != null) {
+      rows.push(
+        `Snipers  ${h.snipersCount}${h.snipersPct != null ? ` (${h.snipersPct.toFixed(2)}%)` : ''}`
+      );
+    }
+    if (!rows.length) return null;
+    const body = rows
+      .map((line, i) => `${i === rows.length - 1 ? '└' : '├'} ${line}`)
+      .join('\n');
+    return `👥 <b>Holders</b>\n<pre><code>${escapeHtml(body)}</code></pre>`;
   })();
 
   const securityLine = (() => {
@@ -166,18 +184,20 @@ function formatFaSolTelegramHtml(parsed, contractAddress, opts = {}) {
     if (sec.lpPct != null) parts.push(`LP ${sec.lpPct.toFixed(2)}%`);
     if (sec.dexUnpaid === true) parts.push('DEX Unpaid');
     if (sec.taxPct != null) parts.push(`Tax ${sec.taxPct.toFixed(2)}%`);
-    return parts.length ? `🛡️ <b>Security</b> · ${escapeHtml(parts.join(' · '))}` : null;
+    return parts.length ? `🛡️ <b>Security</b>\n<code>${escapeHtml(parts.join(' · '))}</code>` : null;
   })();
 
   return [
     ...titleLines.filter(Boolean),
     '',
-    statsPre,
+    '<b>📊 Market</b>',
+    statsBlock,
+    '',
     holdersLine,
     securityLine,
     '',
-    `CA: <code>${escapeHtml(ca)}</code>`,
-    `<a href="${escapeHtml(dexScreenerSolUrl(ca))}">DexScreener</a>`
+    `🔗 <code>${escapeHtml(ca)}</code>`,
+    `<a href="${escapeHtml(dexScreenerSolUrl(ca))}">Open DexScreener</a>`
   ]
     .filter(Boolean)
     .join('\n');
@@ -241,6 +261,55 @@ async function sendTelegramMessage(opts) {
     console.warn(`[TelegramAlerts] ${opts.logLabel || 'sendMessage'}:`, desc);
     return false;
   }
+}
+
+/**
+ * Sends token thumbnail when URL is https (Dex CDN / metadata). Falls back to sendMessage by caller.
+ */
+async function sendTelegramPhoto(opts) {
+  const apiBase = getApiBase();
+  if (!apiBase) return false;
+  const chatId = opts.chatId;
+  if (chatId == null || !Number.isFinite(chatId)) return false;
+  const photo = String(opts.photoUrl || '').trim();
+  if (!photo.startsWith('https://')) return false;
+  const captionRaw = truncateTelegramCaption(opts.caption || '');
+  const body = {
+    chat_id: chatId,
+    photo,
+    caption: captionRaw,
+    parse_mode: opts.parseMode === 'HTML' ? 'HTML' : undefined
+  };
+  if (opts.messageThreadId != null && Number.isFinite(opts.messageThreadId)) {
+    body.message_thread_id = opts.messageThreadId;
+  }
+  if (opts.replyMarkup != null) {
+    body.reply_markup = opts.replyMarkup;
+  }
+  try {
+    await axios.post(`${apiBase}/sendPhoto`, body, { timeout: 20000 });
+    return true;
+  } catch (e) {
+    const desc = e?.response?.data?.description || e?.message || e;
+    console.warn(`[TelegramAlerts] ${opts.logLabel || 'sendPhoto'}:`, desc);
+    return false;
+  }
+}
+
+/** Telegram captions max out at 1024 chars (photo or video). */
+function truncateTelegramCaption(html, maxLen = 1024) {
+  const s = String(html ?? '');
+  if (s.length <= maxLen) return s;
+  const cut = Math.max(0, maxLen - 24);
+  return `${s.slice(0, cut)}\n<i>…trimmed (${s.length - cut} chars)</i>`;
+}
+
+function pickTelegramTokenPhotoUrl(ca, scanLike) {
+  const s =
+    scanLike && typeof scanLike === 'object'
+      ? scanLike
+      : { contractAddress: String(ca || '').trim() };
+  return resolveScanThumbnailUrl(s) || '';
 }
 
 function parseTelegramButtons(raw) {
@@ -356,41 +425,41 @@ async function mirrorMilestoneToTelegram(payload) {
   });
 }
 
-/** FaSol mirror → short line in TG bot-call destination */
+/** FaSol-style card → TG bot-call destination (Dex-backed scan shape). */
 async function mirrorBotCallToTelegram(scan) {
   const { chatId, topicId } = botCallsTelegramTarget();
   if (chatId == null) return;
   const ca = String(scan?.contractAddress || '').trim();
   if (!ca) return;
-  const label = [scan?.tokenName, scan?.ticker ? `(${scan.ticker})` : '']
-    .filter(Boolean)
-    .join(' ')
-    .trim();
-  const mc = formatUsdCompact(scan?.marketCap);
-  const liq = formatUsdCompact(scan?.liquidity);
-  const v5 = formatUsdCompact(scan?.volume5m);
-  const v1h = formatUsdCompact(scan?.volume1h);
-  const age = formatAgeSeconds(scan?.ageMinutes);
-  const stats = [`MC ${mc}`, `Liq ${liq}`, `5m ${v5}`, `1h ${v1h}`, age ? `Age ${age}` : null]
-    .filter(Boolean)
-    .join(' · ');
-  const text = [
-    '🤖 Bot call',
-    label || 'Token',
-    ca,
-    stats,
-    dexScreenerSolUrl(ca)
-  ]
-    .filter(Boolean)
-    .join('\n');
+  const parsed =
+    scan?.__faSolParsed && typeof scan.__faSolParsed === 'object'
+      ? scan.__faSolParsed
+      : scanToFaSolParsedForTelegram(scan);
 
   const buttonsRaw = process.env.TELEGRAM_BOT_CALLS_BUTTONS;
   const buttons = buildInlineKeyboardFromButtons(parseTelegramButtons(buttonsRaw), { ca });
+  const caption = formatFaSolTelegramHtml(parsed, ca, { variant: 'bot' });
+  const photoUrl = pickTelegramTokenPhotoUrl(ca, scan);
+  if (photoUrl) {
+    const ok = await sendTelegramPhoto({
+      chatId,
+      messageThreadId: topicId,
+      photoUrl,
+      caption,
+      parseMode: 'HTML',
+      replyMarkup: buttons || undefined,
+      logLabel: 'bot-calls TG photo+caption'
+    });
+    if (ok) return;
+  }
+
   await sendTelegramMessage({
     chatId,
     messageThreadId: topicId,
-    text,
+    text: caption,
+    parseMode: 'HTML',
     replyMarkup: buttons || undefined,
+    disableWebPreview: true,
     logLabel: 'bot-calls TG'
   });
 }
@@ -421,21 +490,42 @@ async function mirrorUserCallToTelegram(scan, callerLabel) {
 
   const enriched = scan?.__faSolParsed && typeof scan.__faSolParsed === 'object' ? scan.__faSolParsed : null;
   const parsed =
-    enriched && scan?.__usedFaSolEnrichment === true ? enriched : scanToFaSolParsedForTelegram(scan);
+    enriched &&
+    (enriched.stats?.marketCap != null ||
+      enriched.stats?.liquidity != null ||
+      enriched.holders?.holders != null ||
+      (enriched.ticker && enriched.tokenName))
+      ? enriched
+      : scanToFaSolParsedForTelegram(scan);
 
   const buttonsRaw =
     String(process.env.TELEGRAM_USER_CALLS_BUTTONS || '').trim() ||
     String(process.env.TELEGRAM_BOT_CALLS_BUTTONS || '').trim();
   const replyMarkup = buildInlineKeyboardFromButtons(parseTelegramButtons(buttonsRaw), { ca });
 
+  const caption = formatFaSolTelegramHtml(parsed, ca, {
+    variant: 'user',
+    callerLabel: who,
+    discordUserId
+  });
+  const photoUrl = pickTelegramTokenPhotoUrl(ca, scan);
+  if (photoUrl) {
+    const ok = await sendTelegramPhoto({
+      chatId,
+      messageThreadId: topicId,
+      photoUrl,
+      caption,
+      parseMode: 'HTML',
+      replyMarkup: replyMarkup || undefined,
+      logLabel: 'user-calls TG photo+caption'
+    });
+    if (ok) return;
+  }
+
   await sendTelegramMessage({
     chatId,
     messageThreadId: topicId,
-    text: formatFaSolTelegramHtml(parsed, ca, {
-      variant: 'user',
-      callerLabel: who,
-      discordUserId
-    }),
+    text: caption,
     parseMode: 'HTML',
     replyMarkup: replyMarkup || undefined,
     disableWebPreview: true,
@@ -445,6 +535,9 @@ async function mirrorUserCallToTelegram(scan, callerLabel) {
 
 module.exports = {
   sendTelegramMessage,
+  sendTelegramPhoto,
+  truncateTelegramCaption,
+  pickTelegramTokenPhotoUrl,
   parseTelegramButtons,
   buildInlineKeyboardFromButtons,
   formatFaSolTelegramHtml,

@@ -143,6 +143,13 @@ function dexscreenerTokenUrl(contractAddress) {
   return `https://dexscreener.com/solana/${contractAddress}`;
 }
 
+/** Discord can hot-link Gecko’s static MC chart PNG (fills the big embed image slot until we attach our own chart). */
+function geckoPoolsChartPngUrl(scan) {
+  const pair = typeof scan?.pairAddress === 'string' ? scan.pairAddress.trim() : '';
+  if (!pair || pair.length < 8 || pair.length > 220) return '';
+  return `https://www.geckoterminal.com/solana/pools/${encodeURIComponent(pair)}/chart.png`;
+}
+
 function buildEliteCallLinkButtons(scan) {
   try {
     const ca = typeof scan?.contractAddress === 'string' ? scan.contractAddress.trim() : '';
@@ -496,42 +503,28 @@ function createUserCallFaSolEmbed(scan, options = {}) {
       ? `📍 **Member call** · Caller <@${callerDiscordId}>`
       : `📍 **Member call** · Caller **${caller}**`;
 
-  const parts = [
-    `**MC** ${formatUsd(scan?.marketCap)}`,
-    `**ATH** ${formatUsd(scan?.ath)}`,
-    `**Liq** ${formatUsd(scan?.liquidity)}`,
-    `**Vol 5m** ${formatUsd(scan?.volume5m)}`,
-    `**Vol 1h** ${formatUsd(scan?.volume1h)}`,
-    `**Age** ${formatAgeMinutes(scan?.ageMinutes)}`
-  ].filter(Boolean);
-
-  const extra = [];
-  if (scan?.fiveMinChangePct != null && Number.isFinite(Number(scan.fiveMinChangePct))) {
-    const v = Number(scan.fiveMinChangePct);
-    extra.push(`**5m** ${v > 0 ? '+' : ''}${v.toFixed(2)}%`);
-  }
-  if (scan?.txBuys != null || scan?.txSells != null) {
-    extra.push(`**TX** B ${formatValue(scan.txBuys, '—')} / S ${formatValue(scan.txSells, '—')}`);
-  }
-  if (scan?.makers != null) {
-    extra.push(`**Makers** ${formatValue(scan.makers, '—')}`);
-  }
-
   const embed = new EmbedBuilder()
     .setColor(0xa855f7)
     .setTitle(`🚀 ${tokenNameUpper} • $${tickerUpper}`)
     .setDescription(
-      [
-        callerLine,
-        options.chartPending ? '_Chart warming up…_' : null,
-        '',
-        parts.join('  •  '),
-        extra.length ? extra.join('  •  ') : null
-      ]
-        .filter(Boolean)
-        .join('\n')
+      truncateEmbedDescription(
+        [
+          callerLine,
+          options.chartPending ? '_Sharper chart attaches in a moment…_' : null,
+          buildSocialLinksLine(scan) ? `🌐 ${buildSocialLinksLine(scan)}` : null
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      )
     )
-    .addFields({ name: '🧾 Contract', value: `\`${shortenCa(ca)}\`\nFull: \`${ca}\``, inline: false })
+    .addFields(
+      { name: 'MC', value: formatUsd(scan?.marketCap), inline: true },
+      { name: 'ATH', value: formatUsd(scan?.ath), inline: true },
+      { name: 'Liq', value: formatUsd(scan?.liquidity), inline: true },
+      { name: 'Vol 5m', value: formatUsd(scan?.volume5m), inline: true },
+      { name: 'Vol 1h', value: formatUsd(scan?.volume1h), inline: true },
+      { name: 'Age', value: formatAgeMinutes(scan?.ageMinutes), inline: true }
+    )
     .setFooter({
       text: (
         options.footerText && String(options.footerText).trim()
@@ -540,6 +533,23 @@ function createUserCallFaSolEmbed(scan, options = {}) {
       ).slice(0, 2048)
     })
     .setTimestamp();
+
+  const activityBits = [];
+  if (scan?.fiveMinChangePct != null && Number.isFinite(Number(scan.fiveMinChangePct))) {
+    const v = Number(scan.fiveMinChangePct);
+    activityBits.push(`5m ${v > 0 ? '+' : ''}${v.toFixed(2)}%`);
+  }
+  if (scan?.makers != null) activityBits.push(`Makers **${formatValue(scan.makers, '—')}**`);
+  if (scan?.txBuys != null || scan?.txSells != null) {
+    activityBits.push(`TX B **${formatValue(scan.txBuys, '—')}** · S **${formatValue(scan.txSells, '—')}**`);
+  }
+  if (activityBits.length) {
+    embed.addFields({
+      name: '📊 Momentum · flow',
+      value: truncateEmbedDescription(activityBits.join('\n'), 1024),
+      inline: false
+    });
+  }
 
   const holdersBits = [];
   if (scan?.holders != null) holdersBits.push(`Holders **${formatValue(scan.holders, '—')}**`);
@@ -564,12 +574,19 @@ function createUserCallFaSolEmbed(scan, options = {}) {
     embed.addFields({ name: '🛡️ Security', value: securityBits.join(' · '), inline: false });
   }
 
+  embed.addFields({ name: '🧾 Contract', value: `\`${shortenCa(ca)}\`\nFull: \`${ca}\``, inline: false });
+
   applyScanThumbnailToEmbed(embed, scan);
   const buttons = buildEliteCallLinkButtons(scan);
   if (buttons) embed._eliteButtons = buttons;
 
   if (options.chartImageUrl) {
     embed.setImage(options.chartImageUrl);
+  } else {
+    const gUrl = geckoPoolsChartPngUrl(scan);
+    if (gUrl && isHttpOrHttpsUrl(gUrl)) {
+      embed.setImage(gUrl);
+    }
   }
 
   return embed;

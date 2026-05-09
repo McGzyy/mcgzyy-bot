@@ -9,7 +9,7 @@
  *   TELEGRAM_FASOL_CHAT_ID       — numeric chat id of the private FaSol group (often negative for supergroups)
  *   TELEGRAM_FASOL_INGEST_CHAT_ID — alias for TELEGRAM_FASOL_CHAT_ID if the latter is empty
  *   TELEGRAM_FASOL_ENRICH_TIMEOUT_MS — optional; !call / dashboard waits for FaSol (default 28000). Runs in parallel with Dex.
- *   TELEGRAM_FASOL_USERNAME      — optional, default "fasolcallbot" (no @)
+ *   TELEGRAM_FASOL_USERNAME      — optional, comma-separated FaSol bot @usernames (default: fasolcallbot,fasolbot)
  *   TELEGRAM_BOT_CALLS_CHANNEL_ID — members TG hub: bot-call lines after FaSol mirror (see utils/telegramAlerts.js)
  *   TELEGRAM_BOT_CALLS_TOPIC_ID   — optional forum topic id for that channel
  *
@@ -27,6 +27,8 @@ const {
   parseTelegramButtons,
   buildInlineKeyboardFromButtons,
   sendTelegramMessage,
+  sendTelegramPhoto,
+  pickTelegramTokenPhotoUrl,
   formatFaSolTelegramHtml
 } = require('./telegramAlerts');
 
@@ -161,6 +163,27 @@ function cleanLine(line) {
     .trim();
 }
 
+/** TELEGRAM_FASOL_USERNAME — comma-separated @handles (default includes common FaSol bot names). */
+function faSolAllowedUsernames() {
+  const raw = String(process.env.TELEGRAM_FASOL_USERNAME ?? 'fasolcallbot,fasolbot')
+    .split(/[,;]+/)
+    .map(s => s.replace(/^@/, '').trim().toLowerCase())
+    .filter(Boolean);
+  return new Set(raw.length ? raw : ['fasolcallbot', 'fasolbot']);
+}
+
+/** Match MC/ATH/LIQ when not at line start (emoji headers, tree lines). */
+function parseUsdLabeled(lines, labelRe) {
+  for (const ln of lines) {
+    const m = ln.match(labelRe);
+    if (m && m[1]) {
+      const v = parseUsdLike(m[1]);
+      if (v != null) return v;
+    }
+  }
+  return null;
+}
+
 function parseFaSolPost(message) {
   const text = [message?.text, message?.caption].filter(Boolean).join('\n');
   const lines = String(text || '')
@@ -200,9 +223,18 @@ function parseFaSolPost(message) {
     return null;
   };
 
-  const mc = parseUsdLike(getAfter(['MC:', 'MC']));
-  const ath = parseUsdLike(getAfter(['ATH:', 'ATH']));
-  const liq = parseUsdLike(getAfter(['LIQ:', 'LIQ']));
+  let mc = parseUsdLike(getAfter(['MC:', 'MC']));
+  if (mc == null) {
+    mc = parseUsdLabeled(lines, /\bMC\b\s*:?\s*(\$?\s*[0-9]+(?:\.[0-9]+)?\s*[kKmMbB]?)/i);
+  }
+  let ath = parseUsdLike(getAfter(['ATH:', 'ATH']));
+  if (ath == null) {
+    ath = parseUsdLabeled(lines, /\bATH\b\s*:?\s*(\$?\s*[0-9]+(?:\.[0-9]+)?\s*[kKmMbB]?)/i);
+  }
+  let liq = parseUsdLike(getAfter(['LIQ:', 'LIQ']));
+  if (liq == null) {
+    liq = parseUsdLabeled(lines, /\bLIQ\b\s*:?\s*(\$?\s*[0-9]+(?:\.[0-9]+)?\s*[kKmMbB]?)/i);
+  }
   const ageMinutes = parseAgeToMinutes(getAfter(['Age:', 'Age']));
   const vol = parseUsdLike(getAfter(['Vol:', 'Vol']));
 
@@ -229,18 +261,21 @@ function parseFaSolPost(message) {
     const m = holdersLine.match(/\bHolders\s+(\d+)/i);
     return m ? Number(m[1]) : null;
   })();
-  const top10Pct = parsePercentLike((holdersLine.match(/TOP\s*10:\s*([0-9.]+%)/i) || [])[1]);
+  const top10Pct = parsePercentLike(
+    (holdersLine.match(/TOP\s*10\s*:\s*([0-9.]+%)/i) || [])[1] ||
+      (holdersLine.match(/TOP\s*10\s*([0-9.]+%)/i) || [])[1]
+  );
 
-  const botsLine = lines.find((ln) => /^Bots:\b/i.test(ln)) || '';
+  const botsLine = lines.find((ln) => /\bBots\s*:\s*[0-9]/i.test(ln)) || '';
   const botsCount = (() => {
-    const m = botsLine.match(/^Bots:\s*([0-9]+)/i);
+    const m = botsLine.match(/\bBots\s*:\s*([0-9]+)/i);
     return m ? Number(m[1]) : null;
   })();
   const botsPct = parsePercentLike(botsLine);
 
-  const snipersLine = lines.find((ln) => /^Snipers:\b/i.test(ln)) || '';
+  const snipersLine = lines.find((ln) => /\bSnipers\s*:\s*[0-9]/i.test(ln)) || '';
   const snipersCount = (() => {
-    const m = snipersLine.match(/^Snipers:\s*([0-9]+)/i);
+    const m = snipersLine.match(/\bSnipers\s*:\s*([0-9]+)/i);
     return m ? Number(m[1]) : null;
   })();
   const snipersPct = parsePercentLike(snipersLine);
@@ -382,11 +417,7 @@ function startTelegramFaSolMirror(opts) {
   const enrichListener = truthyEnv(process.env.TELEGRAM_FASOL_ENRICH_USER_CALLS);
   const enabled = mirrorEnabled || enrichListener;
   const chatIdRaw = getFaSolIngestChatIdRaw();
-  const wantUserRaw = String(process.env.TELEGRAM_FASOL_USERNAME ?? 'fasolcallbot')
-    .trim()
-    .replace(/^@/, '')
-    .toLowerCase();
-  const wantUser = wantUserRaw || 'fasolcallbot';
+  const faSolUsers = faSolAllowedUsernames();
 
   const tgBotCalls = botCallsTelegramTarget();
 
@@ -434,7 +465,7 @@ function startTelegramFaSolMirror(opts) {
   if (mirrorEnabled) modeBits.push('mirror→Discord');
   if (enrichListener) modeBits.push('user-call enrich');
   console.log(
-    `[TelegramFaSol] Ingest ON (${modeBits.join(' + ')}) — TG chat ${chatId}, @${wantUser}` +
+    `[TelegramFaSol] Ingest ON (${modeBits.join(' + ')}) — TG chat ${chatId}, FaSol usernames: ${[...faSolUsers].join(', ')}` +
       (mirrorEnabled && channel ? ` → Discord #${channel.name}${tgBotExtra}` : '')
   );
 
@@ -464,7 +495,7 @@ function startTelegramFaSolMirror(opts) {
     // for the bot that created the post. So: if this is a channel post from the ingest channel,
     // trust the chat_id match and do not require TELEGRAM_FASOL_USERNAME.
     if (!isChannelPostFromIngest) {
-      if (!uname || uname !== wantUser) return;
+      if (!uname || !faSolUsers.has(uname)) return;
     }
     const mints = extractMintsFromTelegramMessage(message);
     if (mints.length === 0) return;
@@ -475,14 +506,19 @@ function startTelegramFaSolMirror(opts) {
       // If this message looks like a FaSol stats card, resolve any pending enrichment waits.
       try {
         const parsedMaybe = parseFaSolPost(message);
-        const hasStats =
+        const enrichable =
           parsedMaybe &&
-          (parsedMaybe?.stats?.marketCap != null ||
-            parsedMaybe?.stats?.liquidity != null ||
-            parsedMaybe?.stats?.volume != null ||
-            parsedMaybe?.stats?.fiveMinVol != null);
-        if (hasStats) {
-          const key = mint.toLowerCase();
+          (parsedMaybe.stats?.marketCap != null ||
+            parsedMaybe.stats?.liquidity != null ||
+            parsedMaybe.stats?.ath != null ||
+            parsedMaybe.stats?.volume != null ||
+            parsedMaybe.stats?.fiveMinVol != null ||
+            parsedMaybe.stats?.fiveMinChangePct != null ||
+            parsedMaybe.stats?.makers != null ||
+            parsedMaybe.holders?.holders != null ||
+            (parsedMaybe.ticker && parsedMaybe.tokenName));
+        if (enrichable) {
+          const key = canonicalMintKey(mint);
           const pending = pendingEnrichment.get(key);
           if (pending && pending.length) {
             pendingEnrichment.delete(key);
@@ -522,6 +558,10 @@ function startTelegramFaSolMirror(opts) {
         ath: parsed?.stats?.ath ?? null,
         liquidity: parsed?.stats?.liquidity ?? null,
         volume5m: parsed?.stats?.fiveMinVol ?? parsed?.stats?.volume ?? null,
+        volume1h:
+          parsed?.stats?.fiveMinVol != null && parsed?.stats?.volume != null
+            ? parsed.stats.volume
+            : null,
         ageMinutes: parsed?.stats?.ageMinutes ?? null,
         holders: parsed?.holders?.holders ?? null,
         top10Pct: parsed?.holders?.top10Pct ?? null,
@@ -533,7 +573,8 @@ function startTelegramFaSolMirror(opts) {
         txSells: parsed?.stats?.txSells ?? null,
         lpPct: parsed?.security?.lpPct ?? null,
         dexUnpaid: parsed?.security?.dexUnpaid ?? null,
-        taxPct: parsed?.security?.taxPct ?? null
+        taxPct: parsed?.security?.taxPct ?? null,
+        __faSolParsed: parsed && typeof parsed === 'object' ? parsed : null
       };
 
       console.log(`[TelegramFaSol] Mirror post ${scan.ticker || mint.slice(0, 6)} (${profileName})`);
@@ -544,10 +585,24 @@ function startTelegramFaSolMirror(opts) {
       if (outChatId != null) {
         const buttonsRaw = process.env.TELEGRAM_BOT_CALLS_BUTTONS;
         const replyMarkup = buildInlineKeyboardFromButtons(parseTelegramButtons(buttonsRaw), { ca: mint });
+        const caption = formatFaSolTelegramHtml(parsed, mint, { variant: 'bot' });
+        const photoUrl = pickTelegramTokenPhotoUrl(mint, scan);
+        if (photoUrl) {
+          const ok = await sendTelegramPhoto({
+            chatId: outChatId,
+            messageThreadId: outTopicId,
+            photoUrl,
+            caption,
+            parseMode: 'HTML',
+            replyMarkup: replyMarkup || undefined,
+            logLabel: 'bot-calls TG fasol+photo'
+          });
+          if (ok) continue;
+        }
         await sendTelegramMessage({
           chatId: outChatId,
           messageThreadId: outTopicId,
-          text: formatFaSolTelegramHtml(parsed, mint, { variant: 'bot' }),
+          text: caption,
           parseMode: 'HTML',
           replyMarkup: replyMarkup || undefined,
           disableWebPreview: true,

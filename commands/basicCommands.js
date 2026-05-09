@@ -27,6 +27,7 @@ const { renderPriceChart, seriesFromTrackedPriceHistory } = require('../utils/re
 const { formatAgeMinutes } = require('../utils/formatAgeMinutes');
 const { applyScanThumbnailToEmbed } = require('../utils/embedTokenThumbnail');
 const { buildOhlcvCandlestickBuffer } = require('../utils/ohlcvCandlestickBuffer');
+const { fetchGeckoChart } = require('../utils/chartCapture');
 const { getCandlestickOverlayProps } = require('../utils/candlestickOverlayFromTracked');
 const { buildOhlcvTimeframeRows } = require('../utils/ohlcvChartControls');
 const { mirrorUserCallToTelegram } = require('../utils/telegramAlerts');
@@ -1007,6 +1008,8 @@ function createTraderScanEmbed(scan, options = {}) {
  * @param {object} scan
  * @param {object} [embedOptions]
  */
+const MIN_GECKO_CHART_BYTES = 4_096;
+
 async function hydrateCallWatchChartMessage(message, scan, embedOptions = {}) {
   if (!message || typeof message.edit !== 'function') return;
   if (!scan) {
@@ -1042,10 +1045,24 @@ async function hydrateCallWatchChartMessage(message, scan, embedOptions = {}) {
     }
 
     if (!buf) {
+      try {
+        const geo = await fetchGeckoChart({
+          pairAddress: scan.pairAddress,
+          contractAddress: scan.contractAddress
+        });
+        if (geo && Buffer.isBuffer(geo) && geo.length >= MIN_GECKO_CHART_BYTES) {
+          buf = geo;
+        }
+      } catch (geoErr) {
+        console.error('[CallWatchChart]', scan.contractAddress, 'gecko png', geoErr?.message || geoErr);
+      }
+    }
+
+    if (!buf) {
       const tracked = getTrackedCall(scan.contractAddress);
       const series = tracked ? seriesFromTrackedPriceHistory(tracked) : null;
 
-      if (series) {
+      if (series && series.prices && series.prices.length >= 3) {
         try {
           buf = await renderPriceChart({
             prices: series.prices,

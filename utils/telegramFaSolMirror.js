@@ -7,6 +7,7 @@
  *   TELEGRAM_FASOL_ENRICH_USER_CALLS — optional "1" = poll ingest when TELEGRAM_FASOL_MIRROR is off but you still want !call enrich
  *   TELEGRAM_FASOL_INGEST_TOPIC_ID — optional forum topic id when posting the CA trigger (same chat as TELEGRAM_FASOL_CHAT_ID)
  *   TELEGRAM_FASOL_CHAT_ID       — numeric chat id of the private FaSol group (often negative for supergroups)
+ *   TELEGRAM_FASOL_INGEST_CHAT_ID — alias for TELEGRAM_FASOL_CHAT_ID if the latter is empty
  *   TELEGRAM_FASOL_USERNAME      — optional, default "fasolcallbot" (no @)
  *   TELEGRAM_BOT_CALLS_CHANNEL_ID — members TG hub: bot-call lines after FaSol mirror (see utils/telegramAlerts.js)
  *   TELEGRAM_BOT_CALLS_TOPIC_ID   — optional forum topic id for that channel
@@ -289,6 +290,14 @@ function canonicalMintKey(ca) {
   return normalizeMintCore(ca).toLowerCase();
 }
 
+/** Numeric Telegram chat id for FaSol ingest (group / forum / channel). */
+function getFaSolIngestChatIdRaw() {
+  const raw =
+    String(process.env.TELEGRAM_FASOL_CHAT_ID ?? '').trim() ||
+    String(process.env.TELEGRAM_FASOL_INGEST_CHAT_ID ?? '').trim();
+  return raw;
+}
+
 async function requestFaSolEnrichment(contractAddress, opts = {}) {
   const rawCa = String(contractAddress || '').trim();
   const core = normalizeMintCore(rawCa);
@@ -297,10 +306,12 @@ async function requestFaSolEnrichment(contractAddress, opts = {}) {
   }
 
   const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
-  const chatIdRaw = String(process.env.TELEGRAM_FASOL_CHAT_ID ?? '').trim();
+  const chatIdRaw = getFaSolIngestChatIdRaw();
   const chatId = Number(chatIdRaw);
   if (!token || !Number.isFinite(chatId)) {
-    throw new Error('Telegram ingest not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_FASOL_CHAT_ID)');
+    throw new Error(
+      'Telegram ingest not configured (need TELEGRAM_BOT_TOKEN and TELEGRAM_FASOL_CHAT_ID or TELEGRAM_FASOL_INGEST_CHAT_ID)'
+    );
   }
 
   const timeoutMs = Math.max(2_000, Math.min(60_000, Number(opts.timeoutMs || 15_000)));
@@ -333,12 +344,30 @@ async function requestFaSolEnrichment(contractAddress, opts = {}) {
     body.message_thread_id = Math.floor(ingestTopicId);
   }
 
-  await axios.post(`${apiBase}/sendMessage`, body, { timeout: 15000 }).catch((e) => {
-    const desc = e?.response?.data?.description || e?.message || e;
-    throw new Error(`sendMessage failed: ${desc}`);
-  });
+  try {
+    console.log(
+      `[UserCall/FaSolEnrich] Posting CA to FaSol ingest chat ${chatId}` +
+        `${body.message_thread_id ? ` topic ${body.message_thread_id}` : ''} …`
+    );
+    const sm = await axios.post(`${apiBase}/sendMessage`, body, { timeout: 15000 });
+    if (sm?.data?.ok !== true) {
+      throw new Error(sm?.data?.description || 'sendMessage ok=false');
+    }
+  } catch (e) {
+    const tg = e?.response?.data;
+    const desc =
+      (tg && typeof tg === 'object' ? tg.description : null) || e?.message || String(e);
+    const hint =
+      /thread/i.test(String(desc)) || /topic/i.test(String(desc))
+        ? ' — set TELEGRAM_FASOL_INGEST_TOPIC_ID to the forum topic id where FaSol listens.'
+        : '';
+    console.error('[UserCall/FaSolEnrich] sendMessage failed:', desc, tg?.error_code ?? '', hint);
+    throw new Error(`sendMessage failed: ${desc}${hint}`);
+  }
 
-  console.log(`[UserCall/FaSolEnrich] Posted CA to ingest chat ${chatId}${body.message_thread_id ? ` topic ${body.message_thread_id}` : ''}`);
+  console.log(
+    `[UserCall/FaSolEnrich] Posted CA to ingest chat ${chatId}${body.message_thread_id ? ` topic ${body.message_thread_id}` : ''}`
+  );
 
   return p;
 }
@@ -351,7 +380,7 @@ function startTelegramFaSolMirror(opts) {
   const mirrorEnabled = truthyEnv(process.env.TELEGRAM_FASOL_MIRROR);
   const enrichListener = truthyEnv(process.env.TELEGRAM_FASOL_ENRICH_USER_CALLS);
   const enabled = mirrorEnabled || enrichListener;
-  const chatIdRaw = String(process.env.TELEGRAM_FASOL_CHAT_ID ?? '').trim();
+  const chatIdRaw = getFaSolIngestChatIdRaw();
   const wantUserRaw = String(process.env.TELEGRAM_FASOL_USERNAME ?? 'fasolcallbot')
     .trim()
     .replace(/^@/, '')
@@ -378,9 +407,9 @@ function startTelegramFaSolMirror(opts) {
   const channel = opts?.discordBotCallsChannel;
   if (mirrorEnabled && (!channel || typeof channel.send !== 'function')) {
     console.warn(
-      '[TelegramFaSol] Mirror enabled but no Discord #bot-calls channel — FaSol→Discord mirror disabled.'
+      '[TelegramFaSol] Mirror enabled but no Discord #bot-calls channel — FaSol→Discord mirror disabled. ' +
+        'Ingest listener still runs so !call / dashboard enrichment can receive FaSol replies.'
     );
-    if (!enrichListener) return;
   }
 
   const chatId = Number(chatIdRaw);

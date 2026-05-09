@@ -2062,19 +2062,26 @@ client.once('clientReady', async () => {
   const botChannel = getBotCallsChannel(firstGuild);
   const userChannel = getUserCallsChannel(firstGuild) || botChannel;
 
-if (!botChannel) {
-  console.log('❌ Could not find #bot-calls channel.');
-  return;
-}
+  try {
+    const { startTelegramFaSolMirror } = require('./utils/telegramFaSolMirror');
+    startTelegramFaSolMirror({ discordBotCallsChannel: botChannel ?? null });
+  } catch (e) {
+    console.error('[TelegramFaSol] Startup failed:', e?.message || e);
+  }
 
-if (userChannel.id === botChannel.id) {
-  console.warn(
-    '[Monitor] No #user-calls (or USER_CALLS_CHANNEL_NAME) — user/watch milestones will use #bot-calls. Add #user-calls to split channels.'
+  if (!botChannel) {
+    console.log('❌ Could not find #bot-calls channel.');
+    return;
+  }
+
+  if (userChannel.id === botChannel.id) {
+    console.warn(
+      '[Monitor] No #user-calls (or USER_CALLS_CHANNEL_NAME) — user/watch milestones will use #bot-calls. Add #user-calls to split channels.'
+    );
+  }
+  console.log(
+    `📡 Monitor: user/watch alerts → #${userChannel.name}; bot auto-calls + bot milestones → #${botChannel.name}`
   );
-}
-console.log(
-  `📡 Monitor: user/watch alerts → #${userChannel.name}; bot auto-calls + bot milestones → #${botChannel.name}`
-);
 
   const trackedDevs = getAllTrackedDevs();
   console.log(`[DevTracker] Loaded ${trackedDevs.length} tracked dev(s).`);
@@ -2087,13 +2094,6 @@ console.log(
       '[Monitor] Scanner disabled — running Supabase performance mirror only (dashboard live X / MC).'
     );
     startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
-  }
-
-  try {
-    const { startTelegramFaSolMirror } = require('./utils/telegramFaSolMirror');
-    startTelegramFaSolMirror({ discordBotCallsChannel: botChannel });
-  } catch (e) {
-    console.error('[TelegramFaSol] Startup failed:', e?.message || e);
   }
 
   await ensureHumanVerifyPrompt(firstGuild);

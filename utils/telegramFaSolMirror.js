@@ -163,6 +163,50 @@ function cleanLine(line) {
     .trim();
 }
 
+/**
+ * FaSol cards often start with a bot/header line ("McGBot Calls - Filter 1") and put the real token on the next line
+ * ("$BTW - …"). Prefer the first `$TICKER — name` row that is not alert-meta noise.
+ */
+function parseFaSolTokenHeader(lines) {
+  const noiseTicker = /^(MCGBOT|MCGBOTCALLS|FILTER|CALLS|ALERT|FASOL|BOT|SCANNER)$/i;
+  const noiseName = /^(McGBot\s+Calls|Filter\s*\d+|Calls\s*-\s*Filter)/i;
+
+  for (const raw of lines) {
+    const ln = String(raw || '').trim();
+    if (!ln) continue;
+    const moon = ln.match(/\$([A-Za-z0-9]{1,20})\s*[-–—]\s*(.+)$/);
+    if (!moon) continue;
+    const t = moon[1].trim();
+    const n = moon[2].trim();
+    if (!t || !n) continue;
+    if (noiseTicker.test(t)) continue;
+    if (noiseName.test(n)) continue;
+    if (/mcgbot/i.test(t) && /call/i.test(t)) continue;
+    if (/^filter\s*\d/i.test(n)) continue;
+    return { ticker: t, tokenName: n };
+  }
+
+  const first = lines[0] || '';
+  let ticker = '';
+  let tokenName = '';
+  if (first) {
+    const moon = first.match(/\$([A-Za-z0-9]{1,24})\s*[-–—]\s*(.+)$/);
+    if (moon) {
+      ticker = moon[1].trim();
+      tokenName = moon[2].trim();
+    } else {
+      const parts = first.split(/\s*[-–—]\s*/);
+      const head = String(parts[0] || '')
+        .replace(/^[\s🌙⌛🔔🪙📊]+/, '')
+        .replace(/^\$\s*/, '')
+        .trim();
+      ticker = head.replace(/^\$/, '').trim();
+      tokenName = String(parts.slice(1).join(' - ') || '').trim();
+    }
+  }
+  return { ticker, tokenName };
+}
+
 /** TELEGRAM_FASOL_USERNAME — comma-separated @handles (default includes common FaSol bot names). */
 function faSolAllowedUsernames() {
   const raw = String(process.env.TELEGRAM_FASOL_USERNAME ?? 'fasolcallbot,fasolbot')
@@ -191,25 +235,7 @@ function parseFaSolPost(message) {
     .map(cleanLine)
     .filter(Boolean);
 
-  const first = lines[0] || '';
-  // Examples: "$FMJ - Flying Mayonnaise Jars", "🌙 $FMJ - Flying Mayonnaise Jars"
-  let ticker = '';
-  let tokenName = '';
-  if (first) {
-    const moon = first.match(/\$([A-Za-z0-9]{1,24})\s*[-–—]\s*(.+)$/);
-    if (moon) {
-      ticker = moon[1].trim();
-      tokenName = moon[2].trim();
-    } else {
-      const parts = first.split(/\s*[-–—]\s*/);
-      const head = String(parts[0] || '')
-        .replace(/^[\s🌙⌛🔔🪙📊]+/, '')
-        .replace(/^\$\s*/, '')
-        .trim();
-      ticker = head.replace(/^\$/, '').trim();
-      tokenName = String(parts.slice(1).join(' - ') || '').trim();
-    }
-  }
+  const { ticker, tokenName } = parseFaSolTokenHeader(lines);
 
   const getAfter = (prefixes) => {
     const ps = Array.isArray(prefixes) ? prefixes : [prefixes];
@@ -324,6 +350,57 @@ function normalizeMintCore(ca) {
 
 function canonicalMintKey(ca) {
   return normalizeMintCore(ca).toLowerCase();
+}
+
+/**
+ * Discord mirror must use a full `generateRealScan` payload so `createAutoCallEmbed` + chart hydrate
+ * have momentum / risk / ratios / pair / correct token names. If scan fails, fall back to minimal FaSol parse
+ * (compact mirror embed).
+ */
+async function buildScanForDiscordMirror(mint, parsed) {
+  const { generateRealScan } = require('./scannerEngine');
+
+  const minimalScan = () => ({
+    __mirrorSource: 'telegram',
+    contractAddress: mint,
+    tokenName: parsed?.tokenName || parsed?.ticker || mint.slice(0, 6),
+    ticker: parsed?.ticker || '',
+    marketCap: parsed?.stats?.marketCap ?? null,
+    ath: parsed?.stats?.ath ?? null,
+    liquidity: parsed?.stats?.liquidity ?? null,
+    volume5m: parsed?.stats?.fiveMinVol ?? parsed?.stats?.volume ?? null,
+    volume1h:
+      parsed?.stats?.fiveMinVol != null && parsed?.stats?.volume != null
+        ? parsed.stats.volume
+        : null,
+    ageMinutes: parsed?.stats?.ageMinutes ?? null,
+    holders: parsed?.holders?.holders ?? null,
+    top10Pct: parsed?.holders?.top10Pct ?? null,
+    botsCount: parsed?.holders?.botsCount ?? null,
+    snipersCount: parsed?.holders?.snipersCount ?? null,
+    fiveMinChangePct: parsed?.stats?.fiveMinChangePct ?? null,
+    makers: parsed?.stats?.makers ?? null,
+    txBuys: parsed?.stats?.txBuys ?? null,
+    txSells: parsed?.stats?.txSells ?? null,
+    lpPct: parsed?.security?.lpPct ?? null,
+    dexUnpaid: parsed?.security?.dexUnpaid ?? null,
+    taxPct: parsed?.security?.taxPct ?? null,
+    __faSolParsed: parsed && typeof parsed === 'object' ? parsed : null
+  });
+
+  try {
+    const real = await generateRealScan(mint);
+    if (real && typeof real === 'object' && String(real.contractAddress || '').trim()) {
+      return {
+        ...real,
+        __faSolParsed: parsed && typeof parsed === 'object' ? parsed : null
+      };
+    }
+  } catch (e) {
+    console.warn('[TelegramFaSol] generateRealScan for mirror failed:', mint.slice(0, 8), e?.message || e);
+  }
+
+  return minimalScan();
 }
 
 /** Numeric Telegram chat id for FaSol ingest (group / forum / channel). */
@@ -560,33 +637,7 @@ function startTelegramFaSolMirror(opts) {
       }
 
       const parsed = parseFaSolPost(message);
-      const scan = {
-        __mirrorSource: 'telegram',
-        contractAddress: mint,
-        tokenName: parsed?.tokenName || parsed?.ticker || mint.slice(0, 6),
-        ticker: parsed?.ticker || '',
-        marketCap: parsed?.stats?.marketCap ?? null,
-        ath: parsed?.stats?.ath ?? null,
-        liquidity: parsed?.stats?.liquidity ?? null,
-        volume5m: parsed?.stats?.fiveMinVol ?? parsed?.stats?.volume ?? null,
-        volume1h:
-          parsed?.stats?.fiveMinVol != null && parsed?.stats?.volume != null
-            ? parsed.stats.volume
-            : null,
-        ageMinutes: parsed?.stats?.ageMinutes ?? null,
-        holders: parsed?.holders?.holders ?? null,
-        top10Pct: parsed?.holders?.top10Pct ?? null,
-        botsCount: parsed?.holders?.botsCount ?? null,
-        snipersCount: parsed?.holders?.snipersCount ?? null,
-        fiveMinChangePct: parsed?.stats?.fiveMinChangePct ?? null,
-        makers: parsed?.stats?.makers ?? null,
-        txBuys: parsed?.stats?.txBuys ?? null,
-        txSells: parsed?.stats?.txSells ?? null,
-        lpPct: parsed?.security?.lpPct ?? null,
-        dexUnpaid: parsed?.security?.dexUnpaid ?? null,
-        taxPct: parsed?.security?.taxPct ?? null,
-        __faSolParsed: parsed && typeof parsed === 'object' ? parsed : null
-      };
+      const scan = await buildScanForDiscordMirror(mint, parsed);
 
       console.log(`[TelegramFaSol] Mirror post ${scan.ticker || mint.slice(0, 6)} (${profileName})`);
       await postBotCallScan(channel, scan, profileName);

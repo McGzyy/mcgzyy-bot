@@ -490,12 +490,18 @@ function createUserCallFaSolEmbed(scan, options = {}) {
   const tickerUpper = formatValue(scan?.ticker, 'UNKNOWN').toUpperCase();
   const ca = formatValue(scan?.contractAddress, 'Unknown');
   const caller = formatValue(options.callerDisplayName, 'Member');
+  const callerDiscordId = options.callerDiscordId ? String(options.callerDiscordId).trim() : '';
+  const callerLine =
+    callerDiscordId && /^\d{17,22}$/.test(callerDiscordId)
+      ? `📍 **Member call** · Caller <@${callerDiscordId}>`
+      : `📍 **Member call** · Caller **${caller}**`;
 
   const parts = [
     `**MC** ${formatUsd(scan?.marketCap)}`,
     `**ATH** ${formatUsd(scan?.ath)}`,
     `**Liq** ${formatUsd(scan?.liquidity)}`,
     `**Vol 5m** ${formatUsd(scan?.volume5m)}`,
+    `**Vol 1h** ${formatUsd(scan?.volume1h)}`,
     `**Age** ${formatAgeMinutes(scan?.ageMinutes)}`
   ].filter(Boolean);
 
@@ -516,7 +522,7 @@ function createUserCallFaSolEmbed(scan, options = {}) {
     .setTitle(`🚀 ${tokenNameUpper} • $${tickerUpper}`)
     .setDescription(
       [
-        `📍 **Member call** · Caller **${caller}**`,
+        callerLine,
         options.chartPending ? '_Chart warming up…_' : null,
         '',
         parts.join('  •  '),

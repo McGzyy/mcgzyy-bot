@@ -46,15 +46,52 @@ function formatAgeSeconds(ageMinutes) {
   return `${h}h${rem ? ` ${rem}m` : ''}`;
 }
 
+/** Build FaSol-shaped stats from a scanner scan (fallback when Telegram ingest doesn’t reply). */
+function scanToFaSolParsedForTelegram(scan) {
+  if (!scan || typeof scan !== 'object') {
+    return { ticker: '', tokenName: '', stats: {}, holders: {}, security: {} };
+  }
+  return {
+    ticker: scan.ticker || '',
+    tokenName: scan.tokenName || '',
+    stats: {
+      marketCap: scan.marketCap ?? null,
+      ath: scan.ath ?? null,
+      liquidity: scan.liquidity ?? null,
+      volume: scan.volume1h ?? null,
+      fiveMinVol: scan.volume5m ?? null,
+      ageMinutes: scan.ageMinutes ?? null,
+      fiveMinChangePct: scan.fiveMinChangePct ?? null,
+      makers: scan.makers ?? null,
+      txBuys: scan.txBuys ?? null,
+      txSells: scan.txSells ?? null
+    },
+    holders: {
+      holders: scan.holders ?? null,
+      top10Pct: scan.top10Pct ?? null,
+      botsCount: scan.botsCount ?? null,
+      botsPct: null,
+      snipersCount: scan.snipersCount ?? null,
+      snipersPct: null
+    },
+    security: {
+      lpPct: scan.lpPct ?? null,
+      dexUnpaid: scan.dexUnpaid ?? null,
+      taxPct: scan.taxPct ?? null
+    }
+  };
+}
+
 /**
  * FaSol-style compact stats card for Telegram (HTML).
  * @param {object} parsed - output shape from parseFaSolPost (telegramFaSolMirror)
  * @param {string} contractAddress - CA (may include pump suffix)
- * @param {{ variant?: 'bot'|'user', callerLabel?: string }} [opts]
+ * @param {{ variant?: 'bot'|'user', callerLabel?: string, discordUserId?: string }} [opts]
  */
 function formatFaSolTelegramHtml(parsed, contractAddress, opts = {}) {
   const variant = opts.variant === 'user' ? 'user' : 'bot';
   const callerLabel = opts.callerLabel ? String(opts.callerLabel).trim().slice(0, 120) : '';
+  const discordUserId = opts.discordUserId ? String(opts.discordUserId).trim() : '';
 
   const ca = String(contractAddress || '').trim();
   const t = parsed?.ticker ? `$${String(parsed.ticker).toUpperCase()}` : 'TOKEN';
@@ -67,30 +104,45 @@ function formatFaSolTelegramHtml(parsed, contractAddress, opts = {}) {
   const mc = st.marketCap != null ? formatUsdCompact(st.marketCap) : null;
   const liq = st.liquidity != null ? formatUsdCompact(st.liquidity) : null;
   const ath = st.ath != null ? formatUsdCompact(st.ath) : null;
-  const vol =
-    st.fiveMinVol != null ? formatUsdCompact(st.fiveMinVol) : st.volume != null ? formatUsdCompact(st.volume) : null;
+  const v5 = st.fiveMinVol != null ? formatUsdCompact(st.fiveMinVol) : null;
+  const v1 = st.volume != null ? formatUsdCompact(st.volume) : null;
   const age = st.ageMinutes != null ? formatAgeSeconds(st.ageMinutes) : null;
   const ch5 =
     st.fiveMinChangePct != null ? `${st.fiveMinChangePct > 0 ? '+' : ''}${st.fiveMinChangePct.toFixed(2)}%` : null;
   const tx =
     st.txBuys != null || st.txSells != null ? `B ${st.txBuys ?? '—'}  S ${st.txSells ?? '—'}` : null;
 
+  const callerLinked =
+    variant === 'user' && callerLabel && discordUserId && /^\d{17,22}$/.test(discordUserId)
+      ? `<a href="https://discord.com/users/${escapeHtml(discordUserId)}">${escapeHtml(callerLabel)}</a>`
+      : callerLabel
+        ? `<i>${escapeHtml(callerLabel)}</i>`
+        : '';
+
   const titleLines =
     variant === 'user'
       ? [
-          `👤 <b>Member call</b>${callerLabel ? ` · <i>${escapeHtml(callerLabel)}</i>` : ''}`,
+          `👤 <b>Member call</b>${callerLinked ? ` · ${callerLinked}` : ''}`,
           `🌙 <b>${escapeHtml(t)}</b>${n ? ` · <i>${escapeHtml(n)}</i>` : ''}`
         ]
       : [`🔔 <b>McGBot Call</b> · <b>${escapeHtml(t)}</b>`, n ? `🪙 <i>${escapeHtml(n)}</i>` : null];
+
+  const volRows =
+    v5 && v1
+      ? [
+          ['V5', v5],
+          ['1H', v1]
+        ]
+      : [['VOL', v5 || v1]];
 
   const statLines = [
     ['MC', mc],
     ['ATH', ath],
     ['LIQ', liq],
     ['AGE', age],
-    ['VOL', vol],
+    ...volRows,
     ['TX', tx],
-    ['5M', ch5],
+    ['P5', ch5],
     ['MK', st.makers != null ? String(st.makers) : null]
   ].filter(([, v]) => v != null);
 
@@ -358,44 +410,36 @@ async function mirrorBotMintFallbackToTelegram(contractAddress) {
   });
 }
 
-/** Discord user call → short line in TG user-call destination */
+/** Discord user call → FaSol-style card in TG (scanner stats + FaSol merge already on scan). */
 async function mirrorUserCallToTelegram(scan, callerLabel) {
   const { chatId, topicId } = userCallsTelegramTarget();
   if (chatId == null) return;
   const ca = String(scan?.contractAddress || '').trim();
   if (!ca) return;
   const who = callerLabel ? String(callerLabel).slice(0, 120) : 'Member';
+  const discordUserId = String(scan?.firstCallerDiscordId || '').trim();
 
-  const parsed = scan?.__faSolParsed;
-  const useFaSol = scan?.__usedFaSolEnrichment === true && parsed && typeof parsed === 'object';
+  const enriched = scan?.__faSolParsed && typeof scan.__faSolParsed === 'object' ? scan.__faSolParsed : null;
+  const parsed =
+    enriched && scan?.__usedFaSolEnrichment === true ? enriched : scanToFaSolParsedForTelegram(scan);
 
-  if (useFaSol) {
-    const buttonsRaw =
-      String(process.env.TELEGRAM_USER_CALLS_BUTTONS || '').trim() ||
-      String(process.env.TELEGRAM_BOT_CALLS_BUTTONS || '').trim();
-    const replyMarkup = buildInlineKeyboardFromButtons(parseTelegramButtons(buttonsRaw), { ca });
-    await sendTelegramMessage({
-      chatId,
-      messageThreadId: topicId,
-      text: formatFaSolTelegramHtml(parsed, ca, { variant: 'user', callerLabel: who }),
-      parseMode: 'HTML',
-      replyMarkup: replyMarkup || undefined,
-      disableWebPreview: true,
-      logLabel: 'user-calls TG fasol'
-    });
-    return;
-  }
+  const buttonsRaw =
+    String(process.env.TELEGRAM_USER_CALLS_BUTTONS || '').trim() ||
+    String(process.env.TELEGRAM_BOT_CALLS_BUTTONS || '').trim();
+  const replyMarkup = buildInlineKeyboardFromButtons(parseTelegramButtons(buttonsRaw), { ca });
 
-  const label = [scan?.tokenName, scan?.ticker ? `(${scan.ticker})` : '']
-    .filter(Boolean)
-    .join(' ')
-    .trim();
-  const text = ['👤 User call', who, label || 'Token', ca, dexScreenerSolUrl(ca)].join('\n');
   await sendTelegramMessage({
     chatId,
     messageThreadId: topicId,
-    text,
-    logLabel: 'user-calls TG'
+    text: formatFaSolTelegramHtml(parsed, ca, {
+      variant: 'user',
+      callerLabel: who,
+      discordUserId
+    }),
+    parseMode: 'HTML',
+    replyMarkup: replyMarkup || undefined,
+    disableWebPreview: true,
+    logLabel: 'user-calls TG card'
   });
 }
 
@@ -404,6 +448,7 @@ module.exports = {
   parseTelegramButtons,
   buildInlineKeyboardFromButtons,
   formatFaSolTelegramHtml,
+  scanToFaSolParsedForTelegram,
   escapeHtml,
   formatUsdCompact,
   formatAgeSeconds,

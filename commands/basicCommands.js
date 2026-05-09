@@ -1445,7 +1445,10 @@ async function sendUserCallsChannelPayloadAsMember(webhookUrl, member, channel, 
     embeds: payload.embeds ?? [],
     username,
     avatarURL,
-    allowedMentions: { parse: [] }
+    allowedMentions:
+      payload.allowedMentions && typeof payload.allowedMentions === 'object'
+        ? payload.allowedMentions
+        : { parse: [] }
   };
   if (payload.components) sendOpts.components = payload.components;
   if (payload.files) sendOpts.files = payload.files;
@@ -1681,7 +1684,16 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
     scan.marketCap = p?.stats?.marketCap ?? scan.marketCap;
     scan.ath = p?.stats?.ath ?? scan.ath;
     scan.liquidity = p?.stats?.liquidity ?? scan.liquidity;
-    scan.volume5m = p?.stats?.fiveMinVol ?? p?.stats?.volume ?? scan.volume5m;
+    if (p?.stats?.fiveMinVol != null) {
+      scan.volume5m = p.stats.fiveMinVol;
+    }
+    if (p?.stats?.volume != null) {
+      if (p?.stats?.fiveMinVol != null) {
+        scan.volume1h = p.stats.volume;
+      } else {
+        scan.volume5m = p.stats.volume;
+      }
+    }
     scan.ageMinutes = p?.stats?.ageMinutes ?? scan.ageMinutes;
     scan.holders = p?.holders?.holders ?? scan.holders;
     scan.top10Pct = p?.holders?.top10Pct ?? scan.top10Pct;
@@ -1745,18 +1757,19 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
       : undefined;
 
   const callerDisplay = getPublicCaller(embedScan);
+  const mentionId = String(
+    trackedCall?.firstCallerDiscordId || message.author?.id || ''
+  ).trim();
+  const mentionOk = /^\d{17,22}$/.test(mentionId);
 
-  const embed = usedFaSolEnrichment
-    ? createUserCallFaSolEmbed(embedScan, {
-        callerDisplayName: callerDisplay,
-        chartPending: callChartPending,
-        ...(dashboardFooter ? { footerText: dashboardFooter } : {})
-      })
-    : createTraderScanEmbed(embedScan, {
-        showTrackedMeta: true,
-        chartPending: callChartPending,
-        ...(dashboardFooter ? { footerText: dashboardFooter } : {})
-      });
+  const embedOptsBase = {
+    callerDisplayName: callerDisplay,
+    callerDiscordId: mentionOk ? mentionId : '',
+    chartPending: callChartPending,
+    ...(dashboardFooter ? { footerText: dashboardFooter } : {})
+  };
+
+  const embed = createUserCallFaSolEmbed(embedScan, embedOptsBase);
 
   const alreadyCalled = !wasNewCall && !wasReactivated && !wasUpgradedToUserCall;
   const replyContent = wasNewCall
@@ -1768,11 +1781,15 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
         : '🧠 This coin has already been called.';
 
   const eliteRow = embed && embed._eliteButtons ? embed._eliteButtons : null;
-  const reply = await message.reply({
-    content: replyContent,
+  const replyPayload = {
+    content: mentionOk ? `${replyContent} <@${mentionId}>` : replyContent,
     embeds: [embed],
     ...(eliteRow ? { components: [eliteRow] } : {})
-  });
+  };
+  if (mentionOk) {
+    replyPayload.allowedMentions = { users: [mentionId] };
+  }
+  const reply = await message.reply(replyPayload);
 
   if (wasNewCall || wasReactivated || wasUpgradedToUserCall) {
     const callerLabel =
@@ -1830,17 +1847,19 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
 
   const hydrateOpts = {
     showTrackedMeta: true,
-    ...(dashboardFooter ? { footerText: dashboardFooter } : {})
-  };
-  if (usedFaSolEnrichment) {
-    hydrateOpts.embedFactory = (s, opts) =>
-      createUserCallFaSolEmbed(s, {
+    ...(dashboardFooter ? { footerText: dashboardFooter } : {}),
+    embedFactory: (s, opts) => {
+      const mid = String(s?.firstCallerDiscordId || '').trim();
+      const midOk = /^\d{17,22}$/.test(mid);
+      return createUserCallFaSolEmbed(s, {
         callerDisplayName: getPublicCaller(s),
+        callerDiscordId: midOk ? mid : '',
         chartPending: opts.chartPending,
         chartImageUrl: opts.chartImageUrl,
         ...(dashboardFooter ? { footerText: dashboardFooter } : {})
       });
-  }
+    }
+  };
 
   hydrateCallWatchChartMessage(reply, embedScan, hydrateOpts).catch(err => {
     console.error('[CallWatchChart]', embedScan?.contractAddress, err.message);

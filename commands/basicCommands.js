@@ -1699,16 +1699,31 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
   const faSolIngestOn =
     truthyTelegramEnv(process.env.TELEGRAM_FASOL_MIRROR) ||
     truthyTelegramEnv(process.env.TELEGRAM_FASOL_ENRICH_USER_CALLS);
-  if (faSolIngestOn) {
-    try {
-      enrichment = await requestFaSolEnrichment(contractAddress, { timeoutMs: 28_000 });
-    } catch (e) {
-      console.warn('[UserCall/FaSolEnrich]', e?.message || e);
-      enrichment = null;
-    }
-  }
+  const enrichTimeoutRaw = Number(process.env.TELEGRAM_FASOL_ENRICH_TIMEOUT_MS);
+  const enrichTimeoutMs = Math.max(
+    3_000,
+    Math.min(60_000, Number.isFinite(enrichTimeoutRaw) ? enrichTimeoutRaw : 28_000)
+  );
 
-  const realData = await runQuickCa(contractAddress);
+  let realData;
+  if (faSolIngestOn) {
+    // Run in parallel: serial FaSol-then-Dex was ~28s + Dex; now ~max(FaSol, Dex) for dashboard latency.
+    const [enrichSettled, quickSettled] = await Promise.allSettled([
+      requestFaSolEnrichment(contractAddress, { timeoutMs: enrichTimeoutMs }),
+      runQuickCa(contractAddress)
+    ]);
+    if (enrichSettled.status === 'fulfilled') {
+      enrichment = enrichSettled.value;
+    } else {
+      console.warn('[UserCall/FaSolEnrich]', enrichSettled.reason?.message || enrichSettled.reason);
+    }
+    if (quickSettled.status === 'rejected') {
+      throw quickSettled.reason;
+    }
+    realData = quickSettled.value;
+  } else {
+    realData = await runQuickCa(contractAddress);
+  }
   const scan = normalizeRealDataToScan(realData);
   if (enrichment?.parsed) {
     applyFaSolParsedToScan(scan, enrichment.parsed);

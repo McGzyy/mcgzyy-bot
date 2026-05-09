@@ -8,6 +8,7 @@
  *   TELEGRAM_FASOL_INGEST_TOPIC_ID — optional forum topic id when posting the CA trigger (same chat as TELEGRAM_FASOL_CHAT_ID)
  *   TELEGRAM_FASOL_CHAT_ID       — numeric chat id of the private FaSol group (often negative for supergroups)
  *   TELEGRAM_FASOL_INGEST_CHAT_ID — alias for TELEGRAM_FASOL_CHAT_ID if the latter is empty
+ *   TELEGRAM_FASOL_ENRICH_TIMEOUT_MS — optional; !call / dashboard waits for FaSol (default 28000). Runs in parallel with Dex.
  *   TELEGRAM_FASOL_USERNAME      — optional, default "fasolcallbot" (no @)
  *   TELEGRAM_BOT_CALLS_CHANNEL_ID — members TG hub: bot-call lines after FaSol mirror (see utils/telegramAlerts.js)
  *   TELEGRAM_BOT_CALLS_TOPIC_ID   — optional forum topic id for that channel

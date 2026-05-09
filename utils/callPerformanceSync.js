@@ -3,6 +3,15 @@
 const { createClient } = require('@supabase/supabase-js');
 const { getTrackedCall, updateTrackedCallData } = require('./trackedCallsService');
 
+/** Keep in sync with `mcgbot-dashboard/lib/callPerformanceMultiples.ts` ATH_MULTIPLE_STATS_MAX */
+const ATH_MULTIPLE_STATS_MAX = 50_000;
+
+function clampAthMultipleForStats(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n) || n <= 0) return n;
+  return Math.min(n, ATH_MULTIPLE_STATS_MAX);
+}
+
 function getSupabaseServiceRole() {
   const url = String(process.env.SUPABASE_URL || '').trim();
   const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
@@ -21,7 +30,8 @@ function computeAthMultiple(tracked) {
   if (!(first > 0) || !(ath > 0)) return 1;
   const x = ath / first;
   if (!Number.isFinite(x) || x <= 0) return 1;
-  return Number(x.toFixed(4));
+  const capped = clampAthMultipleForStats(x);
+  return Number(capped.toFixed(4));
 }
 
 /** Current MC / MC at call — drives dashboard "live" X while ATH can still be 1x. */
@@ -38,7 +48,8 @@ function computeSpotMultiple(tracked) {
   if (!(first > 0) || !(cur > 0)) return 1;
   const x = cur / first;
   if (!Number.isFinite(x) || x <= 0) return 1;
-  return Number(x.toFixed(4));
+  const capped = clampAthMultipleForStats(x);
+  return Number(capped.toFixed(4));
 }
 
 /** DB `call_performance.call_time` is BIGINT (UTC epoch ms), not timestamptz. */
@@ -360,6 +371,39 @@ async function updateUserCallPerformanceAth(contractAddress) {
   const tokenImageUrl = snapshotImageUrl(tracked);
 
   const liveMc = Number(tracked.latestMarketCap);
+
+  const { data: curRow, error: curErr } = await sb
+    .from('call_performance')
+    .select('excluded_from_stats,excluded_reason,hidden_from_dashboard')
+    .eq('id', rowId)
+    .maybeSingle();
+
+  if (curErr) {
+    console.error(
+      '[CallPerformanceSync] read row before update failed:',
+      contractAddress,
+      curErr.message || curErr
+    );
+    return;
+  }
+
+  const reason = String((curRow && curRow.excluded_reason) || '').trim();
+  /** Dashboard / admin exclusions must not be cleared when tracked state still says "counted". */
+  const STICKY_EXCLUDED_REASONS = new Set([
+    'admin_reset',
+    'admin_stats_cutover',
+    'admin_bot_calls_reset',
+    'dashboard_bot_exclude'
+  ]);
+  const adminStickyExcluded =
+    STICKY_EXCLUDED_REASONS.has(reason) &&
+    curRow &&
+    curRow.excluded_from_stats === true;
+
+  const dbExcluded = Boolean(curRow && curRow.excluded_from_stats === true);
+  const trExcluded = tracked.excludedFromStats === true;
+  const mergedExcluded = adminStickyExcluded ? true : dbExcluded || trExcluded;
+
   const patch = {
     ath_multiple: mult,
     spot_multiple: computeSpotMultiple(tracked),
@@ -368,11 +412,15 @@ async function updateUserCallPerformanceAth(contractAddress) {
     token_ticker: tokenTickerRaw ? tokenTickerRaw.slice(0, 48) : null,
     call_market_cap_usd: callMc,
     token_image_url: tokenImageUrl,
-    excluded_from_stats: tracked.excludedFromStats === true,
+    excluded_from_stats: mergedExcluded,
     hidden_from_dashboard: tracked.hiddenFromDashboard === true
   };
 
-  const { error } = await sb.from('call_performance').update(patch).eq('id', rowId);
+  const { error, data: gateRows } = await sb
+    .from('call_performance')
+    .update(patch)
+    .eq('id', rowId)
+    .select('excluded_from_stats,hidden_from_dashboard');
 
   if (error) {
     console.error(
@@ -383,14 +431,16 @@ async function updateUserCallPerformanceAth(contractAddress) {
     return;
   }
 
+  const gateRow = Array.isArray(gateRows) ? gateRows[0] : gateRows;
+
   const callerId = String(
     tracked.firstCallerDiscordId || tracked.firstCallerId || ''
   ).trim();
   const rowSource = rowSourceFromTracked(tracked);
   if (rowSource === 'user' && callerId && callerId.toUpperCase() !== 'AUTO_BOT') {
     queueGrantCallClubMilestones(callerId, mult, rowId, {
-      excludedFromStats: tracked.excludedFromStats === true,
-      hiddenFromDashboard: tracked.hiddenFromDashboard === true,
+      excludedFromStats: gateRow && gateRow.excluded_from_stats === true,
+      hiddenFromDashboard: gateRow && gateRow.hidden_from_dashboard === true,
       source: 'user'
     });
   }

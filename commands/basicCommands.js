@@ -1710,6 +1710,23 @@ function applyFaSolParsedToScan(scan, p) {
 }
 
 async function handleCallCommand(message, contractAddress, source = 'command') {
+  const authorId = String(message?.author?.id || '').trim();
+  if (authorId) {
+    try {
+      const { isDiscordUserCallSuspended } = require('../utils/userCallSuspensionDb');
+      if (await isDiscordUserCallSuspended(authorId)) {
+        const msg =
+          '⛔ Your ability to make calls is suspended. Contact a moderator if you think this is a mistake.';
+        if (typeof message.reply === 'function') {
+          await message.reply({ content: msg });
+        }
+        return;
+      }
+    } catch (e) {
+      console.warn('[CallSuspension] check failed (fail-open):', e?.message || e);
+    }
+  }
+
   let enrichment = null;
   // Same switch as FaSol mirror: one env — no extra TELEGRAM_FASOL_ENRICH_USER_CALLS required.
   // Optional TELEGRAM_FASOL_ENRICH_USER_CALLS=1 if you want user-call enrich while mirror is off.

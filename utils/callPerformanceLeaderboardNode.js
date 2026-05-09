@@ -7,6 +7,9 @@ const CALL_PERFORMANCE_VISIBLE_ON_DASHBOARD_OR =
 const CALL_PERFORMANCE_NOT_EXCLUDED_FROM_STATS_OR =
   'excluded_from_stats.is.null,excluded_from_stats.eq.false';
 
+/** Match `mcgbot-dashboard/lib/callPerformanceMultiples.ts` ATH_MULTIPLE_STATS_MAX */
+const ATH_MULTIPLE_STATS_MAX = 50_000;
+
 function getSupabaseServiceRole() {
   const url = String(process.env.SUPABASE_URL || '').trim();
   const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
@@ -35,7 +38,8 @@ function rowAthMultiple(row) {
     Number.isFinite(/** @type {number} */ (row && row.ath_multiple))
       ? /** @type {number} */ (row.ath_multiple)
       : Number((row && row.ath_multiple) || 0);
-  return Number.isFinite(ath) && ath > 0 ? ath : 0;
+  if (!Number.isFinite(ath) || ath <= 0) return 0;
+  return Math.min(ath, ATH_MULTIPLE_STATS_MAX);
 }
 
 /**

@@ -337,9 +337,14 @@ async function tickXLeaderboardDigest() {
   const now = new Date();
   const utcDate = now.toISOString().slice(0, 10);
   const hour = now.getUTCHours();
-  const minute = now.getUTCMinutes();
   const targetHour = Number(process.env.X_LEADERBOARD_DIGEST_UTC_HOUR ?? 16);
-  if (hour !== targetHour || minute > 12) {
+  /**
+   * IMPORTANT: scheduler tick is `setInterval(...)` and may not align to :00.
+   * A narrow "first 12 minutes" window can miss the entire day if the process
+   * starts at :14/:19/etc. We dedupe by day/week/month keys, so it's safe to
+   * allow the whole hour.
+   */
+  if (hour !== targetHour) {
     return;
   }
 
@@ -401,10 +406,10 @@ async function tickWeeklyStatsSnapshot() {
 
   const now = new Date();
   const hour = now.getUTCHours();
-  const minute = now.getUTCMinutes();
   const digestHour = Number(process.env.X_LEADERBOARD_DIGEST_UTC_HOUR ?? 16);
   const targetHour = Number(process.env.X_WEEKLY_STATS_UTC_HOUR ?? digestHour);
-  if (hour !== targetHour || minute > 12) {
+  // Same reasoning as `tickXLeaderboardDigest`: allow the whole hour and dedupe by key.
+  if (hour !== targetHour) {
     return;
   }
 

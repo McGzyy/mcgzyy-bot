@@ -42,7 +42,8 @@ async function tickXEngagementPosts() {
   const wday = now.getUTCDay();
   const dom = now.getUTCDate();
 
-  if (minute > 12) {
+  // Allow the whole hour; individual post functions are expected to self-dedupe if needed.
+  if (minute > 59) {
     return;
   }
 

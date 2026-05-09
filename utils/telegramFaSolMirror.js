@@ -503,6 +503,9 @@ function startTelegramFaSolMirror(opts) {
     for (const mint of mints) {
       if (!isLikelySolanaMint(mint)) continue;
 
+      /** FaSol reply to our ingest CA — belongs on user-call feeds only; skip bot-call mirror (Discord + TG). */
+      let skipMirrorForUserEnrich = false;
+
       // If this message looks like a FaSol stats card, resolve any pending enrichment waits.
       try {
         const parsedMaybe = parseFaSolPost(message);
@@ -521,6 +524,7 @@ function startTelegramFaSolMirror(opts) {
           const key = canonicalMintKey(mint);
           const pending = pendingEnrichment.get(key);
           if (pending && pending.length) {
+            skipMirrorForUserEnrich = true;
             pendingEnrichment.delete(key);
             for (const waiter of pending) {
               if (waiter.expiresAt > Date.now()) {
@@ -531,6 +535,13 @@ function startTelegramFaSolMirror(opts) {
         }
       } catch (_) {
         // ignore parse failures for enrichment resolution
+      }
+
+      if (skipMirrorForUserEnrich) {
+        console.log(
+          `[TelegramFaSol] Skip bot-call mirror for ${mint.slice(0, 6)}… — FaSol reply matched !call/dashboard enrich`
+        );
+        continue;
       }
 
       if (!mirrorEnabled || !channel || typeof channel.send !== 'function') {

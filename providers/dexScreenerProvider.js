@@ -1,5 +1,112 @@
+/**
+ * DexScreener public HTTP API — requests are globally queued + spaced to reduce 429s from monitoring.
+ * Env: DEXSCREENER_MIN_INTERVAL_MS (default 450), DEXSCREENER_MAX_RETRIES (default 4).
+ */
 const axios = require('axios');
 const { computeMigrated } = require('../utils/solanaPoolMigrated');
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Minimum gap between DexScreener HTTP calls (same IP limit across monitoring + calls). */
+function dexMinIntervalMs() {
+  const n = Number(process.env.DEXSCREENER_MIN_INTERVAL_MS);
+  if (Number.isFinite(n) && n >= 0) return Math.min(n, 10_000);
+  return 450;
+}
+
+const dexMaxRetries = (() => {
+  const n = Number(process.env.DEXSCREENER_MAX_RETRIES);
+  if (Number.isFinite(n) && n >= 1) return Math.min(Math.floor(n), 8);
+  return 4;
+})();
+
+let dexQueueLastDone = Promise.resolve();
+let lastDexSpacingAt = 0;
+
+/**
+ * Serialize DexScreener requests and enforce spacing so monitoring loops do not burst 100+ req/s.
+ */
+function enqueueDexRequest(fn) {
+  const run = dexQueueLastDone.then(async () => {
+    const gap = dexMinIntervalMs();
+    const now = Date.now();
+    const wait = lastDexSpacingAt + gap - now;
+    if (wait > 0) await sleep(wait);
+    try {
+      return await fn();
+    } finally {
+      lastDexSpacingAt = Date.now();
+    }
+  });
+  dexQueueLastDone = run.catch(() => {});
+  return run;
+}
+
+let lastDex429LogAt = 0;
+function logDex429Once(backoffMs) {
+  const t = Date.now();
+  if (t - lastDex429LogAt < 45_000) return;
+  lastDex429LogAt = t;
+  console.warn(
+    `[DexScreener] Rate limited (429) — backing off ${backoffMs}ms. ` +
+      `Tune DEXSCREENER_MIN_INTERVAL_MS (default 450) if this persists.`
+  );
+}
+
+async function dexHttpGet(url, axiosConfig = {}) {
+  return enqueueDexRequest(async () => {
+    for (let attempt = 0; attempt < dexMaxRetries; attempt++) {
+      let response;
+      try {
+        response = await axios.get(url, {
+          timeout: 15000,
+          headers: { Accept: 'application/json' },
+          validateStatus: () => true,
+          ...axiosConfig
+        });
+      } catch (e) {
+        if (attempt < dexMaxRetries - 1) {
+          await sleep(Math.min(8000, 400 * 2 ** attempt));
+          continue;
+        }
+        throw e;
+      }
+
+      const status = response.status;
+      const retryAfterSec = parseInt(response.headers?.['retry-after'], 10);
+
+      if (status === 429 || status === 503) {
+        const backoffMs =
+          Number.isFinite(retryAfterSec) && retryAfterSec > 0
+            ? Math.min(60_000, retryAfterSec * 1000)
+            : Math.min(15_000, 800 * 2 ** attempt);
+        logDex429Once(backoffMs);
+        if (attempt < dexMaxRetries - 1) {
+          await sleep(backoffMs);
+          continue;
+        }
+        const err = new Error(`Request failed with status code ${status}`);
+        err.response = response;
+        throw err;
+      }
+
+      if (status >= 400) {
+        const err = new Error(`Request failed with status code ${status}`);
+        err.response = response;
+        throw err;
+      }
+
+      return response;
+    }
+    throw new Error('dexHttpGet: retries exhausted');
+  });
+}
+
+function isAxios429(err) {
+  return err && err.response && err.response.status === 429;
+}
 
 function toNumber(value, fallback = 0) {
   const num = Number(value);
@@ -260,12 +367,7 @@ function buildDexScreenerTokenPayload(bestPair, pairCount, baseContractAddress) 
 async function fetchDexScreenerTokenData(contractAddress) {
   const url = `https://api.dexscreener.com/latest/dex/tokens/${contractAddress}`;
 
-  const response = await axios.get(url, {
-    timeout: 15000,
-    headers: {
-      Accept: 'application/json'
-    }
-  });
+  const response = await dexHttpGet(url);
 
   const rawPairs = response.data?.pairs || [];
 
@@ -302,12 +404,7 @@ async function fetchDexScreenerLockedSolanaPair(pairAddress, baseMint) {
 
   try {
     const url = `https://api.dexscreener.com/latest/dex/pairs/solana/${encodeURIComponent(pairId)}`;
-    const response = await axios.get(url, {
-      timeout: 15000,
-      headers: {
-        Accept: 'application/json'
-      }
-    });
+    const response = await dexHttpGet(url);
 
     const rawPairs = response.data?.pairs || [];
     const bestPair = rawPairs[0];
@@ -322,11 +419,13 @@ async function fetchDexScreenerLockedSolanaPair(pairAddress, baseMint) {
 
     return buildDexScreenerTokenPayload(bestPair, 1, wantMint);
   } catch (err) {
-    console.error(
-      '[DexScreener] Locked pair fetch failed:',
-      pairId.slice(0, 12),
-      err && err.message ? err.message : err
-    );
+    if (!isAxios429(err)) {
+      console.error(
+        '[DexScreener] Locked pair fetch failed:',
+        pairId.slice(0, 12),
+        err && err.message ? err.message : err
+      );
+    }
     return null;
   }
 }
@@ -345,12 +444,7 @@ async function fetchDexScreenerCandidatePairs() {
     try {
       const url = `https://api.dexscreener.com/latest/dex/search/?q=${encodeURIComponent(query)}`;
 
-      const response = await axios.get(url, {
-        timeout: 15000,
-        headers: {
-          Accept: 'application/json'
-        }
-      });
+      const response = await dexHttpGet(url);
 
       const pairs = response.data?.pairs || [];
 

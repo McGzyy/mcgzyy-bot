@@ -558,7 +558,10 @@ async function fetchRealTokenData(contractAddress, opts = null) {
     if (geckoImg) normalized.token.geckoImageUrl = geckoImg;
     return normalized;
   } catch (error) {
-    console.error('[RealTokenProvider] Error:', error.message);
+    const st = error?.response?.status;
+    if (st !== 429) {
+      console.error('[RealTokenProvider] Error:', error.message);
+    }
     return buildFallbackErrorObject(contractAddress);
   }
 }

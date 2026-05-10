@@ -328,6 +328,26 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
         source: row.source
       });
     }
+    if (row.source === 'bot') {
+      try {
+        const { queueCopyTradeSignal } = require('./copyTradeSignalPush');
+        queueCopyTradeSignal({
+          callPerformanceId: id,
+          call_ca: contract,
+          source: row.source,
+          snapshot: {
+            ath_multiple: row.ath_multiple,
+            spot_multiple: row.spot_multiple,
+            call_market_cap_usd: row.call_market_cap_usd,
+            token_name: row.token_name,
+            token_ticker: row.token_ticker,
+            call_time: row.call_time,
+          },
+        });
+      } catch (e) {
+        console.error('[CallPerformanceSync] copy trade signal:', e?.message || e);
+      }
+    }
     return { ok: true, id };
   }
 

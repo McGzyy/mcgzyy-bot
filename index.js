@@ -2069,6 +2069,13 @@ client.once('clientReady', async () => {
     console.error('[TelegramFaSol] Startup failed:', e?.message || e);
   }
 
+  try {
+    const { startOutsideXCallerPoller } = require('./utils/outsideXCallerPoller');
+    startOutsideXCallerPoller();
+  } catch (e) {
+    console.error('[OutsideXPoll] Startup failed:', e?.message || e);
+  }
+
   if (!botChannel) {
     console.log('❌ Could not find #bot-calls channel.');
     return;

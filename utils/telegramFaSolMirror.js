@@ -8,6 +8,9 @@
  *   TELEGRAM_FASOL_INGEST_TOPIC_ID — optional forum topic id when posting the CA trigger (same chat as TELEGRAM_FASOL_CHAT_ID)
  *   TELEGRAM_FASOL_CHAT_ID       — numeric chat id of the private FaSol group (often negative for supergroups)
  *   TELEGRAM_FASOL_INGEST_CHAT_ID — alias for TELEGRAM_FASOL_CHAT_ID if the latter is empty
+ *   TELEGRAM_FASOL_OUTSIDE_CHAT_ID — optional separate supergroup for Outside Calls: McGBot posts CA here, FaSol replies
+ *     (reply_to McGBot’s CA). `requestFaSolEnrichmentOutside()` + DB row insert into `outside_calls` (needs SUPABASE_SERVICE_ROLE_KEY).
+ *   TELEGRAM_FASOL_OUTSIDE_INGEST_TOPIC_ID — optional forum topic id in that outside group
  *   TELEGRAM_FASOL_ENRICH_TIMEOUT_MS — optional; !call / dashboard waits for FaSol (default 28000). Runs in parallel with Dex.
  *   TELEGRAM_FASOL_USERNAME      — optional, comma-separated FaSol bot @usernames (default: fasolcallbot,fasolbot)
  *   TELEGRAM_BOT_CALLS_CHANNEL_ID — members TG hub: bot-call lines after FaSol mirror (see utils/telegramAlerts.js)
@@ -18,6 +21,7 @@
  * McGBot Telegram: BotFather → Group privacy OFF so the bot receives all messages in the group.
  */
 const axios = require('axios');
+const { insertOutsideCallRow } = require('./outsideCallsSupabaseIngest');
 const { postBotCallScan } = require('./autoCallEngine');
 const { autoCallConfig } = require('../config/autoCallConfig');
 const { getTrackedCall } = require('./trackedCallsService');
@@ -40,6 +44,9 @@ const MINT_RE = /\b([1-9A-HJ-NP-Za-km-z]{32,44})(?:pump)?\b/g;
 // We piggyback on the same getUpdates poll loop: when a FaSol post containing a mint arrives,
 // we resolve any pending requests for that mint.
 const pendingEnrichment = new Map(); // mintLower -> [{ resolve, reject, expiresAt }]
+
+/** Outside ingest: `sendMessage` id in the outside group → wait for FaSol `reply_to_message` + insert `outside_calls`. */
+const pendingOutsideByTriggerId = new Map(); // trigger message_id -> { sourceId, mint, tweetId, xPostUrl, resolve, reject, timer }
 
 function truthyEnv(v) {
   const s = String(v ?? '')
@@ -411,6 +418,10 @@ function getFaSolIngestChatIdRaw() {
   return raw;
 }
 
+function getFaSolOutsideIngestChatIdRaw() {
+  return String(process.env.TELEGRAM_FASOL_OUTSIDE_CHAT_ID ?? '').trim();
+}
+
 async function requestFaSolEnrichment(contractAddress, opts = {}) {
   const rawCa = String(contractAddress || '').trim();
   const core = normalizeMintCore(rawCa);
@@ -486,14 +497,190 @@ async function requestFaSolEnrichment(contractAddress, opts = {}) {
 }
 
 /**
+ * Post a CA into the **outside** FaSol group (see TELEGRAM_FASOL_OUTSIDE_CHAT_ID), wait for FaSol’s reply
+ * (must reply to McGBot’s trigger message), then insert `public.outside_calls` via service role.
+ * Call this from your X / outside-source worker when an allow-listed handle posts a mint.
+ *
+ * @param {string} contractAddress
+ * @param {{ sourceId: string; tweetId?: string | null; xPostUrl?: string | null; timeoutMs?: number }} opts
+ */
+async function requestFaSolEnrichmentOutside(contractAddress, opts = {}) {
+  const rawCa = String(contractAddress || '').trim();
+  const core = normalizeMintCore(rawCa);
+  if (!isLikelySolanaMint(core)) {
+    throw new Error('Invalid Solana contract address');
+  }
+
+  const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
+  const chatIdRaw = getFaSolOutsideIngestChatIdRaw();
+  const chatId = Number(chatIdRaw);
+  if (!token || !Number.isFinite(chatId)) {
+    throw new Error(
+      'Outside Telegram ingest not configured (need TELEGRAM_BOT_TOKEN and TELEGRAM_FASOL_OUTSIDE_CHAT_ID)'
+    );
+  }
+
+  const sourceId = String(opts.sourceId || '').trim();
+  if (!sourceId) {
+    throw new Error('requestFaSolEnrichmentOutside: sourceId (outside_x_sources.id uuid) is required');
+  }
+
+  const timeoutDefault = Number(process.env.TELEGRAM_FASOL_ENRICH_TIMEOUT_MS || 28_000);
+  const timeoutMs = Math.max(2_000, Math.min(60_000, Number(opts.timeoutMs || timeoutDefault)));
+
+  const apiBase = `https://api.telegram.org/bot${encodeURIComponent(token)}`;
+  const topicRaw = String(process.env.TELEGRAM_FASOL_OUTSIDE_INGEST_TOPIC_ID ?? '').trim();
+  const topicId = topicRaw ? Number(topicRaw) : null;
+  const body = {
+    chat_id: chatId,
+    text: rawCa,
+    disable_web_page_preview: true
+  };
+  if (topicId != null && Number.isFinite(topicId) && topicId > 0) {
+    body.message_thread_id = Math.floor(topicId);
+  }
+
+  let triggerId;
+  try {
+    console.log(
+      `[OutsideCall/FaSol] Posting CA to outside ingest chat ${chatId}` +
+        `${body.message_thread_id ? ` topic ${body.message_thread_id}` : ''} …`
+    );
+    const sm = await axios.post(`${apiBase}/sendMessage`, body, { timeout: 15000 });
+    if (sm?.data?.ok !== true) {
+      throw new Error(sm?.data?.description || 'sendMessage ok=false');
+    }
+    triggerId = sm?.data?.result?.message_id;
+    if (triggerId == null) {
+      throw new Error('sendMessage missing message_id');
+    }
+  } catch (e) {
+    const tg = e?.response?.data;
+    const desc =
+      (tg && typeof tg === 'object' ? tg.description : null) || e?.message || String(e);
+    const hint =
+      /thread/i.test(String(desc)) || /topic/i.test(String(desc))
+        ? ' — set TELEGRAM_FASOL_OUTSIDE_INGEST_TOPIC_ID to the forum topic id where FaSol listens.'
+        : '';
+    console.error('[OutsideCall/FaSol] sendMessage failed:', desc, tg?.error_code ?? '', hint);
+    throw new Error(`sendMessage failed: ${desc}${hint}`);
+  }
+
+  const tweetId =
+    opts.tweetId != null && String(opts.tweetId).trim() ? String(opts.tweetId).trim() : null;
+  const xPostUrl =
+    opts.xPostUrl != null && String(opts.xPostUrl).trim() ? String(opts.xPostUrl).trim() : null;
+
+  return new Promise((resolve, reject) => {
+    const row = {
+      sourceId,
+      mint: core,
+      tweetId,
+      xPostUrl,
+      resolve,
+      reject,
+      timer: null
+    };
+    row.timer = setTimeout(() => {
+      if (pendingOutsideByTriggerId.get(triggerId) === row) {
+        pendingOutsideByTriggerId.delete(triggerId);
+        reject(new Error('timeout'));
+      }
+    }, timeoutMs + 250);
+    pendingOutsideByTriggerId.set(triggerId, row);
+  });
+}
+
+async function handleOutsideFaSolReply(message) {
+  const outsideRaw = getFaSolOutsideIngestChatIdRaw();
+  const outsideChatId = Number(outsideRaw);
+  if (!Number.isFinite(outsideChatId) || Number(message?.chat?.id) !== outsideChatId) {
+    return;
+  }
+
+  const uname = senderUsernameFromMessage(message);
+  const senderChatId =
+    message?.sender_chat?.id != null ? Number(message.sender_chat.id) : null;
+  const isChannelPostFromIngest =
+    senderChatId != null && Number.isFinite(senderChatId) && senderChatId === outsideChatId;
+
+  const faSolUsers = faSolAllowedUsernames();
+  if (!isChannelPostFromIngest) {
+    if (!uname || !faSolUsers.has(uname)) return;
+  }
+
+  const replyToId = message.reply_to_message?.message_id;
+  if (replyToId == null) {
+    return;
+  }
+
+  const pending = pendingOutsideByTriggerId.get(replyToId);
+  if (!pending) {
+    return;
+  }
+
+  let parsedMaybe;
+  try {
+    parsedMaybe = parseFaSolPost(message);
+  } catch (_) {
+    return;
+  }
+
+  const enrichable =
+    parsedMaybe &&
+    (parsedMaybe.stats?.marketCap != null ||
+      parsedMaybe.stats?.liquidity != null ||
+      parsedMaybe.stats?.ath != null ||
+      parsedMaybe.stats?.volume != null ||
+      parsedMaybe.stats?.fiveMinVol != null ||
+      parsedMaybe.stats?.fiveMinChangePct != null ||
+      parsedMaybe.stats?.makers != null ||
+      parsedMaybe.holders?.holders != null ||
+      (parsedMaybe.ticker && parsedMaybe.tokenName));
+  if (!enrichable) {
+    return;
+  }
+
+  const ins = await insertOutsideCallRow({
+    sourceId: pending.sourceId,
+    mint: pending.mint,
+    tweetId: pending.tweetId,
+    xPostUrl: pending.xPostUrl
+  });
+
+  if (pending.timer) {
+    clearTimeout(pending.timer);
+  }
+  pendingOutsideByTriggerId.delete(replyToId);
+
+  if (ins.ok || ins.error === 'duplicate_tweet_or_conflict') {
+    if (!ins.ok) {
+      console.log(
+        `[OutsideCall/FaSol] Duplicate tweet or conflict for mint ${pending.mint.slice(0, 8)}… — treating as done`
+      );
+    } else {
+      console.log(
+        `[OutsideCall/FaSol] Inserted ${ins.callRole} row for source ${pending.sourceId} mint ${pending.mint.slice(0, 8)}…`
+      );
+    }
+    pending.resolve({ mint: pending.mint, parsed: parsedMaybe, message, insert: ins });
+  } else {
+    console.error('[OutsideCall/FaSol] outside_calls insert failed:', ins);
+    pending.reject(new Error(ins.error || 'outside_call_insert_failed'));
+  }
+}
+
+/**
  * @param {{ discordBotCallsChannel: import('discord.js').TextChannel | null }} opts
  */
 function startTelegramFaSolMirror(opts) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   const mirrorEnabled = truthyEnv(process.env.TELEGRAM_FASOL_MIRROR);
   const enrichListener = truthyEnv(process.env.TELEGRAM_FASOL_ENRICH_USER_CALLS);
-  const enabled = mirrorEnabled || enrichListener;
-  const chatIdRaw = getFaSolIngestChatIdRaw();
+  const userChatIdRaw = getFaSolIngestChatIdRaw();
+  const outsideChatIdRaw = getFaSolOutsideIngestChatIdRaw();
+  const outsideIngestConfigured = Boolean(outsideChatIdRaw);
+  const enabled = mirrorEnabled || enrichListener || outsideIngestConfigured;
   const faSolUsers = faSolAllowedUsernames();
 
   const tgBotCalls = botCallsTelegramTarget();
@@ -508,9 +695,31 @@ function startTelegramFaSolMirror(opts) {
     console.warn('[TelegramFaSol] TELEGRAM_BOT_TOKEN is empty — ingest listener not started.');
     return;
   }
-  if (!chatIdRaw) {
-    console.warn('[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID is empty — ingest listener not started.');
+  if (!userChatIdRaw && !outsideChatIdRaw) {
+    console.warn(
+      '[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID (or INGEST) and TELEGRAM_FASOL_OUTSIDE_CHAT_ID are both empty — ingest listener not started.'
+    );
     return;
+  }
+
+  const userIngestChatId = userChatIdRaw ? Number(userChatIdRaw) : NaN;
+  const outsideIngestChatId = outsideChatIdRaw ? Number(outsideChatIdRaw) : NaN;
+  if (userChatIdRaw && !Number.isFinite(userIngestChatId)) {
+    console.warn('[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID must be a numeric id (got non-number).');
+    return;
+  }
+  if (outsideChatIdRaw && !Number.isFinite(outsideIngestChatId)) {
+    console.warn('[TelegramFaSol] TELEGRAM_FASOL_OUTSIDE_CHAT_ID must be a numeric id (got non-number).');
+    return;
+  }
+  if (
+    Number.isFinite(userIngestChatId) &&
+    Number.isFinite(outsideIngestChatId) &&
+    userIngestChatId === outsideIngestChatId
+  ) {
+    console.warn(
+      '[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID and TELEGRAM_FASOL_OUTSIDE_CHAT_ID are the same — outside + user ingest routing will misbehave.'
+    );
   }
 
   const channel = opts?.discordBotCallsChannel;
@@ -519,12 +728,6 @@ function startTelegramFaSolMirror(opts) {
       '[TelegramFaSol] Mirror enabled but no Discord #bot-calls channel — FaSol→Discord mirror disabled. ' +
         'Ingest listener still runs so !call / dashboard enrichment can receive FaSol replies.'
     );
-  }
-
-  const chatId = Number(chatIdRaw);
-  if (!Number.isFinite(chatId)) {
-    console.warn('[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID must be a numeric id (got non-number).');
-    return;
   }
 
   const apiBase = `https://api.telegram.org/bot${encodeURIComponent(token)}`;
@@ -560,13 +763,18 @@ function startTelegramFaSolMirror(opts) {
 
   async function handleMessage(message) {
     if (!message || message.chat?.id == null) return;
-    if (Number(message.chat.id) !== chatId) return;
+    const mid = Number(message.chat.id);
+    if (Number.isFinite(outsideIngestChatId) && mid === outsideIngestChatId) {
+      await handleOutsideFaSolReply(message);
+      return;
+    }
+    if (!Number.isFinite(userIngestChatId) || mid !== userIngestChatId) return;
 
     const uname = senderUsernameFromMessage(message);
     const senderChatId =
       message?.sender_chat?.id != null ? Number(message.sender_chat.id) : null;
     const isChannelPostFromIngest =
-      senderChatId != null && Number.isFinite(senderChatId) && senderChatId === chatId;
+      senderChatId != null && Number.isFinite(senderChatId) && senderChatId === userIngestChatId;
 
     // In channels, Bot API updates arrive as `channel_post` and usually do NOT include `from.username`
     // for the bot that created the post. So: if this is a channel post from the ingest channel,
@@ -717,4 +925,8 @@ function startTelegramFaSolMirror(opts) {
   };
 }
 
-module.exports = { startTelegramFaSolMirror, requestFaSolEnrichment };
+module.exports = {
+  startTelegramFaSolMirror,
+  requestFaSolEnrichment,
+  requestFaSolEnrichmentOutside
+};

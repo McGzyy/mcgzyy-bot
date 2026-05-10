@@ -15,6 +15,9 @@
  *   TELEGRAM_FASOL_USERNAME      — optional, comma-separated FaSol bot @usernames (default: fasolcallbot,fasolbot)
  *   TELEGRAM_BOT_CALLS_CHANNEL_ID — members TG hub: bot-call lines after FaSol mirror (see utils/telegramAlerts.js)
  *   TELEGRAM_BOT_CALLS_TOPIC_ID   — optional forum topic id for that channel
+ *   TELEGRAM_CA_ANALYZER_CHAT_ID  — optional supergroup/channel for dashboard “CA Analyzer”: McGBot posts mint, FaSol replies;
+ *     same getUpdates loop resolves `requestCaAnalyzerFaSolEnrichment()` (often `-100…` format).
+ *   TELEGRAM_CA_ANALYZER_TOPIC_ID — optional forum topic id in that channel
  *
  * Flow: FaSol group → generateRealScan → Discord #bot-calls (full embed) → TG bot-call line if CHANNEL_ID set.
  *
@@ -422,6 +425,11 @@ function getFaSolOutsideIngestChatIdRaw() {
   return String(process.env.TELEGRAM_FASOL_OUTSIDE_CHAT_ID ?? '').trim();
 }
 
+/** Dedicated Telegram chat for dashboard CA Analyzer (FaSol enrich only; no Discord mirror). */
+function getCaAnalyzerChatIdRaw() {
+  return String(process.env.TELEGRAM_CA_ANALYZER_CHAT_ID ?? '').trim();
+}
+
 async function requestFaSolEnrichment(contractAddress, opts = {}) {
   const rawCa = String(contractAddress || '').trim();
   const core = normalizeMintCore(rawCa);
@@ -492,6 +500,81 @@ async function requestFaSolEnrichment(contractAddress, opts = {}) {
   console.log(
     `[UserCall/FaSolEnrich] Posted CA to ingest chat ${chatId}${body.message_thread_id ? ` topic ${body.message_thread_id}` : ''}`
   );
+
+  return p;
+}
+
+/**
+ * Same contract-address → FaSol card flow as `requestFaSolEnrichment`, but posts to `TELEGRAM_CA_ANALYZER_CHAT_ID`
+ * so production FaSol ingest traffic stays separate from the main operator group.
+ * @param {string} contractAddress
+ * @param {{ timeoutMs?: number }} [opts]
+ */
+async function requestCaAnalyzerFaSolEnrichment(contractAddress, opts = {}) {
+  const rawCa = String(contractAddress || '').trim();
+  const core = normalizeMintCore(rawCa);
+  if (!isLikelySolanaMint(core)) {
+    throw new Error('Invalid Solana contract address');
+  }
+
+  const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
+  const chatIdRaw = getCaAnalyzerChatIdRaw();
+  const chatId = Number(chatIdRaw);
+  if (!token || !Number.isFinite(chatId)) {
+    throw new Error(
+      'CA Analyzer Telegram not configured (need TELEGRAM_BOT_TOKEN and TELEGRAM_CA_ANALYZER_CHAT_ID, usually -100…)'
+    );
+  }
+
+  const timeoutMs = Math.max(2_000, Math.min(60_000, Number(opts.timeoutMs || 15_000)));
+  const mintKey = canonicalMintKey(rawCa);
+  const expiresAt = Date.now() + timeoutMs;
+
+  const p = new Promise((resolve, reject) => {
+    const arr = pendingEnrichment.get(mintKey) || [];
+    arr.push({ resolve, reject, expiresAt });
+    pendingEnrichment.set(mintKey, arr);
+    setTimeout(() => {
+      const cur = pendingEnrichment.get(mintKey) || [];
+      const next = cur.filter((x) => x.expiresAt > Date.now() && x.resolve !== resolve);
+      if (next.length) pendingEnrichment.set(mintKey, next);
+      else pendingEnrichment.delete(mintKey);
+      reject(new Error('timeout'));
+    }, timeoutMs + 250);
+  });
+
+  const apiBase = `https://api.telegram.org/bot${encodeURIComponent(token)}`;
+  const topicRaw = String(process.env.TELEGRAM_CA_ANALYZER_TOPIC_ID ?? '').trim();
+  const topicId = topicRaw ? Number(topicRaw) : null;
+  const body = {
+    chat_id: chatId,
+    text: rawCa,
+    disable_web_page_preview: true
+  };
+  if (topicId != null && Number.isFinite(topicId) && topicId > 0) {
+    body.message_thread_id = Math.floor(topicId);
+  }
+
+  try {
+    console.log(
+      `[CA-Analyzer/FaSol] Posting CA to analyzer chat ${chatId}` +
+        `${body.message_thread_id ? ` topic ${body.message_thread_id}` : ''} …`
+    );
+    const sm = await axios.post(`${apiBase}/sendMessage`, body, { timeout: 15000 });
+    if (sm?.data?.ok !== true) {
+      throw new Error(sm?.data?.description || 'sendMessage ok=false');
+    }
+  } catch (e) {
+    const tg = e?.response?.data;
+    const desc =
+      (tg && typeof tg === 'object' ? tg.description : null) || e?.message || String(e);
+    const hint =
+      /thread/i.test(String(desc)) || /topic/i.test(String(desc))
+        ? ' — set TELEGRAM_CA_ANALYZER_TOPIC_ID to the forum topic id where FaSol listens.'
+        : '';
+    console.error('[CA-Analyzer/FaSol] sendMessage failed:', desc, tg?.error_code ?? '', hint);
+    throw new Error(`sendMessage failed: ${desc}${hint}`);
+  }
 
   return p;
 }
@@ -679,15 +762,17 @@ function startTelegramFaSolMirror(opts) {
   const enrichListener = truthyEnv(process.env.TELEGRAM_FASOL_ENRICH_USER_CALLS);
   const userChatIdRaw = getFaSolIngestChatIdRaw();
   const outsideChatIdRaw = getFaSolOutsideIngestChatIdRaw();
+  const caAnalyzerChatIdRaw = getCaAnalyzerChatIdRaw();
   const outsideIngestConfigured = Boolean(outsideChatIdRaw);
-  const enabled = mirrorEnabled || enrichListener || outsideIngestConfigured;
+  const caAnalyzerConfigured = Boolean(caAnalyzerChatIdRaw);
+  const enabled = mirrorEnabled || enrichListener || outsideIngestConfigured || caAnalyzerConfigured;
   const faSolUsers = faSolAllowedUsernames();
 
   const tgBotCalls = botCallsTelegramTarget();
 
   if (!enabled) {
     console.log(
-      '[TelegramFaSol] Ingest idle — enable TELEGRAM_FASOL_MIRROR and/or TELEGRAM_FASOL_ENRICH_USER_CALLS.'
+      '[TelegramFaSol] Ingest idle — enable TELEGRAM_FASOL_MIRROR, TELEGRAM_FASOL_ENRICH_USER_CALLS, outside ingest, and/or set TELEGRAM_CA_ANALYZER_CHAT_ID.'
     );
     return;
   }
@@ -695,21 +780,26 @@ function startTelegramFaSolMirror(opts) {
     console.warn('[TelegramFaSol] TELEGRAM_BOT_TOKEN is empty — ingest listener not started.');
     return;
   }
-  if (!userChatIdRaw && !outsideChatIdRaw) {
+  if (!userChatIdRaw && !outsideChatIdRaw && !caAnalyzerChatIdRaw) {
     console.warn(
-      '[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID (or INGEST) and TELEGRAM_FASOL_OUTSIDE_CHAT_ID are both empty — ingest listener not started.'
+      '[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID (or INGEST), TELEGRAM_FASOL_OUTSIDE_CHAT_ID, and TELEGRAM_CA_ANALYZER_CHAT_ID are all empty — ingest listener not started.'
     );
     return;
   }
 
   const userIngestChatId = userChatIdRaw ? Number(userChatIdRaw) : NaN;
   const outsideIngestChatId = outsideChatIdRaw ? Number(outsideChatIdRaw) : NaN;
+  const caAnalyzerChatId = caAnalyzerChatIdRaw ? Number(caAnalyzerChatIdRaw) : NaN;
   if (userChatIdRaw && !Number.isFinite(userIngestChatId)) {
     console.warn('[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID must be a numeric id (got non-number).');
     return;
   }
   if (outsideChatIdRaw && !Number.isFinite(outsideIngestChatId)) {
     console.warn('[TelegramFaSol] TELEGRAM_FASOL_OUTSIDE_CHAT_ID must be a numeric id (got non-number).');
+    return;
+  }
+  if (caAnalyzerChatIdRaw && !Number.isFinite(caAnalyzerChatId)) {
+    console.warn('[TelegramFaSol] TELEGRAM_CA_ANALYZER_CHAT_ID must be a numeric id (got non-number).');
     return;
   }
   if (
@@ -720,6 +810,14 @@ function startTelegramFaSolMirror(opts) {
     console.warn(
       '[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID and TELEGRAM_FASOL_OUTSIDE_CHAT_ID are the same — outside + user ingest routing will misbehave.'
     );
+  }
+  if (Number.isFinite(caAnalyzerChatId)) {
+    if (Number.isFinite(userIngestChatId) && caAnalyzerChatId === userIngestChatId) {
+      console.warn('[TelegramFaSol] CA Analyzer chat id equals TELEGRAM_FASOL_CHAT_ID — routing may overlap.');
+    }
+    if (Number.isFinite(outsideIngestChatId) && caAnalyzerChatId === outsideIngestChatId) {
+      console.warn('[TelegramFaSol] CA Analyzer chat id equals TELEGRAM_FASOL_OUTSIDE_CHAT_ID — routing may overlap.');
+    }
   }
 
   const channel = opts?.discordBotCallsChannel;
@@ -744,8 +842,11 @@ function startTelegramFaSolMirror(opts) {
   const modeBits = [];
   if (mirrorEnabled) modeBits.push('mirror→Discord');
   if (enrichListener) modeBits.push('user-call enrich');
+  if (caAnalyzerConfigured) modeBits.push('ca-analyzer');
+  const ingestChatLabel =
+    [userChatIdRaw, outsideChatIdRaw, caAnalyzerChatIdRaw].filter(Boolean).join(' | ') || 'n/a';
   console.log(
-    `[TelegramFaSol] Ingest ON (${modeBits.join(' + ')}) — TG chat ${chatId}, FaSol usernames: ${[...faSolUsers].join(', ')}` +
+    `[TelegramFaSol] Ingest ON (${modeBits.join(' + ')}) — TG chat(s) ${ingestChatLabel}, FaSol usernames: ${[...faSolUsers].join(', ')}` +
       (mirrorEnabled && channel ? ` → Discord #${channel.name}${tgBotExtra}` : '')
   );
 
@@ -768,6 +869,50 @@ function startTelegramFaSolMirror(opts) {
       await handleOutsideFaSolReply(message);
       return;
     }
+    if (Number.isFinite(caAnalyzerChatId) && mid === caAnalyzerChatId) {
+      const unameCa = senderUsernameFromMessage(message);
+      const senderChatIdCa =
+        message?.sender_chat?.id != null ? Number(message.sender_chat.id) : null;
+      const isChannelPostCa =
+        senderChatIdCa != null && Number.isFinite(senderChatIdCa) && senderChatIdCa === caAnalyzerChatId;
+      if (!isChannelPostCa) {
+        if (!unameCa || !faSolUsers.has(unameCa)) return;
+      }
+      const mintsCa = extractMintsFromTelegramMessage(message);
+      for (const mint of mintsCa) {
+        if (!isLikelySolanaMint(mint)) continue;
+        try {
+          const parsedMaybe = parseFaSolPost(message);
+          const enrichableCa =
+            parsedMaybe &&
+            (parsedMaybe.stats?.marketCap != null ||
+              parsedMaybe.stats?.liquidity != null ||
+              parsedMaybe.stats?.ath != null ||
+              parsedMaybe.stats?.volume != null ||
+              parsedMaybe.stats?.fiveMinVol != null ||
+              parsedMaybe.stats?.fiveMinChangePct != null ||
+              parsedMaybe.stats?.makers != null ||
+              parsedMaybe.holders?.holders != null ||
+              (parsedMaybe.ticker && parsedMaybe.tokenName));
+          if (enrichableCa) {
+            const keyCa = canonicalMintKey(mint);
+            const pendingCa = pendingEnrichment.get(keyCa);
+            if (pendingCa && pendingCa.length) {
+              pendingEnrichment.delete(keyCa);
+              for (const waiter of pendingCa) {
+                if (waiter.expiresAt > Date.now()) {
+                  waiter.resolve({ mint, parsed: parsedMaybe, message });
+                }
+              }
+            }
+          }
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      return;
+    }
+
     if (!Number.isFinite(userIngestChatId) || mid !== userIngestChatId) return;
 
     const uname = senderUsernameFromMessage(message);
@@ -928,5 +1073,6 @@ function startTelegramFaSolMirror(opts) {
 module.exports = {
   startTelegramFaSolMirror,
   requestFaSolEnrichment,
-  requestFaSolEnrichmentOutside
+  requestFaSolEnrichmentOutside,
+  requestCaAnalyzerFaSolEnrichment
 };

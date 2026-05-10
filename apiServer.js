@@ -208,6 +208,7 @@ function startReferralApiServer(discordClient = null, opts = {}) {
         internalPost: [
           'call',
           'watch',
+          'ca-fasol-enrich',
           'x-oauth/start',
           'x-oauth/complete',
           'x-oauth/unlink',
@@ -352,6 +353,42 @@ function startReferralApiServer(discordClient = null, opts = {}) {
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'Watch failed';
       console.error('[API] POST /internal/watch', msg);
+      res.status(400).json({ success: false, error: msg });
+    }
+  });
+
+  app.post('/internal/ca-fasol-enrich', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error: 'CALL_INTERNAL_SECRET is not set on the bot host (required for dashboard CA Analyzer FaSol).'
+        });
+        return;
+      }
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const ca = String(body.ca || body.contractAddress || '').trim();
+      if (!ca) {
+        res.status(400).json({ success: false, error: 'Missing ca' });
+        return;
+      }
+      const timeoutMs = Math.max(5_000, Math.min(55_000, Number(body.timeoutMs || 32_000)));
+      const { requestCaAnalyzerFaSolEnrichment } = require('./utils/telegramFaSolMirror');
+      const out = await requestCaAnalyzerFaSolEnrichment(ca, { timeoutMs });
+      res.json({
+        success: true,
+        mint: out && out.mint ? String(out.mint) : ca,
+        parsed: out && out.parsed && typeof out.parsed === 'object' ? out.parsed : null
+      });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'ca-fasol-enrich failed';
+      console.error('[API] POST /internal/ca-fasol-enrich', msg);
       res.status(400).json({ success: false, error: msg });
     }
   });

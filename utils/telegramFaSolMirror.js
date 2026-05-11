@@ -430,6 +430,26 @@ function getCaAnalyzerChatIdRaw() {
   return String(process.env.TELEGRAM_CA_ANALYZER_CHAT_ID ?? '').trim();
 }
 
+/**
+ * Trim/BOM/quotes and map bare positive supergroup/channel fragments to Bot API form (`-100…`).
+ * Already-negative ids are unchanged. Intended for group/channel env vars (not DM user ids).
+ * @param {string} raw
+ * @returns {{ chatId: number; normalizedFromPositive?: boolean } | null}
+ */
+function normalizeTelegramSupergroupChatIdForBotApi(raw) {
+  const s = String(raw ?? '')
+    .trim()
+    .replace(/^\uFEFF/, '')
+    .replace(/^['"]|['"]$/g, '');
+  if (!s || !/^-?\d+$/.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;
+  if (n > 0 && n < 1e12) {
+    return { chatId: -(1_000_000_000_000 + n), normalizedFromPositive: true };
+  }
+  return { chatId: n };
+}
+
 async function requestFaSolEnrichment(contractAddress, opts = {}) {
   const rawCa = String(contractAddress || '').trim();
   const core = normalizeMintCore(rawCa);
@@ -519,10 +539,16 @@ async function requestCaAnalyzerFaSolEnrichment(contractAddress, opts = {}) {
 
   const token = String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim();
   const chatIdRaw = getCaAnalyzerChatIdRaw();
-  const chatId = Number(chatIdRaw);
-  if (!token || !Number.isFinite(chatId)) {
+  const chatNorm = normalizeTelegramSupergroupChatIdForBotApi(chatIdRaw);
+  const chatId = chatNorm?.chatId;
+  if (!token || chatId == null || !Number.isFinite(chatId)) {
     throw new Error(
       'CA Analyzer Telegram not configured (need TELEGRAM_BOT_TOKEN and TELEGRAM_CA_ANALYZER_CHAT_ID, usually -100…)'
+    );
+  }
+  if (chatNorm?.normalizedFromPositive) {
+    console.log(
+      `[CA-Analyzer/FaSol] TELEGRAM_CA_ANALYZER_CHAT_ID normalized bare positive "${chatIdRaw}" → ${chatId}`
     );
   }
 
@@ -568,10 +594,15 @@ async function requestCaAnalyzerFaSolEnrichment(contractAddress, opts = {}) {
     const tg = e?.response?.data;
     const desc =
       (tg && typeof tg === 'object' ? tg.description : null) || e?.message || String(e);
-    const hint =
-      /thread/i.test(String(desc)) || /topic/i.test(String(desc))
-        ? ' — set TELEGRAM_CA_ANALYZER_TOPIC_ID to the forum topic id where FaSol listens.'
-        : '';
+    let hint = '';
+    if (/chat not found/i.test(String(desc))) {
+      hint =
+        ' — Checklist: the bot for TELEGRAM_BOT_TOKEN on this apiServer host must be a member of that chat; ' +
+        'confirm chat_id from inside that chat (supergroups/channels use -100…); restart apiServer after .env changes; ' +
+        'forums may need TELEGRAM_CA_ANALYZER_TOPIC_ID.';
+    } else if (/thread/i.test(String(desc)) || /topic/i.test(String(desc))) {
+      hint = ' — set TELEGRAM_CA_ANALYZER_TOPIC_ID to the forum topic id where FaSol listens.';
+    }
     console.error('[CA-Analyzer/FaSol] sendMessage failed:', desc, tg?.error_code ?? '', hint);
     throw new Error(`sendMessage failed: ${desc}${hint}`);
   }
@@ -789,7 +820,8 @@ function startTelegramFaSolMirror(opts) {
 
   const userIngestChatId = userChatIdRaw ? Number(userChatIdRaw) : NaN;
   const outsideIngestChatId = outsideChatIdRaw ? Number(outsideChatIdRaw) : NaN;
-  const caAnalyzerChatId = caAnalyzerChatIdRaw ? Number(caAnalyzerChatIdRaw) : NaN;
+  const caNorm = caAnalyzerChatIdRaw ? normalizeTelegramSupergroupChatIdForBotApi(caAnalyzerChatIdRaw) : null;
+  const caAnalyzerChatId = caNorm ? caNorm.chatId : NaN;
   if (userChatIdRaw && !Number.isFinite(userIngestChatId)) {
     console.warn('[TelegramFaSol] TELEGRAM_FASOL_CHAT_ID must be a numeric id (got non-number).');
     return;

@@ -160,7 +160,7 @@ function parseAgeToMinutes(raw) {
 }
 
 function parsePercentLike(raw) {
-  const m = String(raw ?? '').match(/(-?\d+(?:\.\d+)?)\s*%/);
+  const m = String(raw ?? '').match(/([+-]?\d+(?:\.\d+)?)\s*%/);
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) ? n : null;
@@ -271,22 +271,39 @@ function parseFaSolPost(message) {
   if (liq == null) {
     liq = parseUsdLabeled(lines, /\bLIQ\b\s*:?\s*(\$?\s*[0-9]+(?:\.[0-9]+)?\s*[kKmMbB]?)/i);
   }
-  const ageMinutes = parseAgeToMinutes(getAfter(['Age:', 'Age']));
+  let ageMinutes = parseAgeToMinutes(getAfter(['Age:', 'Age']));
+  if (ageMinutes == null) {
+    for (const ln of lines) {
+      const am = ln.match(/\bAge\s*:?\s*(.+)$/i);
+      if (am && am[1]) {
+        ageMinutes = parseAgeToMinutes(String(am[1]).trim());
+        if (ageMinutes != null) break;
+      }
+    }
+  }
   const vol = parseUsdLike(getAfter(['Vol:', 'Vol']));
 
-  const txLine = getAfter(['TXs:', 'TXS:', 'Txs:']);
-  const b = (() => {
-    const m = String(txLine ?? '').match(/\bB\s*([0-9]+)\b/i);
-    return m ? Number(m[1]) : null;
-  })();
-  const s = (() => {
-    const m = String(txLine ?? '').match(/\bS\s*([0-9]+)\b/i);
-    return m ? Number(m[1]) : null;
-  })();
+  const txLine = getAfter(['TXs:', 'TXS:', 'Txs:', 'TX:']);
+  const parseTxCountSegment = (letter) => {
+    const seg = String(txLine ?? '').match(new RegExp(`\\b${letter}\\s*((?:\\$)?[0-9]+(?:\\.[0-9]+)?\\s*[kKmMbB]?)`, 'i'));
+    if (!seg || !seg[1]) return null;
+    const n = parseUsdLike(seg[1]);
+    return Number.isFinite(n) ? Math.round(n) : null;
+  };
+  const b = parseTxCountSegment('B');
+  const s = parseTxCountSegment('S');
 
-  const fiveMinLine = lines.find((ln) => /\b5m\b/i.test(ln)) || '';
-  const fiveMinChangePct = parsePercentLike(fiveMinLine);
-  const fiveMinVol = parseUsdLike((fiveMinLine.match(/\bVol\s*([^·]+)\b/i) || [])[1]);
+  const fiveMinLine =
+    lines.find((ln) => /\b5m\b/i.test(ln)) ||
+    lines.find((ln) => /\b5M\b/.test(ln) && /vol|makers/i.test(ln)) ||
+    '';
+  let fiveMinChangePct = parsePercentLike(fiveMinLine);
+  let fiveMinChangeIsInfinity = false;
+  if (fiveMinChangePct == null && /\binfinity\b/i.test(fiveMinLine)) {
+    fiveMinChangeIsInfinity = true;
+  }
+  const volBit = (fiveMinLine.match(/\bVol\s*([^·•]+?)(?=\s*[·•]|\s+Makers\b|$)/i) || [])[1];
+  const fiveMinVol = parseUsdLike(String(volBit ?? '').trim());
   const makers = (() => {
     const m = fiveMinLine.match(/\bMakers\s*([0-9]+)\b/i);
     return m ? Number(m[1]) : null;
@@ -316,10 +333,25 @@ function parseFaSolPost(message) {
   })();
   const snipersPct = parsePercentLike(snipersLine);
 
-  const taxLine = lines.find((ln) => /\bTax\b/i.test(ln)) || '';
-  const taxPct = parsePercentLike(taxLine);
-  const lpPct = parsePercentLike((lines.find((ln) => /^LP:\b/i.test(ln)) || ''));
-  const dexUnpaid = /\bDEX\s*Unpaid\b/i.test(lines.join(' '));
+  const lpLine = lines.find((ln) => /\bLP\s*:/i.test(ln)) || '';
+  const lpPct = (() => {
+    const m = lpLine.match(/\bLP\s*:?\s*([0-9.]+%)/i);
+    if (m && m[1]) return parsePercentLike(m[1]);
+    return parsePercentLike(lpLine);
+  })();
+  const taxPct = (() => {
+    for (const ln of lines) {
+      const m =
+        ln.match(/\bTax\s*:?\s*([0-9.]+%)/i) ||
+        ln.match(/\bTax\s+([0-9.]+%)/i) ||
+        ln.match(/·\s*Tax\s*([0-9.]+%)/i);
+      if (m && m[1]) return parsePercentLike(m[1]);
+    }
+    return null;
+  })();
+  const joinedLines = lines.join('\n');
+  const dexUnpaid = /\bDEX\s*Unpaid\b/i.test(joinedLines);
+  const dexPaid = /\bDEX\s*Paid\b/i.test(joinedLines);
 
   return {
     ticker: ticker || null,
@@ -331,10 +363,11 @@ function parseFaSolPost(message) {
       ageMinutes,
       volume: vol,
       fiveMinChangePct,
+      fiveMinChangeIsInfinity: fiveMinChangeIsInfinity ? true : undefined,
       fiveMinVol,
       makers,
-      txBuys: Number.isFinite(b) ? b : null,
-      txSells: Number.isFinite(s) ? s : null
+      txBuys: b != null && Number.isFinite(b) ? b : null,
+      txSells: s != null && Number.isFinite(s) ? s : null
     },
     holders: {
       holders,
@@ -347,6 +380,7 @@ function parseFaSolPost(message) {
     security: {
       lpPct,
       dexUnpaid,
+      dexPaid: dexPaid ? true : undefined,
       taxPct
     }
   };

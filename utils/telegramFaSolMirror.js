@@ -541,9 +541,18 @@ async function requestCaAnalyzerFaSolEnrichment(contractAddress, opts = {}) {
   const chatIdRaw = getCaAnalyzerChatIdRaw();
   const chatNorm = normalizeTelegramSupergroupChatIdForBotApi(chatIdRaw);
   const chatId = chatNorm?.chatId;
-  if (!token || chatId == null || !Number.isFinite(chatId)) {
+  if (!token) {
     throw new Error(
-      'CA Analyzer Telegram not configured (need TELEGRAM_BOT_TOKEN and TELEGRAM_CA_ANALYZER_CHAT_ID, usually -100…)'
+      'CA Analyzer: TELEGRAM_BOT_TOKEN is empty on the apiServer/bot host. ' +
+        'The dashboard only calls your bridge; Telegram uses the token from this process’s environment.'
+    );
+  }
+  if (chatId == null || !Number.isFinite(chatId)) {
+    const detail = chatIdRaw
+      ? `TELEGRAM_CA_ANALYZER_CHAT_ID is set but not parseable as digits (check for quotes/spaces/hidden chars). Raw length=${chatIdRaw.length}.`
+      : 'TELEGRAM_CA_ANALYZER_CHAT_ID is empty.';
+    throw new Error(
+      `CA Analyzer: ${detail} Set a numeric supergroup/channel id on the same host as apiServer (usually -100…), then restart.`
     );
   }
   if (chatNorm?.normalizedFromPositive) {

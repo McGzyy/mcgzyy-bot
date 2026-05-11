@@ -35,6 +35,16 @@ function formatUsdCompact(v) {
   return `$${n.toFixed(0)}`;
 }
 
+/** Integer TX counts (FaSol 🅑 / Ⓢ style), not dollar amounts. */
+function formatTxCountCompact(n) {
+  if (n == null) return '—';
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 0) return '—';
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+  if (v >= 1000) return `${(v / 1000).toFixed(2)}k`;
+  return String(Math.round(v));
+}
+
 function formatAgeSeconds(ageMinutes) {
   const m = Number(ageMinutes);
   if (!Number.isFinite(m) || m < 0) return null;
@@ -63,6 +73,7 @@ function scanToFaSolParsedForTelegram(scan) {
       fiveMinVol: scan.volume5m ?? null,
       ageMinutes: scan.ageMinutes ?? null,
       fiveMinChangePct: scan.fiveMinChangePct ?? null,
+      fiveMinChangeIsInfinity: scan.fiveMinChangeIsInfinity === true ? true : undefined,
       makers: scan.makers ?? null,
       txBuys: scan.txBuys ?? null,
       txSells: scan.txSells ?? null
@@ -109,9 +120,15 @@ function formatFaSolTelegramHtml(parsed, contractAddress, opts = {}) {
   const v1 = st.volume != null ? formatUsdCompact(st.volume) : null;
   const age = st.ageMinutes != null ? formatAgeSeconds(st.ageMinutes) : null;
   const ch5 =
-    st.fiveMinChangePct != null ? `${st.fiveMinChangePct > 0 ? '+' : ''}${st.fiveMinChangePct.toFixed(2)}%` : null;
+    st.fiveMinChangeIsInfinity === true
+      ? '+∞%'
+      : st.fiveMinChangePct != null
+        ? `${st.fiveMinChangePct > 0 ? '+' : ''}${st.fiveMinChangePct.toFixed(2)}%`
+        : null;
   const tx =
-    st.txBuys != null || st.txSells != null ? `B ${st.txBuys ?? '—'}  S ${st.txSells ?? '—'}` : null;
+    st.txBuys != null || st.txSells != null
+      ? `🅑 ${formatTxCountCompact(st.txBuys)}  Ⓢ ${formatTxCountCompact(st.txSells)}`
+      : null;
 
   const callerLinked =
     variant === 'user' && callerLabel && discordUserId && /^\d{17,22}$/.test(discordUserId)
@@ -167,10 +184,23 @@ function formatFaSolTelegramHtml(parsed, contractAddress, opts = {}) {
         `Bots  ${h.botsCount}${h.botsPct != null ? ` (${h.botsPct.toFixed(2)}%)` : ''}`
       );
     }
+    if (h.freshCount != null) {
+      rows.push(
+        `Fresh  ${h.freshCount}${h.freshPct != null ? ` (${h.freshPct.toFixed(2)}%)` : ''}`
+      );
+    }
+    if (h.bundlersCount != null) {
+      rows.push(
+        `Bundlers  ${h.bundlersCount}${h.bundlersPct != null ? ` (${h.bundlersPct.toFixed(2)}%)` : ''}`
+      );
+    }
     if (h.snipersCount != null) {
       rows.push(
         `Snipers  ${h.snipersCount}${h.snipersPct != null ? ` (${h.snipersPct.toFixed(2)}%)` : ''}`
       );
+    }
+    if (h.devHoldPct != null && Number.isFinite(Number(h.devHoldPct))) {
+      rows.push(`Dev H  ${Number(h.devHoldPct).toFixed(2)}%`);
     }
     if (!rows.length) return null;
     const body = rows
@@ -183,6 +213,7 @@ function formatFaSolTelegramHtml(parsed, contractAddress, opts = {}) {
     const parts = [];
     if (sec.lpPct != null) parts.push(`LP ${sec.lpPct.toFixed(2)}%`);
     if (sec.dexUnpaid === true) parts.push('DEX Unpaid');
+    else if (sec.dexPaid === true) parts.push('DEX Paid');
     if (sec.taxPct != null) parts.push(`Tax ${sec.taxPct.toFixed(2)}%`);
     return parts.length ? `🛡️ <b>Security</b>\n<code>${escapeHtml(parts.join(' · '))}</code>` : null;
   })();

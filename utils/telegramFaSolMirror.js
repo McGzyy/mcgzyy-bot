@@ -19,6 +19,9 @@
  *     same getUpdates loop resolves `requestCaAnalyzerFaSolEnrichment()` (often `-100…` format).
  *   TELEGRAM_CA_ANALYZER_TOPIC_ID — optional forum topic id in that channel
  *
+ * `parseFaSolPost()` is the single canonical parse for FaSol Telegram cards; the same object is attached as
+ * `scan.__faSolParsed` for Discord→TG user calls, bot-call mirrors, outside ingest, and the dashboard CA Analyzer.
+ *
  * Flow: FaSol group → generateRealScan → Discord #bot-calls (full embed) → TG bot-call line if CHANNEL_ID set.
  *
  * McGBot Telegram: BotFather → Group privacy OFF so the bot receives all messages in the group.
@@ -238,6 +241,27 @@ function parseUsdLabeled(lines, labelRe) {
   return null;
 }
 
+/**
+ * FaSol TX lines use ASCII B/S or circled / negative-circled letters, e.g.
+ * `TXs: 🅑 1.32K Ⓢ 1.12K` (U+1F151, U+24C8) or `B 1.32K · S 1.12K`.
+ * @returns {{ buys: number|null, sells: number|null }}
+ */
+function parseTxBuysSellsFromFragment(fragment) {
+  const text = String(fragment ?? '').trim();
+  if (!text) return { buys: null, sells: null };
+  // FaSol: ASCII B/S, circled B (U+24B7), negative circled B (U+1F151 = \uD83C\uDD51), circled S (U+24C8)
+  const buyRe =
+    /(?:^|[\s·•|])(?:\uD83C\uDD51|\u24B7|B)\s*((?:\$)?\s*[0-9]+(?:\.[0-9]+)?\s*[kKmMbB]?)/iu;
+  const sellRe = /(?:^|[\s·•|])(?:\u24C8|S)\s*((?:\$)?\s*[0-9]+(?:\.[0-9]+)?\s*[kKmMbB]?)/iu;
+  const pick = (re) => {
+    const m = text.match(re);
+    if (!m || !m[1]) return null;
+    const n = parseUsdLike(m[1]);
+    return Number.isFinite(n) ? Math.round(n) : null;
+  };
+  return { buys: pick(buyRe), sells: pick(sellRe) };
+}
+
 function parseFaSolPost(message) {
   const text = [message?.text, message?.caption].filter(Boolean).join('\n');
   const lines = String(text || '')
@@ -283,15 +307,15 @@ function parseFaSolPost(message) {
   }
   const vol = parseUsdLike(getAfter(['Vol:', 'Vol']));
 
-  const txLine = getAfter(['TXs:', 'TXS:', 'Txs:', 'TX:']);
-  const parseTxCountSegment = (letter) => {
-    const seg = String(txLine ?? '').match(new RegExp(`\\b${letter}\\s*((?:\\$)?[0-9]+(?:\\.[0-9]+)?\\s*[kKmMbB]?)`, 'i'));
-    if (!seg || !seg[1]) return null;
-    const n = parseUsdLike(seg[1]);
-    return Number.isFinite(n) ? Math.round(n) : null;
-  };
-  const b = parseTxCountSegment('B');
-  const s = parseTxCountSegment('S');
+  let txTail = getAfter(['TXs:', 'TXS:', 'Txs:', 'TX:']);
+  if (!txTail) {
+    const txRow = lines.find((ln) => /\btxs?\s*:/i.test(ln));
+    if (txRow) {
+      const m = txRow.match(/\btxs?\s*:?\s*(.+)$/i);
+      txTail = m ? String(m[1]).trim() : '';
+    }
+  }
+  const { buys: b, sells: s } = parseTxBuysSellsFromFragment(txTail);
 
   const fiveMinLine =
     lines.find((ln) => /\b5m\b/i.test(ln)) ||
@@ -303,7 +327,11 @@ function parseFaSolPost(message) {
     fiveMinChangeIsInfinity = true;
   }
   const volBit = (fiveMinLine.match(/\bVol\s*([^·•]+?)(?=\s*[·•]|\s+Makers\b|$)/i) || [])[1];
-  const fiveMinVol = parseUsdLike(String(volBit ?? '').trim());
+  let fiveMinVol = parseUsdLike(String(volBit ?? '').trim());
+  if (fiveMinVol == null && fiveMinLine) {
+    const vm = fiveMinLine.match(/\bVol\s*(\$?\s*[0-9]+(?:\.[0-9]+)?\s*[kKmMbB]?)/i);
+    if (vm && vm[1]) fiveMinVol = parseUsdLike(vm[1].trim());
+  }
   const makers = (() => {
     const m = fiveMinLine.match(/\bMakers\s*([0-9]+)\b/i);
     return m ? Number(m[1]) : null;
@@ -332,6 +360,29 @@ function parseFaSolPost(message) {
     return m ? Number(m[1]) : null;
   })();
   const snipersPct = parsePercentLike(snipersLine);
+
+  const freshLine = lines.find((ln) => /\bFresh\s*:/i.test(ln)) || '';
+  const freshM = freshLine.match(/\bFresh\s*:?\s*([0-9]+)(?:\s*[·•]\s*([0-9.]+)%)?/i);
+  const freshCount = freshM && freshM[1] ? Number(freshM[1]) : null;
+  const freshPct =
+    freshM && freshM[2] != null && freshM[2] !== '' ? parsePercentLike(`${freshM[2]}%`) : null;
+
+  const bundlersLine = lines.find((ln) => /\bBundlers\s*:/i.test(ln)) || '';
+  const bundM = bundlersLine.match(/\bBundlers\s*:?\s*([0-9]+)(?:\s*[·•]\s*([0-9.]+)%)?/i);
+  const bundlersCount = bundM && bundM[1] ? Number(bundM[1]) : null;
+  const bundlersPct =
+    bundM && bundM[2] != null && bundM[2] !== '' ? parsePercentLike(`${bundM[2]}%`) : null;
+
+  let devHoldPct = null;
+  for (const ln of lines) {
+    const d =
+      ln.match(/\bDev\s*H\s*(?:\([^)]*\))?\s*:?\s*([0-9.]+%)/i) ||
+      ln.match(/\bDev\s+Holding\s*:?\s*([0-9.]+%)/i);
+    if (d && d[1]) {
+      devHoldPct = parsePercentLike(d[1]);
+      break;
+    }
+  }
 
   const lpLine = lines.find((ln) => /\bLP\s*:/i.test(ln)) || '';
   const lpPct = (() => {
@@ -375,7 +426,12 @@ function parseFaSolPost(message) {
       botsCount,
       botsPct,
       snipersCount,
-      snipersPct
+      snipersPct,
+      freshCount,
+      freshPct,
+      bundlersCount,
+      bundlersPct,
+      devHoldPct
     },
     security: {
       lpPct,

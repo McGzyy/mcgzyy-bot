@@ -11,7 +11,7 @@ function getSupabaseServiceRole() {
 
 /**
  * After FaSol replies in the outside ingest Telegram group, persist a row for the dashboard tape.
- * @param {{ sourceId: string; mint: string; tweetId?: string | null; xPostUrl?: string | null }} opts
+ * @param {{ sourceId: string; mint: string; tweetId?: string | null; xPostUrl?: string | null; mint_resolution?: string | null; signal_ticker?: string | null }} opts
  */
 async function insertOutsideCallRow(opts) {
   const sb = getSupabaseServiceRole();
@@ -23,6 +23,14 @@ async function insertOutsideCallRow(opts) {
   const mint = String(opts.mint || '').trim();
   const tweetId = opts.tweetId != null && String(opts.tweetId).trim() ? String(opts.tweetId).trim() : null;
   const xPostUrl = opts.xPostUrl != null && String(opts.xPostUrl).trim() ? String(opts.xPostUrl).trim() : null;
+  const mint_resolution =
+    opts.mint_resolution != null && String(opts.mint_resolution).trim()
+      ? String(opts.mint_resolution).trim().toLowerCase()
+      : null;
+  const signal_ticker =
+    opts.signal_ticker != null && String(opts.signal_ticker).trim()
+      ? String(opts.signal_ticker).trim().toUpperCase()
+      : null;
 
   if (!sourceId || !mint) {
     return { ok: false, error: 'missing_source_or_mint' };
@@ -57,6 +65,8 @@ async function insertOutsideCallRow(opts) {
     primary_call_id: isEcho ? primary.id : null,
     tweet_id: tweetId,
     x_post_url: xPostUrl,
+    mint_resolution,
+    signal_ticker,
     posted_at: new Date().toISOString(),
     created_at: new Date().toISOString()
   };

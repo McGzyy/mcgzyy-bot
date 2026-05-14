@@ -52,7 +52,7 @@ const MINT_RE = /\b([1-9A-HJ-NP-Za-km-z]{32,44})(?:pump)?\b/g;
 const pendingEnrichment = new Map(); // mintLower -> [{ resolve, reject, expiresAt }]
 
 /** Outside ingest: `sendMessage` id in the outside group → wait for FaSol `reply_to_message` + insert `outside_calls`. */
-const pendingOutsideByTriggerId = new Map(); // trigger message_id -> { sourceId, mint, tweetId, xPostUrl, resolve, reject, timer }
+const pendingOutsideByTriggerId = new Map(); // trigger message_id -> { sourceId, mint, tweetId, xPostUrl, mintResolution, signalTicker, resolve, reject, timer }
 
 function truthyEnv(v) {
   const s = String(v ?? '')
@@ -715,7 +715,7 @@ async function requestCaAnalyzerFaSolEnrichment(contractAddress, opts = {}) {
  * Call this from your X / outside-source worker when an allow-listed handle posts a mint.
  *
  * @param {string} contractAddress
- * @param {{ sourceId: string; tweetId?: string | null; xPostUrl?: string | null; timeoutMs?: number }} opts
+ * @param {{ sourceId: string; tweetId?: string | null; xPostUrl?: string | null; timeoutMs?: number; mintResolution?: 'ca_in_post'|'curated_map'|'dex_search'; signalTicker?: string | null }} opts
  */
 async function requestFaSolEnrichmentOutside(contractAddress, opts = {}) {
   const rawCa = String(contractAddress || '').trim();
@@ -784,12 +784,24 @@ async function requestFaSolEnrichmentOutside(contractAddress, opts = {}) {
   const xPostUrl =
     opts.xPostUrl != null && String(opts.xPostUrl).trim() ? String(opts.xPostUrl).trim() : null;
 
+  const mintResolutionRaw = String(opts.mintResolution || 'ca_in_post').trim().toLowerCase();
+  const mintResolution =
+    mintResolutionRaw === 'curated_map' || mintResolutionRaw === 'dex_search'
+      ? mintResolutionRaw
+      : 'ca_in_post';
+  const signalTicker =
+    opts.signalTicker != null && String(opts.signalTicker).trim()
+      ? String(opts.signalTicker).trim().toUpperCase()
+      : null;
+
   return new Promise((resolve, reject) => {
     const row = {
       sourceId,
       mint: core,
       tweetId,
       xPostUrl,
+      mintResolution,
+      signalTicker,
       resolve,
       reject,
       timer: null
@@ -858,7 +870,9 @@ async function handleOutsideFaSolReply(message) {
     sourceId: pending.sourceId,
     mint: pending.mint,
     tweetId: pending.tweetId,
-    xPostUrl: pending.xPostUrl
+    xPostUrl: pending.xPostUrl,
+    mint_resolution: pending.mintResolution,
+    signal_ticker: pending.signalTicker
   });
 
   if (pending.timer) {

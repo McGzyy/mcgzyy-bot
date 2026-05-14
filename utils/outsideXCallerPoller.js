@@ -1,8 +1,9 @@
 'use strict';
 
 /**
- * Polls X for new posts from `outside_x_sources` (status=active), extracts a Solana mint,
- * then `requestFaSolEnrichmentOutside` → Telegram outside group → FaSol reply → `outside_calls` insert.
+ * Polls X for new posts from `outside_x_sources` (status=active), extracts a Solana mint (or resolves $TICKER
+ * via `outsideTickerResolve.js`), then `requestFaSolEnrichmentOutside` → Telegram outside group → FaSol reply →
+ * `outside_calls` insert.
  *
  * Runs in the **Discord bot Node process** (same host as `startTelegramFaSolMirror` long-poll).
  * Setting env only on Vercel does **not** start this; the bot needs the env vars below.
@@ -12,12 +13,13 @@
  *   OUTSIDE_X_CALLS_POLL_INTERVAL_MS — default 45000
  *   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
  *   X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET (same as xPoster)
- *   TELEGRAM_FASOL_OUTSIDE_CHAT_ID (+ bot token, etc.) for FaSol path
- */
+ *   OUTSIDE_TICKER_DEX_SEARCH_DISABLED — set to 1 to only use curated $TICKER map (no Dexscreener search)
+ *   OUTSIDE_TICKER_MIN_LIQ_USD — min pair liquidity for dex_search (default 25000)
 
 const { createClient } = require('@supabase/supabase-js');
 const { oauth1aGet } = require('./xPoster');
 const { requestFaSolEnrichmentOutside } = require('./telegramFaSolMirror');
+const { resolveTickerToMintSolana } = require('./outsideTickerResolve');
 
 const X_API_BASE = 'https://api.x.com/2';
 
@@ -219,8 +221,19 @@ async function pollOneSource(row) {
   tweets.sort((a, b) => compareTweetIdAsc(a.id, b.id));
 
   for (const tw of tweets) {
-    const mint = extractFirstMintFromText(tw.text);
     const xUrl = `https://x.com/${handle}/status/${tw.id}`;
+    let mint = extractFirstMintFromText(tw.text);
+    let mintResolution = 'ca_in_post';
+    let signalTicker = null;
+
+    if (!mint) {
+      const tick = await resolveTickerToMintSolana(tw.text);
+      if (tick && tick.mint) {
+        mint = tick.mint;
+        mintResolution = tick.resolution;
+        signalTicker = tick.tickerNormalized;
+      }
+    }
 
     if (!mint) {
       await updateSourcePollCursor(sourceId, tw.id);
@@ -228,12 +241,18 @@ async function pollOneSource(row) {
     }
 
     try {
-      console.log(`[OutsideXPoll] @${handle} tweet ${tw.id} → mint ${mint.slice(0, 8)}… → FaSol outside ingest`);
+      console.log(
+        `[OutsideXPoll] @${handle} tweet ${tw.id} → mint ${mint.slice(0, 8)}…` +
+          (signalTicker ? ` ($${signalTicker} via ${mintResolution})` : '') +
+          ' → FaSol outside ingest'
+      );
       await requestFaSolEnrichmentOutside(mint, {
         sourceId,
         tweetId: tw.id,
         xPostUrl: xUrl,
-        timeoutMs: Number(process.env.TELEGRAM_FASOL_ENRICH_TIMEOUT_MS || 28_000)
+        timeoutMs: Number(process.env.TELEGRAM_FASOL_ENRICH_TIMEOUT_MS || 28_000),
+        mintResolution,
+        signalTicker
       });
     } catch (e) {
       const msg = e?.message || String(e);
@@ -307,7 +326,7 @@ function startOutsideXCallerPoller() {
   }, intervalMs);
 
   console.log(
-    `[OutsideXPoll] Started — every ${intervalMs}ms, active outside_x_sources → X → FaSol → outside_calls`
+    `[OutsideXPoll] Started — every ${intervalMs}ms, active outside_x_sources → X (mint or $ticker) → FaSol → outside_calls`
   );
 
   return () => clearInterval(id);

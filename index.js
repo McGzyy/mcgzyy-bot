@@ -2060,15 +2060,10 @@ client.once('clientReady', async () => {
   }
 
   const firstGuild = getPrimaryGuildForBotAlerts(client);
+  const botChannel = firstGuild ? getBotCallsChannel(firstGuild) : null;
+  const userChannel = firstGuild ? getUserCallsChannel(firstGuild) || botChannel : null;
 
-  if (!firstGuild) {
-    console.log('❌ No guild found for monitoring alerts.');
-    return;
-  }
-
-  const botChannel = getBotCallsChannel(firstGuild);
-  const userChannel = getUserCallsChannel(firstGuild) || botChannel;
-
+  // Outside X ingest + FaSol Telegram listener are independent of Discord guild/channel discovery.
   try {
     const { startTelegramFaSolMirror } = require('./utils/telegramFaSolMirror');
     startTelegramFaSolMirror({ discordBotCallsChannel: botChannel ?? null });
@@ -2081,6 +2076,11 @@ client.once('clientReady', async () => {
     startOutsideXCallerPoller();
   } catch (e) {
     console.error('[OutsideXPoll] Startup failed:', e?.message || e);
+  }
+
+  if (!firstGuild) {
+    console.log('❌ No guild found for monitoring alerts.');
+    return;
   }
 
   if (!botChannel) {

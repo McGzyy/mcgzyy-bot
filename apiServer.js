@@ -196,11 +196,28 @@ function startReferralApiServer(discordClient = null, opts = {}) {
       scannerEnabled = true;
     }
 
+    let outsideXCallsPoll = null;
+    try {
+      const { getOutsideXPollStatus } = require('./utils/outsideXCallerPoller');
+      outsideXCallsPoll = getOutsideXPollStatus();
+    } catch (e) {
+      outsideXCallsPoll = {
+        status: 'unknown',
+        disabledByEnv: null,
+        readyToRun: null,
+        running: null,
+        pollIntervalMs: null,
+        blockers: [],
+        hint: e && e.message ? String(e.message) : 'outside_poll_status_unavailable'
+      };
+    }
+
     res.json({
       ok: true,
       scannerEnabled,
       discordReady: Boolean(discordClient && discordClient.isReady && discordClient.isReady()),
       processUptimeSec: Math.floor(process.uptime()),
+      outsideXCallsPoll,
       endpoints: {
         modQueueGet: true,
         modStatsGet: true,

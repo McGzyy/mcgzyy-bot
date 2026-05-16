@@ -15,6 +15,7 @@
  *   X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET (same as xPoster)
  *   OUTSIDE_TICKER_DEX_SEARCH_DISABLED — set to 1 to only use curated $TICKER map (no Dexscreener search)
  *   OUTSIDE_TICKER_MIN_LIQ_USD — min pair liquidity for dex_search (default 25000)
+ */
 
 const { createClient } = require('@supabase/supabase-js');
 const { oauth1aGet } = require('./xPoster');
@@ -56,12 +57,111 @@ function hasXReadCreds() {
   );
 }
 
+function hasTelegramBotToken() {
+  return Boolean(String(process.env.TELEGRAM_BOT_TOKEN ?? '').trim());
+}
+
 function shouldStartPoller() {
   if (pollDisabled()) return false;
   if (!getFaSolOutsideIngestChatIdRaw()) return false;
+  if (!hasTelegramBotToken()) return false;
   if (!getSupabaseServiceRole()) return false;
   if (!hasXReadCreds()) return false;
   return true;
+}
+
+/** Set when `startOutsideXCallerPoller()` installed its interval (cleared on stop callback). */
+let outsidePollIntervalActive = false;
+
+function resolvePollIntervalMs() {
+  return Math.max(
+    15_000,
+    Math.min(120_000, Number(process.env.OUTSIDE_X_CALLS_POLL_INTERVAL_MS || 45_000))
+  );
+}
+
+/**
+ * Missing env on the bot host (empty when disabled-by-env or fully configured).
+ * @returns {string[]}
+ */
+function getOutsideXPollBlockers() {
+  if (pollDisabled()) return [];
+  const blockers = [];
+  if (!hasTelegramBotToken()) blockers.push('TELEGRAM_BOT_TOKEN');
+  if (!getFaSolOutsideIngestChatIdRaw()) blockers.push('TELEGRAM_FASOL_OUTSIDE_CHAT_ID');
+  if (!getSupabaseServiceRole()) blockers.push('SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY');
+  if (!hasXReadCreds()) blockers.push('X_API_KEY + X_ACCESS_TOKEN (+ secrets)');
+  return blockers;
+}
+
+/**
+ * Snapshot for GET /health and admin dashboard (bot process env only).
+ * @returns {{
+ *   status: 'disabled' | 'running' | 'idle',
+ *   disabledByEnv: boolean,
+ *   readyToRun: boolean,
+ *   running: boolean,
+ *   pollIntervalMs: number,
+ *   blockers: string[],
+ *   hint: string
+ * }}
+ */
+function getOutsideXPollStatus() {
+  const disabledByEnv = pollDisabled();
+  const blockers = getOutsideXPollBlockers();
+  const readyToRun = !disabledByEnv && blockers.length === 0;
+  const pollIntervalMs = resolvePollIntervalMs();
+  const running = Boolean(outsidePollIntervalActive && readyToRun);
+
+  if (disabledByEnv) {
+    return {
+      status: 'disabled',
+      disabledByEnv: true,
+      readyToRun: false,
+      running: false,
+      pollIntervalMs,
+      blockers: [],
+      hint:
+        'OUTSIDE_X_CALLS_POLL_DISABLED is set on the bot host. X timeline reads are off; milestone and D/W/M posts still use X write credits when enabled.'
+    };
+  }
+
+  if (running) {
+    return {
+      status: 'running',
+      disabledByEnv: false,
+      readyToRun: true,
+      running: true,
+      pollIntervalMs,
+      blockers: [],
+      hint: `Polling active monitors every ${Math.round(pollIntervalMs / 1000)}s (X API read credits).`
+    };
+  }
+
+  if (readyToRun) {
+    return {
+      status: 'idle',
+      disabledByEnv: false,
+      readyToRun: true,
+      running: false,
+      pollIntervalMs,
+      blockers: [],
+      hint: 'Env is configured but the poller is not running — restart the Discord bot (index.js) on the bot host.'
+    };
+  }
+
+  return {
+    status: 'idle',
+    disabledByEnv: false,
+    readyToRun: false,
+    running: false,
+    pollIntervalMs,
+    blockers,
+    hint:
+      blockers.length > 0
+        ? `Missing on bot host: ${blockers.join('; ')}.`
+        : 'Outside X poll is idle.'
+  };
 }
 
 function extractFirstMintFromText(text) {
@@ -125,7 +225,13 @@ async function resolveTwitterUserId(handleNormalized) {
   } catch (e) {
     const st = e?.response?.status;
     const body = e?.response?.data;
-    console.error(`[OutsideXPoll] users/by/username @${key} failed`, st, body || e?.message || e);
+    if (st === 402) {
+      console.error(
+        '[OutsideXPoll] X API credits depleted (402 CreditsDepleted). Outside polling cannot resolve handles until credits are restored on the X developer account.'
+      );
+    } else {
+      console.error(`[OutsideXPoll] users/by/username @${key} failed`, st, body || e?.message || e);
+    }
     return null;
   }
 }
@@ -296,18 +402,16 @@ async function pollAllSourcesOnce() {
  * @returns {null | (() => void)}
  */
 function startOutsideXCallerPoller() {
+  outsidePollIntervalActive = false;
   if (!shouldStartPoller()) {
     console.log(
-      '[OutsideXPoll] Idle — need TELEGRAM_FASOL_OUTSIDE_CHAT_ID + Supabase service role + X creds; ' +
+      '[OutsideXPoll] Idle — need TELEGRAM_BOT_TOKEN + TELEGRAM_FASOL_OUTSIDE_CHAT_ID + Supabase service role + X creds; ' +
         'set OUTSIDE_X_CALLS_POLL_DISABLED=1 to suppress.'
     );
     return null;
   }
 
-  const intervalMs = Math.max(
-    15_000,
-    Math.min(120_000, Number(process.env.OUTSIDE_X_CALLS_POLL_INTERVAL_MS || 45_000))
-  );
+  const intervalMs = resolvePollIntervalMs();
 
   let busy = false;
   const tick = async () => {
@@ -325,11 +429,19 @@ function startOutsideXCallerPoller() {
     void tick();
   }, intervalMs);
 
+  outsidePollIntervalActive = true;
   console.log(
     `[OutsideXPoll] Started — every ${intervalMs}ms, active outside_x_sources → X (mint or $ticker) → FaSol → outside_calls`
   );
 
-  return () => clearInterval(id);
+  return () => {
+    outsidePollIntervalActive = false;
+    clearInterval(id);
+  };
 }
 
-module.exports = { startOutsideXCallerPoller, pollAllSourcesOnce };
+module.exports = {
+  startOutsideXCallerPoller,
+  pollAllSourcesOnce,
+  getOutsideXPollStatus
+};

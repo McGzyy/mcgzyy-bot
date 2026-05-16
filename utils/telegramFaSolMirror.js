@@ -823,17 +823,6 @@ async function handleOutsideFaSolReply(message) {
     return;
   }
 
-  const uname = senderUsernameFromMessage(message);
-  const senderChatId =
-    message?.sender_chat?.id != null ? Number(message.sender_chat.id) : null;
-  const isChannelPostFromIngest =
-    senderChatId != null && Number.isFinite(senderChatId) && senderChatId === outsideChatId;
-
-  const faSolUsers = faSolAllowedUsernames();
-  if (!isChannelPostFromIngest) {
-    if (!uname || !faSolUsers.has(uname)) return;
-  }
-
   const replyToId = message.reply_to_message?.message_id;
   if (replyToId == null) {
     return;
@@ -842,6 +831,23 @@ async function handleOutsideFaSolReply(message) {
   const pending = pendingOutsideByTriggerId.get(replyToId);
   if (!pending) {
     return;
+  }
+
+  // IMPORTANT: We key off `reply_to_message.message_id` first.
+  // This prevents silent drops when FaSol’s username changes; any reply we can
+  // match to a pending trigger is (by construction) related to our ingest flow.
+  const uname = senderUsernameFromMessage(message);
+  const senderChatId =
+    message?.sender_chat?.id != null ? Number(message.sender_chat.id) : null;
+  const isChannelPostFromIngest =
+    senderChatId != null && Number.isFinite(senderChatId) && senderChatId === outsideChatId;
+  const faSolUsers = faSolAllowedUsernames();
+  if (!isChannelPostFromIngest) {
+    if (!uname || !faSolUsers.has(uname)) {
+      console.warn(
+        `[OutsideCall/FaSol] FaSol sender mismatch (still accepting pending reply). replyToId=${replyToId} uname=${uname || '(empty)'} source=${pending.sourceId} mint=${pending.mint.slice(0, 8)}…`
+      );
+    }
   }
 
   let parsedMaybe;

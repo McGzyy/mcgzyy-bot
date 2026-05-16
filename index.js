@@ -199,15 +199,23 @@ const DEV_EDIT_SESSION_TTL_MS = 10 * 60 * 1000;
 // Intended flow:
 // 1) New member joins → `assignUnverifiedRoleOnJoin` adds DISCORD_UNVERIFIED_ROLE_ID (optional env).
 // 2) They use #verification (name configurable) → Verify button → simple math modal.
-// 3) Correct answer → add HUMAN_VERIFIED_ROLE_ID (default snowflake below), then remove unverified if set.
+// 3) Correct answer → add Unpaid role (verified, not subscribed), remove Unverified.
 const HUMAN_VERIFY_CHANNEL_NAME = (() => {
   const t = String(process.env.HUMAN_VERIFY_CHANNEL_NAME ?? '').trim();
   return t || 'verification';
 })();
+/** Legacy name; prefer DISCORD_UNPAID_ROLE_ID. Verified-but-not-paid members get this role. */
 const HUMAN_VERIFIED_ROLE_ID = (() => {
   const t = String(process.env.HUMAN_VERIFIED_ROLE_ID ?? '').trim();
   return t || '1482446226027843757';
 })();
+const UNPAID_ROLE_ID = String(
+  process.env.DISCORD_UNPAID_ROLE_ID ?? process.env.HUMAN_VERIFIED_ROLE_ID ?? ''
+).trim();
+const TRENCHER_ROLE_ID = String(
+  process.env.DISCORD_TRENCHER_ROLE_ID ?? process.env.DISCORD_PREMIUM_ROLE_ID ?? ''
+).trim();
+const PRO_MEMBER_ROLE_ID = String(process.env.DISCORD_PRO_ROLE_ID ?? '').trim();
 /** Snowflake; optional — assign to new non-bot members on join (see `assignUnverifiedRoleOnJoin`). */
 const UNVERIFIED_ROLE_ID = String(process.env.DISCORD_UNVERIFIED_ROLE_ID ?? '').trim();
 const HUMAN_VERIFY_TTL_MS = 5 * 60 * 1000;
@@ -254,7 +262,9 @@ async function assignUnverifiedRoleOnJoin(member) {
     if (primaryGuild && member.guild.id !== primaryGuild) return;
 
     if (member.roles.cache.has(UNVERIFIED_ROLE_ID)) return;
-    if (member.roles.cache.has(HUMAN_VERIFIED_ROLE_ID)) return;
+    if (UNPAID_ROLE_ID && member.roles.cache.has(UNPAID_ROLE_ID)) return;
+    if (TRENCHER_ROLE_ID && member.roles.cache.has(TRENCHER_ROLE_ID)) return;
+    if (PRO_MEMBER_ROLE_ID && member.roles.cache.has(PRO_MEMBER_ROLE_ID)) return;
 
     await member.roles.add(UNVERIFIED_ROLE_ID, 'New member — default unverified');
   } catch (e) {
@@ -2221,7 +2231,10 @@ client.on('interactionCreate', async (interaction) => {
           return;
         }
 
-        if (member.roles?.cache?.has?.(HUMAN_VERIFIED_ROLE_ID)) {
+        if (
+          (UNPAID_ROLE_ID && member.roles?.cache?.has?.(UNPAID_ROLE_ID)) ||
+          member.roles?.cache?.has?.(HUMAN_VERIFIED_ROLE_ID)
+        ) {
           await interaction.reply({ content: '✅ You’re already verified.', ephemeral: true });
           return;
         }
@@ -2626,7 +2639,10 @@ let updated = null;
           return;
         }
 
-        if (member.roles?.cache?.has?.(HUMAN_VERIFIED_ROLE_ID)) {
+        if (
+          (UNPAID_ROLE_ID && member.roles?.cache?.has?.(UNPAID_ROLE_ID)) ||
+          member.roles?.cache?.has?.(HUMAN_VERIFIED_ROLE_ID)
+        ) {
           await interaction.reply({ content: '✅ You’re already verified.', ephemeral: true });
           return;
         }
@@ -2670,13 +2686,23 @@ let updated = null;
           return;
         }
 
+        const paidRoleId = UNPAID_ROLE_ID || HUMAN_VERIFIED_ROLE_ID;
+        if (!paidRoleId) {
+          await interaction.reply({
+            content:
+              '❌ Unpaid member role is not configured on the bot (`DISCORD_UNPAID_ROLE_ID`). Please ping a moderator.',
+            ephemeral: true
+          });
+          return;
+        }
+
         try {
-          await member.roles.add(HUMAN_VERIFIED_ROLE_ID);
+          await member.roles.add(paidRoleId, 'Human verification passed — unpaid member');
         } catch (e) {
           console.error('[HumanVerify] roles.add failed:', e?.message || e);
           await interaction.reply({
             content:
-              '❌ I could not assign your access role. Please ping a moderator (bot may be missing permissions).',
+              '❌ I could not assign your member role. Please ping a moderator (bot may be missing permissions).',
             ephemeral: true
           });
           return;
@@ -2696,15 +2722,17 @@ let updated = null;
           embeds: [
             new EmbedBuilder()
               .setTitle('✅ Verified')
-              .setDescription('Welcome in. You can head back to the dashboard now.')
+              .setDescription(
+                'You are verified in the server. Subscribe on the site to unlock the dashboard (Basic → Trencher, Pro → Pro role).'
+              )
               .setColor(0x22c55e)
           ],
           components: [
             new ActionRowBuilder().addComponents(
               new ButtonBuilder()
                 .setStyle(ButtonStyle.Link)
-                .setLabel('Go to Dashboard')
-                .setURL(`${resolveDashboardUrl()}/`)
+                .setLabel('View membership')
+                .setURL(`${resolveDashboardUrl()}/membership`)
             )
           ],
           ephemeral: true

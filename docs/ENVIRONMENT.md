@@ -172,11 +172,23 @@ Loaded via **`dotenv`** from **`.env`** in the project root (unless the host inj
 
 | Variable | Purpose |
 |----------|---------|
-| **`DISCORD_UNVERIFIED_ROLE_ID`** | Discord role snowflake assigned automatically to **non-bot** members on `guildMemberAdd`. Skipped if the member already has this role or the verified role. If **`DISCORD_GUILD_ID`** is set, assignment only runs in that guild. Requires the bot role **above** this role in Server Settings → Roles and **Manage Roles** permission. |
-| **`HUMAN_VERIFIED_ROLE_ID`** | Snowflake added when the user passes the **Verify** math check in the verification channel (default `1482446226027843757` if unset). |
+| **`DISCORD_UNVERIFIED_ROLE_ID`** | Discord role snowflake assigned automatically to **non-bot** members on `guildMemberAdd`. Skipped if the member already has Unpaid, Trencher, or Pro. If **`DISCORD_GUILD_ID`** is set, assignment only runs in that guild. Requires the bot role **above** this role in Server Settings → Roles and **Manage Roles** permission. |
+| **`DISCORD_UNPAID_ROLE_ID`** | Role after human verify (verified, not subscribed). **No dashboard access.** Falls back to **`HUMAN_VERIFIED_ROLE_ID`** if unset. |
+| **`HUMAN_VERIFIED_ROLE_ID`** | Legacy alias for Unpaid (default `1482446226027843757` if unset). Prefer **`DISCORD_UNPAID_ROLE_ID`**. |
 | **`HUMAN_VERIFY_CHANNEL_NAME`** | Text channel **name** where the bot posts the verify embed (default `verification`). Must match your channel name exactly. |
 
-After a successful verify, the bot adds **`HUMAN_VERIFIED_ROLE_ID`** and removes **`DISCORD_UNVERIFIED_ROLE_ID`** when that env is set, so members do not keep both roles.
+After verify, the bot adds **Unpaid** and removes **Unverified**.
+
+**Dashboard (`mcgbot-dashboard`) — membership ladder (same guild):**
+
+| Variable | Purpose |
+|----------|---------|
+| **`DISCORD_TRENCHER_ROLE_ID`** | Basic paid members. Falls back to **`DISCORD_PREMIUM_ROLE_ID`**. |
+| **`DISCORD_PRO_ROLE_ID`** | Pro paid members. |
+| **`DISCORD_UNVERIFIED_ROLE_IDS`** | Optional comma list — deny dashboard if member has any (can include Unverified + Unpaid snowflakes). |
+| **`DISCORD_REQUIRED_MEMBER_ROLE_IDS`** | Optional legacy list — require at least one paid role. Prefer Trencher/Pro env vars above. |
+
+Payment (Stripe/SOL) calls **`syncMembershipDiscordRoles`**: active Basic → Trencher; active Pro → Pro; expired → Unpaid.
 
 ### 7.2 Required for owner-only commands
 

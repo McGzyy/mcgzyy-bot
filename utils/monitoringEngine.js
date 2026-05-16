@@ -41,6 +41,8 @@ let isRunning = false;
 /** When the main scanner is off, still push live MC / spot_multiple to Supabase for the dashboard. */
 let performanceMirrorInterval = null;
 let isPerformanceMirrorRunning = false;
+/** `#bot-calls` (or any guild text channel) used only for `queueApprovalReview` → `#mod-approvals` when scanner is off. */
+let mirrorApprovalRelayChannel = null;
 
 function sleepMonitoring(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -52,7 +54,8 @@ function sleepMonitoring(ms) {
  * =========================
  */
 
-// Discord alert ladder
+// Discord milestone embeds (#user-calls / #bot-calls) when the **scanner monitor** is running.
+// Not used for X or #mod-approvals — those use `approvalMilestoneService` (trigger + ladder in scanner settings).
 const DISCORD_MILESTONE_LEVELS = [
   { key: '2x', x: 2, threshold: 100 },
   { key: '4x', x: 4, threshold: 300 },
@@ -1136,9 +1139,13 @@ function stopMonitoring() {
  *
  * Env: PERFORMANCE_MIRROR_INTERVAL_MS (min 10_000), overrides opts.intervalMs when set.
  *
- * @param {{ intervalMs?: number }} [opts]
+ * @param {{ intervalMs?: number, botChannel?: import('discord.js').TextChannel | null }} [opts]
  */
 function startUserPerformanceSupabaseMirror(opts = {}) {
+  if (opts.botChannel && opts.botChannel.guild) {
+    mirrorApprovalRelayChannel = opts.botChannel;
+  }
+
   if (isPerformanceMirrorRunning) return;
 
   const fromOpts = Number(opts.intervalMs);
@@ -1154,8 +1161,8 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
 
   isPerformanceMirrorRunning = true;
   console.log(
-    `[PerformanceMirror] Supabase MC mirror (scanner off): live Dex quotes + idle ${intervalMs / 1000}s after each full pass — ` +
-      `tune PERFORMANCE_MIRROR_INTERVAL_MS`
+    `[PerformanceMirror] Scanner off: Dex MC → Supabase + idle ${intervalMs / 1000}s; ` +
+      `X approval ladder + approved milestones ${mirrorApprovalRelayChannel ? 'enabled (#bot-calls relay)' : 'DISABLED (missing bot channel)'}`
   );
 
   const tick = async () => {
@@ -1201,6 +1208,34 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
 
         const { queueUpdateUserCallPerformanceAth } = require('./callPerformanceSync');
         queueUpdateUserCallPerformanceAth(coin.contractAddress);
+
+        const relay = mirrorApprovalRelayChannel;
+        if (relay) {
+          const refreshedTrackedCall = getTrackedCall(coin.contractAddress) || persisted;
+          const athXForApproval = calculateCurrentX(firstMc, athMc);
+          const approvalCheck = shouldCreateApprovalRequest(refreshedTrackedCall, athXForApproval);
+          if (approvalCheck.shouldSend) {
+            const src = String(refreshedTrackedCall.callSourceType || '');
+            const envAuto = String(process.env.X_AUTO_APPROVE_USER_CALLS || '')
+              .trim()
+              .toLowerCase();
+            const autoUserX = envAuto === '1' || envAuto === 'true' || envAuto === 'yes';
+            if (autoUserX && src === 'user_call') {
+              applyUserCallAutoXApproval(
+                refreshedTrackedCall.contractAddress,
+                approvalCheck.triggerX
+              );
+            } else {
+              queueApprovalReview(relay, refreshedTrackedCall, scan, approvalCheck.triggerX);
+            }
+          }
+          const latestTrackedCall = getTrackedCall(coin.contractAddress) || refreshedTrackedCall;
+          await maybePublishApprovedMilestoneToX(
+            { ...latestTrackedCall, athMc, latestMarketCap: currentMc },
+            scan
+          );
+        }
+
         ok += 1;
       } catch (err) {
         const quiet429 = String(err?.message || '').includes('429');
@@ -1238,6 +1273,7 @@ function stopUserPerformanceSupabaseMirror() {
     performanceMirrorInterval = null;
   }
   isPerformanceMirrorRunning = false;
+  mirrorApprovalRelayChannel = null;
 }
 
 module.exports = {

@@ -1,5 +1,23 @@
 const { loadScannerSettings } = require('./scannerSettingsService');
 
+/**
+ * X + mod approval pipeline (scanner ON, scanner OFF / FaSol mirror, and manual ingest):
+ *
+ * 1) `approvalTriggerX` (scanner settings / `data/scannerSettings.json`)
+ *    Minimum ATH× (vs first-called MC) before **#mod-approvals** can be opened for a coin.
+ *
+ * 2) `approvalMilestoneLadder` (same settings file)
+ *    Sorted rungs ≥ trigger. Used for **both**:
+ *    - Which rung the next Discord approval card is for (`shouldCreateApprovalRequest` → highest
+ *      eligible rung not yet recorded in `approvalMilestonesTriggered`).
+ *    - Which ATH× rung to post on **X** after a mod approves (`getHighestEligibleApprovalMilestone` →
+ *      original post + reply milestones; `xPostedMilestones` tracks what already went out).
+ *
+ * FaSol / performance mirror uses the same functions once MC is refreshed — same two settings,
+ * same behavior as the full scanner for mod + X (Discord embed milestones are separate; see
+ * `DISCORD_MILESTONE_LEVELS` in `monitoringEngine.js`).
+ */
+
 const PRESET_APPROVAL_LADDER = [2, 3, 5, 8, 12, 20, 30, 50, 74, 100];
 
 function normalizeLadderRungs(list) {

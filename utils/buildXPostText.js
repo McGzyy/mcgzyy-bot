@@ -8,8 +8,8 @@
  * - Member calls: @handle when Supabase prefs allow tagging and multiple >= threshold; else generic credit
  */
 
-/** Short section rule (narrow X clients avoid wrapping a long bar). */
-const X_TERMINAL_SECTION_RULE = `${'\u2500'.repeat(4)} \u22C5 ${'\u2500'.repeat(4)}`;
+/** Classic digest / milestone section divider (full-width light rule on X). */
+const X_TERMINAL_SECTION_RULE = '\u2500'.repeat(32);
 
 function xTerminalSectionRule() {
   return X_TERMINAL_SECTION_RULE;
@@ -140,7 +140,7 @@ async function buildAttributionLine(trackedCall, multipleX) {
 
   const discordId = trackedCall.firstCallerDiscordId || trackedCall.firstCallerId;
   if (!discordId || String(discordId).toUpperCase() === 'AUTO_BOT') {
-    return 'Credit · McGBot Terminal community';
+    return 'Credit · McGBot Community';
   }
 
   const prefs = await fetchUserXPostingPrefs(discordId);
@@ -261,7 +261,7 @@ async function buildXPostText(trackedCall, opts = {}) {
       : '🔹 Member Call 🔹';
   const sub =
     athX > 0
-      ? `$${ticker} · ${athX.toFixed(2)}× ATH  ·  spot ${spotX.toFixed(2)}×`
+      ? `$${ticker} · ${athX.toFixed(2)}× ATH · spot ${spotX.toFixed(2)}×`
       : `$${ticker} · ${spotX.toFixed(2)}×`;
 
   const heroBlock = [channelKicker, headline].join('\n');

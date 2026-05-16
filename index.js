@@ -681,7 +681,14 @@ async function applyScannerEnabledFromDashboard(enabled) {
     stopMonitoring();
     stopAutoCallLoop();
     if (!want) {
-      startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
+      let relayBc = null;
+      try {
+        const fg = getPrimaryGuildForBotAlerts(client);
+        relayBc = fg ? getBotCallsChannel(fg) : null;
+      } catch (_) {
+        relayBc = null;
+      }
+      startUserPerformanceSupabaseMirror({ intervalMs: 30_000, botChannel: relayBc });
     }
     return { ok: true };
   }
@@ -707,7 +714,7 @@ async function applyScannerEnabledFromDashboard(enabled) {
   } else {
     stopMonitoring();
     stopAutoCallLoop();
-    startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
+    startUserPerformanceSupabaseMirror({ intervalMs: 30_000, botChannel });
   }
   return { ok: true };
 }
@@ -2100,7 +2107,7 @@ client.once('clientReady', async () => {
     console.log(
       '[Monitor] Scanner disabled — running Supabase performance mirror only (dashboard live X / MC).'
     );
-    startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
+    startUserPerformanceSupabaseMirror({ intervalMs: 30_000, botChannel });
   }
 
   await ensureHumanVerifyPrompt(firstGuild);
@@ -4188,7 +4195,8 @@ if (lowerContent === '!resetmonitor') {
 
   resetAllTrackedCalls();
 
-  startUserPerformanceSupabaseMirror({ intervalMs: 30_000 });
+  const resetMirrorBc = message.guild ? getBotCallsChannel(message.guild) : null;
+  startUserPerformanceSupabaseMirror({ intervalMs: 30_000, botChannel: resetMirrorBc });
 
   await replyText(
     message,

@@ -2723,7 +2723,7 @@ let updated = null;
             new EmbedBuilder()
               .setTitle('✅ Verified')
               .setDescription(
-                'You are verified in the server. Subscribe on the site to unlock the dashboard (Basic → Trencher, Pro → Pro role).'
+                'You\'re verified. Choose **Basic** or **Pro** on the membership page to unlock the dashboard.'
               )
               .setColor(0x22c55e)
           ],
@@ -2731,7 +2731,7 @@ let updated = null;
             new ActionRowBuilder().addComponents(
               new ButtonBuilder()
                 .setStyle(ButtonStyle.Link)
-                .setLabel('View membership')
+                .setLabel('Choose membership')
                 .setURL(`${resolveDashboardUrl()}/membership`)
             )
           ],

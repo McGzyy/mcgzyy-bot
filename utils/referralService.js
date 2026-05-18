@@ -416,28 +416,16 @@ async function handleGuildMemberAdd(member) {
           if (idx === -1) {
             console.log(`[Referral] Owner ${ownerId} missing from store — skip append`);
           } else {
-            users[idx].referrals.push({ userId: newId, joinedAt: Date.now() });
+            const joinedAt = Date.now();
+            users[idx].referrals.push({ userId: newId, joinedAt });
             await writeParsed({ users });
-            try {
-              const joinedAt = Date.now();
-              const supabase = getSupabase();
-              const { error: supabaseError } = await supabase.from('referrals').upsert(
-                {
-                  owner_discord_id: ownerId,
-                  referred_user_id: member.id,
-                  joined_at: joinedAt,
-                  attribution_source: 'discord_invite'
-                },
-                { onConflict: 'referred_user_id', ignoreDuplicates: true }
-              );
-              if (supabaseError) {
-                console.error('[Referral] Supabase upsert:', supabaseError.message || supabaseError);
-              }
-            } catch (supabaseErr) {
-              const msg =
-                supabaseErr instanceof Error ? supabaseErr.message : String(supabaseErr);
-              console.error('[Referral] Supabase insert:', msg);
-            }
+            await mirrorReferralRowToPostgres({
+              ownerDiscordId: ownerId,
+              referredUserId: newId,
+              joinedAt,
+              attributionSource: 'discord_invite',
+              ignoreDuplicates: true
+            });
             console.log(
               `[Referral] User ${joinerTag} joined using invite ${increasedCode} → credited to ${ownerTag}`
             );
@@ -473,6 +461,88 @@ function tryGetSupabase() {
   } catch (_) {
     return null;
   }
+}
+
+/**
+ * Mirror one attribution row to Postgres (no-op when Supabase env is missing).
+ * @param {{ ownerDiscordId: string, referredUserId: string, joinedAt: number, attributionSource?: string, ignoreDuplicates?: boolean }}
+ * @returns {Promise<{ ok: boolean, skipped?: boolean, error?: string }>}
+ */
+async function mirrorReferralRowToPostgres({
+  ownerDiscordId,
+  referredUserId,
+  joinedAt,
+  attributionSource = 'discord_invite',
+  ignoreDuplicates = true
+}) {
+  const owner = String(ownerDiscordId || '').trim();
+  const referred = String(referredUserId || '').trim();
+  const t = Number(joinedAt);
+  if (!owner || !referred || owner === referred || !Number.isFinite(t) || t <= 0) {
+    return { ok: false, error: 'invalid_args' };
+  }
+
+  const supabase = tryGetSupabase();
+  if (!supabase) return { ok: false, skipped: true };
+
+  const opts = ignoreDuplicates ? { onConflict: 'referred_user_id', ignoreDuplicates: true } : { onConflict: 'referred_user_id' };
+  const { error } = await supabase.from('referrals').upsert(
+    {
+      owner_discord_id: owner,
+      referred_user_id: referred,
+      joined_at: Math.floor(t),
+      attribution_source: attributionSource
+    },
+    opts
+  );
+
+  if (error) {
+    const msg = error.message || String(error);
+    console.error('[Referral] Supabase upsert:', msg);
+    return { ok: false, error: msg };
+  }
+  return { ok: true };
+}
+
+/**
+ * Backfill `data/referrals.json` rows into Postgres (fills gaps only by default).
+ * @param {{ dryRun?: boolean }} [options]
+ * @returns {Promise<{ owners: number, rows: number, mirrored: number, skipped: number, errors: number }>}
+ */
+async function syncReferralsJsonStoreToPostgres(options = {}) {
+  const dryRun = Boolean(options.dryRun);
+  const store = await loadReferrals();
+  let rows = 0;
+  let mirrored = 0;
+  let skipped = 0;
+  let errors = 0;
+
+  for (const u of store.users) {
+    const owner = String(u.discordId || '').trim();
+    if (!owner) continue;
+    for (const r of u.referrals) {
+      const referred = String(r.userId || '').trim();
+      const joinedAt = Number(r.joinedAt) || 0;
+      if (!referred || referred === owner || !joinedAt) continue;
+      rows += 1;
+      if (dryRun) {
+        mirrored += 1;
+        continue;
+      }
+      const result = await mirrorReferralRowToPostgres({
+        ownerDiscordId: owner,
+        referredUserId: referred,
+        joinedAt,
+        attributionSource: 'discord_invite',
+        ignoreDuplicates: true
+      });
+      if (result.skipped) skipped += 1;
+      else if (result.ok) mirrored += 1;
+      else errors += 1;
+    }
+  }
+
+  return { owners: store.users.length, rows, mirrored, skipped, errors };
 }
 
 /**
@@ -642,19 +712,33 @@ async function assignReferralsToUser(ownerDiscordId, userIds) {
   const existingIds = new Set(user.referrals.map(r => r.userId));
 
   const now = Date.now();
+  /** @type {Array<{ userId: string, joinedAt: number }>} */
+  const added = [];
 
   for (const id of userIds) {
-    if (!existingIds.has(id) && id !== ownerDiscordId) {
-      user.referrals.push({
-        userId: id,
-        joinedAt: now - Math.floor(Math.random() * 7 * 24 * 60 * 60 * 1000)
-      });
-    }
+    const referred = String(id || '').trim();
+    if (!referred || existingIds.has(referred) || referred === ownerDiscordId) continue;
+    const joinedAt = now - Math.floor(Math.random() * 7 * 24 * 60 * 60 * 1000);
+    user.referrals.push({ userId: referred, joinedAt });
+    existingIds.add(referred);
+    added.push({ userId: referred, joinedAt });
   }
 
   await saveReferrals(store);
 
-  console.log(`[Referral] Assigned ${userIds.length} referrals to ${ownerDiscordId}`);
+  for (const row of added) {
+    await mirrorReferralRowToPostgres({
+      ownerDiscordId,
+      referredUserId: row.userId,
+      joinedAt: row.joinedAt,
+      attributionSource: 'discord_invite',
+      ignoreDuplicates: true
+    });
+  }
+
+  console.log(
+    `[Referral] Assigned ${added.length} referral(s) to ${ownerDiscordId} (${userIds.length} id(s) requested)`
+  );
 }
 
 module.exports = {
@@ -667,5 +751,7 @@ module.exports = {
   handleGuildMemberAdd,
   getReferralStatsForReferrer,
   getReferralLeaderboardTop,
-  assignReferralsToUser
+  assignReferralsToUser,
+  mirrorReferralRowToPostgres,
+  syncReferralsJsonStoreToPostgres
 };

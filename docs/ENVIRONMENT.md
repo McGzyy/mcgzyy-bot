@@ -281,7 +281,7 @@ Some docs mention vars (e.g. milestone chart toggles) that **do not** appear in 
 5. Run `node index.js`.  
 6. If using X posting, add all four `X_*` variables and test with `!testx` (owner only).  
 7. If you enable Playwright-based code, run `npx playwright install chromium` (and `install-deps` on Linux if needed).  
-8. If you want **referral rows mirrored to Supabase**, add `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the **root** `.env` (see §7.4); otherwise the bot still tracks referrals in `data/referrals.json` without Postgres.
+8. If you want **referral rows mirrored to Supabase**, add `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the **root** `.env` (see §7.4); otherwise the bot still tracks referrals in `data/referrals.json` without Postgres. After deploy, run `node scripts/syncReferralsJsonToPostgres.js` once to backfill historical JSON rows. On Vercel, set **`CRON_SECRET`** for `/api/cron/referral-credit-settle` and `/api/cron/reconcile-subscriptions`.
 
 ---
 

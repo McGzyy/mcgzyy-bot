@@ -465,28 +465,32 @@ async function handleGuildMemberAdd(member) {
 }
 
 /**
- * @param {string} referrerId
- * @returns {Promise<{ total: number, last24h: number, last7d: number, last30d: number }>}
+ * @returns {import('@supabase/supabase-js').SupabaseClient | null}
  */
-async function getReferralStatsForReferrer(referrerId) {
-  const uid = String(referrerId || '').trim();
+function tryGetSupabase() {
+  try {
+    return getSupabase();
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * @param {number[]} joinedAtMs
+ * @returns {{ total: number, last24h: number, last7d: number, last30d: number }}
+ */
+function tallyReferralJoinedTimes(joinedAtMs) {
   const out = { total: 0, last24h: 0, last7d: 0, last30d: 0 };
-  if (!uid) return out;
-
-  const store = await loadReferrals();
-  const rec = store.users.find(u => u.discordId === uid);
-  if (!rec) return out;
-
   const now = Date.now();
   const msHour = 60 * 60 * 1000;
   const ms24 = 24 * msHour;
   const ms7 = 7 * ms24;
   const ms30 = 30 * ms24;
 
-  for (const r of rec.referrals) {
-    out.total += 1;
-    const t = Number(r.joinedAt) || 0;
+  for (const raw of joinedAtMs) {
+    const t = Number(raw) || 0;
     if (!t) continue;
+    out.total += 1;
     const age = now - t;
     if (age < 0) continue;
     if (age <= ms24) out.last24h += 1;
@@ -498,6 +502,71 @@ async function getReferralStatsForReferrer(referrerId) {
 }
 
 /**
+ * @param {string} ownerDiscordId
+ * @returns {Promise<number[] | null>}
+ */
+async function fetchReferralJoinedAtFromPostgres(ownerDiscordId) {
+  const supabase = tryGetSupabase();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from('referrals')
+    .select('joined_at')
+    .eq('owner_discord_id', ownerDiscordId);
+
+  if (error) {
+    console.error('[Referral] Supabase stats:', error.message || error);
+    return null;
+  }
+
+  return (Array.isArray(data) ? data : [])
+    .map(r => Number(r?.joined_at))
+    .filter(t => Number.isFinite(t) && t > 0);
+}
+
+/**
+ * @returns {Promise<Map<string, number> | null>}
+ */
+async function fetchReferralCountsByOwnerFromPostgres() {
+  const supabase = tryGetSupabase();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase.from('referrals').select('owner_discord_id');
+  if (error) {
+    console.error('[Referral] Supabase leaderboard:', error.message || error);
+    return null;
+  }
+
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const row of Array.isArray(data) ? data : []) {
+    const id = String(row?.owner_discord_id || '').trim();
+    if (!id) continue;
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * @param {string} referrerId
+ * @returns {Promise<{ total: number, last24h: number, last7d: number, last30d: number }>}
+ */
+async function getReferralStatsForReferrer(referrerId) {
+  const uid = String(referrerId || '').trim();
+  const out = { total: 0, last24h: 0, last7d: 0, last30d: 0 };
+  if (!uid) return out;
+
+  const fromDb = await fetchReferralJoinedAtFromPostgres(uid);
+  if (fromDb) return tallyReferralJoinedTimes(fromDb);
+
+  const store = await loadReferrals();
+  const rec = store.users.find(u => u.discordId === uid);
+  if (!rec) return out;
+
+  return tallyReferralJoinedTimes(rec.referrals.map(r => Number(r.joinedAt) || 0));
+}
+
+/**
  * @param {import('discord.js').Guild|null} guild
  * @param {import('discord.js').Client} discordClient
  * @param {number} [limit]
@@ -505,15 +574,28 @@ async function getReferralStatsForReferrer(referrerId) {
  */
 async function getReferralLeaderboardTop(guild, discordClient, limit = 10) {
   const lim = Math.min(50, Math.max(1, Math.floor(Number(limit) || 10)));
-  const store = await loadReferrals();
-  const sorted = [...store.users]
-    .filter(u => u.referrals.length > 0)
-    .sort((a, b) => b.referrals.length - a.referrals.length || a.discordId.localeCompare(b.discordId));
+
+  /** @type {Array<{ discordId: string, count: number }>} */
+  let ranked = [];
+
+  const countsByOwner = await fetchReferralCountsByOwnerFromPostgres();
+  if (countsByOwner && countsByOwner.size > 0) {
+    ranked = [...countsByOwner.entries()]
+      .map(([discordId, count]) => ({ discordId, count }))
+      .filter(r => r.count > 0)
+      .sort((a, b) => b.count - a.count || a.discordId.localeCompare(b.discordId));
+  } else {
+    const store = await loadReferrals();
+    ranked = [...store.users]
+      .filter(u => u.referrals.length > 0)
+      .map(u => ({ discordId: u.discordId, count: u.referrals.length }))
+      .sort((a, b) => b.count - a.count || a.discordId.localeCompare(b.discordId));
+  }
 
   /** @type {Array<{ userId: string, username: string, count: number }>} */
   const out = [];
 
-  for (const u of sorted) {
+  for (const u of ranked) {
     if (out.length >= lim) break;
     try {
       const user = await discordClient.users.fetch(u.discordId).catch(() => null);
@@ -528,7 +610,7 @@ async function getReferralLeaderboardTop(guild, discordClient, limit = 10) {
       out.push({
         userId: u.discordId,
         username: String(username || 'Unknown').slice(0, 80),
-        count: u.referrals.length
+        count: u.count
       });
     } catch (_) {}
   }

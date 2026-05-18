@@ -421,13 +421,17 @@ async function handleGuildMemberAdd(member) {
             try {
               const joinedAt = Date.now();
               const supabase = getSupabase();
-              const { error: supabaseError } = await supabase.from('referrals').insert({
-                owner_discord_id: ownerId,
-                referred_user_id: member.id,
-                joined_at: joinedAt
-              });
+              const { error: supabaseError } = await supabase.from('referrals').upsert(
+                {
+                  owner_discord_id: ownerId,
+                  referred_user_id: member.id,
+                  joined_at: joinedAt,
+                  attribution_source: 'discord_invite'
+                },
+                { onConflict: 'referred_user_id', ignoreDuplicates: true }
+              );
               if (supabaseError) {
-                console.error('[Referral] Supabase insert:', supabaseError.message || supabaseError);
+                console.error('[Referral] Supabase upsert:', supabaseError.message || supabaseError);
               }
             } catch (supabaseErr) {
               const msg =

@@ -9,7 +9,7 @@ const {
   buildPast30DaysDigestPng
 } = require('./digestPerformanceChart');
 const { buildWeeklySnapshotModulesPng } = require('./weeklySnapshotPanel');
-const { buildDailySnapshotModulesPng } = require('./dailyDigestPanel');
+const { buildDailyDigestCardPng } = require('./dailyDigestPanel');
 const { tickXEngagementPosts } = require('./xEngagementScheduler');
 const {
   getCallerLeaderboardInTimeframe,
@@ -27,7 +27,8 @@ const {
   xTerminalFooterLine,
   fitTweet,
   fitTweetWholeLines,
-  resolveWeeklyStatsTweetMaxChars
+  resolveWeeklyStatsTweetMaxChars,
+  buildTerminalDigestCaption
 } = require('./buildXPostText');
 
 /** Bullet for list rows — works on every X client (avoid emoji squares). */
@@ -352,15 +353,17 @@ async function postDigest(p, options = {}) {
   /** Same attach path as milestone `createPost(text, null, chartBuf)` — upload inside `createPost`. */
   let png = null;
 
-  if (options.attachDailyDualPanel) {
+  const useTerminalDailyCard = options.attachDailyDualPanel || options.attachDailyDigestCard;
+
+  if (useTerminalDailyCard) {
     try {
-      const raw = await buildDailySnapshotModulesPng(new Date());
+      const raw = await buildDailyDigestCardPng(new Date());
       png = normalizePngUploadBuffer(raw);
       if (!png) {
-        console.error('[XLeaderboardDigest] daily dual panel: render did not produce a valid PNG buffer');
+        console.error('[XLeaderboardDigest] daily digest card: render did not produce a valid PNG buffer');
       }
     } catch (err) {
-      console.error('[XLeaderboardDigest] daily dual panel failed:', err?.message || err);
+      console.error('[XLeaderboardDigest] daily digest card failed:', err?.message || err);
     }
   } else if (options.attachWeeklyAvgXChart) {
     try {
@@ -386,10 +389,15 @@ async function postDigest(p, options = {}) {
     }
   }
 
-  let text = buildLeaderboardDigestBody({ windowLabel, days, topN });
-  const maxChars = resolveWeeklyStatsTweetMaxChars();
-  if (text.length > maxChars) {
-    text = maxChars >= 2000 ? fitTweet(text, maxChars) : fitTweetWholeLines(text, maxChars);
+  let text;
+  if (useTerminalDailyCard) {
+    text = buildTerminalDigestCaption('daily', windowLabel);
+  } else {
+    text = buildLeaderboardDigestBody({ windowLabel, days, topN });
+    const maxChars = resolveWeeklyStatsTweetMaxChars();
+    if (text.length > maxChars) {
+      text = maxChars >= 2000 ? fitTweet(text, maxChars) : fitTweetWholeLines(text, maxChars);
+    }
   }
 
   const result = await createPost(text, null, png, { audit: { category: 'leaderboard_digest' } });

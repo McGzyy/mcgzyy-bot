@@ -1,48 +1,34 @@
 'use strict';
 
 const { createCanvas } = require('canvas');
-const { getUtcYesterdayAndPriorDeskAvgs } = require('./callerStatsService');
+const {
+  TEXT,
+  MUTED,
+  DIM,
+  drawPanel,
+  fitFontSize,
+  truncate,
+  channelAccent
+} = require('./xCardRenderHelpers');
+const {
+  paintCardBackground,
+  paintMgWatermark,
+  drawSoftGlow,
+  CARD_WIDTH,
+  CARD_HEIGHT
+} = require('./xMilestoneDataCard');
+const { loadMgMarkImage } = require('./xBrandAssets');
+const {
+  getUtcYesterdayAndPriorDeskAvgs,
+  getCallerLeaderboardInTimeframe,
+  getBestCallInTimeframe,
+  getBestBotCallInTimeframe
+} = require('./callerStatsService');
 
-const W = 960;
-const H = 460;
-const BG = '#000000';
-const PANEL = '#0a0a0a';
-const BORDER = 'rgba(255, 255, 255, 0.12)';
-const TEXT = '#fafafa';
-const MUTED = 'rgba(161, 161, 170, 0.95)';
-const GREEN = '#22c55e';
-const RED = '#ef4444';
-const RADIUS = 18;
-/** Member desk hero: at or above this avg ATH × → green, else red. */
+const W = CARD_WIDTH;
+const H = CARD_HEIGHT;
+const PAD = 52;
 const MEMBER_AVG_GOOD_AT = 2;
-
-/**
- * @param {import('canvas').CanvasRenderingContext2D} ctx
- * @param {number} x
- * @param {number} y
- * @param {number} w
- * @param {number} h
- * @param {number} r
- */
-function roundRectPath(ctx, x, y, w, h, r) {
-  const rr = Math.min(r, w / 2, h / 2);
-  if (typeof ctx.roundRect === 'function') {
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, rr);
-    return;
-  }
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.lineTo(x + w - rr, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
-  ctx.lineTo(x + w, y + h - rr);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
-  ctx.lineTo(x + rr, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
-  ctx.lineTo(x, y + rr);
-  ctx.quadraticCurveTo(x, y, x + rr, y);
-  ctx.closePath();
-}
 
 /**
  * @param {number|null|undefined} prev
@@ -58,10 +44,8 @@ function fmtDayOverDay(prev, cur) {
 }
 
 /**
- * Member avg minus McGBot avg (yesterday UTC). Positive = members ahead.
  * @param {number|null|undefined} mX
  * @param {number|null|undefined} bX
- * @returns {{ line: string, memberAhead: boolean|null }}
  */
 function fmtMemberBotSpread(mX, bX) {
   if (mX == null || bX == null || !Number.isFinite(mX) || !Number.isFinite(bX)) {
@@ -73,178 +57,223 @@ function fmtMemberBotSpread(mX, bX) {
 }
 
 /**
- * Pick largest font size so text fits maxWidth (bold weight).
  * @param {import('canvas').CanvasRenderingContext2D} ctx
- * @param {string} text
- * @param {number} maxWidth
- * @param {number} maxSize
- * @param {number} minSize
+ * @param {number} x
+ * @param {number} y
+ * @param {number} w
+ * @param {number} h
+ * @param {string} label
+ * @param {string} sub
+ * @param {string} hero
+ * @param {string} heroColor
+ * @param {string} foot
+ * @param {string} accent
  */
-function fitFontSize(ctx, text, maxWidth, maxSize, minSize) {
-  for (let s = maxSize; s >= minSize; s -= 2) {
-    ctx.font = `800 ${s}px system-ui, "Segoe UI", sans-serif`;
-    if (ctx.measureText(text).width <= maxWidth) {
-      return s;
-    }
-  }
-  return minSize;
+function drawMetricPanel(ctx, x, y, w, h, label, sub, hero, heroColor, foot, accent) {
+  drawPanel(ctx, x, y, w, h, 20, 'rgba(255,255,255,0.035)', 'rgba(255,255,255,0.1)');
+  drawSoftGlow(ctx, x + w * 0.5, y + h * 0.42, w * 0.45, accent.soft);
+
+  const cx = x + w / 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = MUTED;
+  ctx.font = '600 13px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(label, cx, y + 16);
+  ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(sub, cx, y + 34);
+
+  const maxTextW = w - 36;
+  const heroSize = fitFontSize(ctx, hero, maxTextW, Math.min(96, h * 0.38), 36, '800');
+  ctx.fillStyle = heroColor;
+  ctx.font = `800 ${heroSize}px system-ui, "Segoe UI", sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(hero, cx, y + h * 0.48);
+
+  ctx.textBaseline = 'top';
+  ctx.font = '600 15px system-ui, "Segoe UI", sans-serif';
+  ctx.fillStyle = foot === '—' ? DIM : TEXT;
+  ctx.fillText(foot, cx, y + h - 28);
 }
 
 /**
- * Two rounded cards: (1) member desk avg for last completed UTC day + day-over-day change,
- * (2) member vs McGBot avg spread for that day.
+ * @param {object|null} call
+ */
+function formatHighlight(call) {
+  if (!call || !call.ticker) return '—';
+  const raw = String(call.ticker || call.tokenName || '')
+    .trim()
+    .replace(/^\$+/u, '');
+  const t = raw.length > 14 ? `${raw.slice(0, 12)}…` : raw;
+  const x = Number(call.x) || 0;
+  return `${t.toUpperCase()} · ${x.toFixed(2)}×`;
+}
+
+/**
+ * Elite daily digest card (1200×820) — same shell as milestone data cards.
  * @param {Date} [anchor]
  * @returns {Promise<Buffer>}
  */
-async function buildDailySnapshotModulesPng(anchor = new Date()) {
+async function buildDailyDigestCardPng(anchor = new Date()) {
+  const accent = channelAccent('member');
+  const glow = accent.soft;
   const { yesterday, prior, yesterdayLabel } = getUtcYesterdayAndPriorDeskAvgs(anchor);
-
-  const canvas = createCanvas(W, H);
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = BG;
-  ctx.fillRect(0, 0, W, H);
-
-  const pad = 22;
-  const gap = 18;
-  const panelW = (W - pad * 2 - gap) / 2;
-  const panelH = H - pad * 2;
-  const y0 = pad;
-  const xL = pad;
-  const xR = pad + panelW + gap;
+  const rows = getCallerLeaderboardInTimeframe(1, 4);
+  const bestHuman = getBestCallInTimeframe(1);
+  const bestBot = getBestBotCallInTimeframe(1);
 
   const mY = yesterday.memberAvgX;
   const bY = yesterday.botAvgX;
   const mP = prior.memberAvgX;
-
   const dod = fmtDayOverDay(mP, mY);
   const spread = fmtMemberBotSpread(mY, bY);
 
   const mOk = mY != null && Number.isFinite(Number(mY));
-  const memberHeroColor = !mOk ? MUTED : Number(mY) >= MEMBER_AVG_GOOD_AT ? GREEN : RED;
+  const memberHero = mOk ? `${Number(mY).toFixed(2)}× avg` : '—';
+  const memberColor =
+    !mOk ? DIM : Number(mY) >= MEMBER_AVG_GOOD_AT ? '#22c55e' : '#ef4444';
   const spreadColor =
-    spread.memberAhead == null ? MUTED : spread.memberAhead ? GREEN : RED;
-
-  /**
-   * @param {number} px
-   */
-  function drawCard(px) {
-    ctx.fillStyle = PANEL;
-    roundRectPath(ctx, px, y0, panelW, panelH, RADIUS);
-    ctx.fill();
-    ctx.strokeStyle = BORDER;
-    ctx.lineWidth = 1;
-    roundRectPath(ctx, px, y0, panelW, panelH, RADIUS);
-    ctx.stroke();
-  }
-
-  drawCard(xL);
-  drawCard(xR);
-
-  const cxL = xL + panelW / 2;
-  const cxR = xR + panelW / 2;
-  const maxTextW = panelW - 28;
-  const headerTop = y0 + 14;
-
-  /* Left: compact header, dominant hero, sub */
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = MUTED;
-  ctx.font = '600 10px system-ui, Segoe UI, sans-serif';
-  ctx.fillText('Member desk', cxL, headerTop);
-  ctx.font = '500 10px system-ui, Segoe UI, sans-serif';
-  ctx.fillText(yesterdayLabel, cxL, headerTop + 14);
-
-  const blockTop = headerTop + 34;
-  const blockBottom = y0 + panelH - 22;
-  const heroCenterY = blockTop + (blockBottom - blockTop) / 2;
-  const heroMaxByHeight = Math.floor((panelH - 72) * 0.52);
-  const maxNum = Math.min(108, heroMaxByHeight);
-
-  ctx.fillStyle = memberHeroColor;
-  ctx.textBaseline = 'middle';
-
-  if (!mOk) {
-    const dashSize = fitFontSize(ctx, '—', maxTextW, maxNum, 40);
-    ctx.font = `800 ${dashSize}px system-ui, Segoe UI, sans-serif`;
-    const hm =
-      ctx.measureText('—').actualBoundingBoxAscent +
-        ctx.measureText('—').actualBoundingBoxDescent || dashSize * 1.05;
-    ctx.fillText('—', cxL, heroCenterY - hm * 0.05);
-  } else {
-    const numStr = `${Number(mY).toFixed(2)}×`;
-    const avgStr = 'avg';
-    let numSize = 40;
-    let avgSize = 20;
-    for (let n = maxNum; n >= 40; n -= 2) {
-      const aSz = Math.max(20, Math.round(n * 0.38));
-      ctx.font = `800 ${n}px system-ui, Segoe UI, sans-serif`;
-      const wNum = ctx.measureText(numStr).width;
-      ctx.font = `600 ${aSz}px system-ui, Segoe UI, sans-serif`;
-      const wAvg = ctx.measureText(avgStr).width;
-      const g = Math.max(6, Math.round(n * 0.06));
-      if (wNum + g + wAvg <= maxTextW) {
-        numSize = n;
-        avgSize = aSz;
-        break;
-      }
-    }
-
-    ctx.font = `800 ${numSize}px system-ui, Segoe UI, sans-serif`;
-    const wNum = ctx.measureText(numStr).width;
-    ctx.font = `600 ${avgSize}px system-ui, Segoe UI, sans-serif`;
-    const wAvg = ctx.measureText(avgStr).width;
-    const g = Math.max(6, Math.round(numSize * 0.06));
-    const totalW = wNum + g + wAvg;
-    const x0 = cxL - totalW / 2;
-
-    ctx.textAlign = 'left';
-    ctx.fillStyle = memberHeroColor;
-    ctx.font = `800 ${numSize}px system-ui, Segoe UI, sans-serif`;
-    ctx.fillText(numStr, x0, heroCenterY);
-
-    ctx.font = `600 ${avgSize}px system-ui, Segoe UI, sans-serif`;
-    ctx.globalAlpha = 0.88;
-    ctx.fillText(avgStr, x0 + wNum + g, heroCenterY);
-    ctx.globalAlpha = 1;
-    ctx.textAlign = 'center';
-  }
-
-  ctx.textBaseline = 'top';
-  ctx.font = '600 14px system-ui, Segoe UI, sans-serif';
-  ctx.fillStyle = dod === '—' ? MUTED : TEXT;
-  ctx.fillText(dod, cxL, blockBottom - 20);
-
-  /* Right: member vs bot spread */
-  ctx.fillStyle = MUTED;
-  ctx.font = '600 10px system-ui, Segoe UI, sans-serif';
-  ctx.fillText('Member vs McGBot', cxR, headerTop);
-  ctx.font = '500 10px system-ui, Segoe UI, sans-serif';
-  ctx.fillText('Avg ATH × spread · same day', cxR, headerTop + 14);
-
-  const spreadMaxByHeight = Math.floor((panelH - 72) * 0.52);
-  const spreadSize = fitFontSize(ctx, spread.line, maxTextW, Math.min(108, spreadMaxByHeight), 40);
-  ctx.font = `800 ${spreadSize}px system-ui, Segoe UI, sans-serif`;
-  const sm = ctx.measureText(spread.line);
-  const spreadH = sm.actualBoundingBoxAscent + sm.actualBoundingBoxDescent || spreadSize * 1.05;
-
-  ctx.fillStyle = spreadColor;
-  ctx.textBaseline = 'middle';
-  ctx.fillText(spread.line, cxR, heroCenterY - spreadH * 0.05);
-
-  ctx.textBaseline = 'top';
-  ctx.font = '500 12px system-ui, Segoe UI, sans-serif';
-  ctx.fillStyle = MUTED;
-  const sub =
+    spread.memberAhead == null ? DIM : spread.memberAhead ? '#22c55e' : '#ef4444';
+  const spreadSub =
     spread.memberAhead == null
       ? 'Need member & bot averages'
       : spread.memberAhead
-        ? 'Members ahead of bot for the day'
-        : 'Bot ahead of members for the day';
-  ctx.fillText(sub, cxR, blockBottom - 20);
+        ? 'Members ahead of bot'
+        : 'Bot ahead of members';
+
+  const mgImg = await loadMgMarkImage();
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  paintCardBackground(ctx, W, H, glow, accent.primary);
+  paintMgWatermark(ctx, mgImg, W, H);
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = DIM;
+  ctx.font = '600 14px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('▲ McGBot Terminal', PAD, PAD);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = MUTED;
+  ctx.font = '600 14px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(`UTC ${yesterdayLabel}`, W - PAD, PAD);
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = accent.primary;
+  const titleSize = fitFontSize(ctx, 'Daily snapshot', W - PAD * 2, 56, 36, '800');
+  ctx.font = `800 ${titleSize}px system-ui, "Segoe UI", sans-serif`;
+  ctx.fillText('Daily snapshot', PAD, PAD + 28);
+
+  const statsY = PAD + 28 + titleSize + 24;
+  const statsH = 200;
+  const gap = 22;
+  const panelW = (W - PAD * 2 - gap) / 2;
+
+  drawMetricPanel(
+    ctx,
+    PAD,
+    statsY,
+    panelW,
+    statsH,
+    'Member desk',
+    'Avg ATH × · last UTC day',
+    memberHero,
+    memberColor,
+    dod,
+    accent
+  );
+  drawMetricPanel(
+    ctx,
+    PAD + panelW + gap,
+    statsY,
+    panelW,
+    statsH,
+    'Member vs McGBot',
+    'Avg ATH × spread · same day',
+    spread.line,
+    spreadColor,
+    spreadSub,
+    accent
+  );
+
+  const lbY = statsY + statsH + 24;
+  const lbH = 200;
+  drawPanel(ctx, PAD, lbY, W - PAD * 2, lbH, 20);
+  drawSoftGlow(ctx, PAD + 120, lbY + lbH * 0.4, 160, glow);
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = accent.primary;
+  ctx.font = '700 18px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('Caller leaderboard', PAD + 20, lbY + 16);
+  ctx.fillStyle = MUTED;
+  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('Top 4 by avg ATH × · rolling 24h', PAD + 20, lbY + 40);
+
+  const rowStart = lbY + 68;
+  const rowH = 28;
+  ctx.font = '600 16px system-ui, "Segoe UI", sans-serif';
+  if (rows.length) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i];
+      const y = rowStart + i * rowH;
+      ctx.fillStyle = i === 0 ? accent.primary : MUTED;
+      ctx.fillText(`${i + 1}.`, PAD + 20, y);
+      ctx.fillStyle = TEXT;
+      ctx.fillText(truncate(r.username, 18), PAD + 48, y);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = accent.primary;
+      ctx.fillText(`${r.avgX.toFixed(2)}× avg`, W - PAD - 140, y);
+      ctx.fillStyle = DIM;
+      ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
+      ctx.fillText(
+        `${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`,
+        W - PAD - 20,
+        y
+      );
+      ctx.textAlign = 'left';
+      ctx.font = '600 16px system-ui, "Segoe UI", sans-serif';
+    }
+  } else {
+    ctx.fillStyle = DIM;
+    ctx.fillText('Quiet day — no qualifying desk calls', PAD + 20, rowStart);
+  }
+
+  const hiY = lbY + lbH + 22;
+  const hiH = 88;
+  const hiW = (W - PAD * 2 - gap) / 2;
+  drawPanel(ctx, PAD, hiY, hiW, hiH, 16);
+  drawPanel(ctx, PAD + hiW + gap, hiY, hiW, hiH, 16);
+
+  ctx.fillStyle = MUTED;
+  ctx.font = '600 12px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('Best member call', PAD + 16, hiY + 14);
+  ctx.fillText('Best McGBot call', PAD + hiW + gap + 16, hiY + 14);
+
+  ctx.fillStyle = TEXT;
+  const hiSize = fitFontSize(ctx, formatHighlight(bestHuman), hiW - 32, 28, 18, '700');
+  ctx.font = `700 ${hiSize}px system-ui, "Segoe UI", sans-serif`;
+  ctx.fillText(formatHighlight(bestHuman), PAD + 16, hiY + 38);
+  ctx.fillText(formatHighlight(bestBot), PAD + hiW + gap + 16, hiY + 38);
+
+  const footerY = H - PAD - 8;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = MUTED;
+  ctx.font = '600 15px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('🔹 Dashboard link in bio', PAD, footerY);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(180, 180, 192, 0.98)';
+  ctx.font = '700 17px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('mcgbot.xyz', W - PAD, footerY);
 
   return canvas.toBuffer('image/png');
 }
 
+/** @deprecated use buildDailyDigestCardPng */
+async function buildDailySnapshotModulesPng(anchor = new Date()) {
+  return buildDailyDigestCardPng(anchor);
+}
+
 module.exports = {
+  buildDailyDigestCardPng,
   buildDailySnapshotModulesPng
 };

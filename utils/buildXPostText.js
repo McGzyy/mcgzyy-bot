@@ -337,6 +337,23 @@ async function resolveMilestoneCallerXTag(trackedCall, multipleX = 0) {
  * @param {object} trackedCall
  * @param {number} [multipleX]
  */
+/**
+ * Short caption for scheduled terminal digest cards (stats on image).
+ * @param {'daily'|'weekly'|'monthly'|string} kind
+ * @param {string} [windowLabel]
+ */
+function buildTerminalDigestCaption(kind, windowLabel = '') {
+  const botTag = `@${getXBotUsernameForCopy()}`;
+  const labels = {
+    daily: 'Daily snapshot',
+    weekly: '7d snapshot',
+    monthly: 'Monthly snapshot'
+  };
+  const title =
+    labels[kind] || String(windowLabel || 'McGBot Terminal').trim() || 'McGBot Terminal';
+  return `🔹 McGBot Terminal · ${title} 🔹 Tracked LIVE via ${botTag} 🔹 Dashboard link in bio 🔹`;
+}
+
 async function buildMinimalXMilestoneCaption(trackedCall, multipleX = 0) {
   const callerTag = await resolveMilestoneCallerXTag(trackedCall, multipleX);
   const botTag = `@${getXBotUsernameForCopy()}`;
@@ -439,6 +456,7 @@ function xBrandKicker() {
 module.exports = {
   buildXPostText,
   buildXMilestoneCaption,
+  buildTerminalDigestCaption,
   buildAttributionLine,
   xBrandKicker,
   xTerminalSectionRule,

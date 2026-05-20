@@ -438,6 +438,9 @@ async function buildMilestoneDataCardPng(payload) {
 
 module.exports = {
   buildMilestoneDataCardPng,
+  paintCardBackground,
+  paintMgWatermark,
+  drawSoftGlow,
   CARD_WIDTH: W,
   CARD_HEIGHT: H
 };

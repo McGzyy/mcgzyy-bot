@@ -546,7 +546,8 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
     `• \`!xdigeststatus\` — Scheduled X digest / W·M engagement scheduler status + recent post audit (owner only)\n` +
-    `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (desk summary cards), **7d** (weekday chart), or **monthly** (30d trend chart) digest to X (owner only)\n` +
+    `• \`!previewdailydigest\` — **Discord preview** of the daily terminal card + caption (no X)\n` +
+    `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (terminal data card + short caption), **7d** (weekday chart), or **monthly** (30d trend) to X (owner only)\n` +
     `• \`!previewxmilestone user|bot <sol_ca> [mult]\` — **Preview card + caption in Discord** (no X; omit CA for JUP default)\n` +
     `• \`!testxmilestone user|bot <sol_ca> [mult]\` — **Live X post** (real Dex token; user tests credit **@McGzyy**). \`fresh\` skips auto-quote. Quote: \`!testxmilestone quote <post_id> user|bot [mult]\`\n` +
     `• \`!testweeklyrunner\` / \`!testtopcallermonth\` — Force **weekly runner** or **monthly top caller** X posts (owner only; monthly test skips Discord role)\n` +
@@ -3166,7 +3167,17 @@ if (lowerContent === '!scanner off') {
           return;
         }
 
+        /** @type {import('discord.js').Message|null} */
+        let ack = null;
         try {
+          console.log(
+            `[previewxmilestone] ${message.author.tag} variant=${parsed.variant} mx=${parsed.headlineMx} ca=${parsed.contractOverride || 'default'}`
+          );
+          ack = await message.reply({
+            content: '⏳ Generating milestone preview (Dex + card render, ~5–15s)…',
+            allowedMentions: { repliedUser: false }
+          });
+
           const ownerId = String(process.env.BOT_OWNER_ID || '').trim();
           const callerId =
             parsed.variant === 'user' ? ownerId || parsed.callerDiscordId || message.author.id : null;
@@ -3178,26 +3189,29 @@ if (lowerContent === '!scanner off') {
           });
 
           if (!preview.success || !preview.png) {
-            await replyText(
-              message,
-              `❌ Preview failed\n${JSON.stringify(preview.error || 'no_png', null, 2)}`
-            );
+            await ack.edit({
+              content: `❌ Preview failed\n\`\`\`json\n${JSON.stringify(preview.error || 'no_png', null, 2)}\n\`\`\``
+            });
             return;
           }
 
           const label = parsed.variant === 'bot' ? 'McGBot' : 'User';
           const file = new AttachmentBuilder(preview.png, { name: 'milestone_preview.png' });
-          await message.reply({
+          await ack.edit({
             content:
               `**${label} milestone preview** · **${parsed.headlineMx}×** · \`$${preview.tracked?.ticker || '?'}\` · ${preview.tracked?.tokenName || '—'}\n` +
               `Live Dex: **${preview.liveOk ? 'yes' : 'fallback'}** · Test caller: **@${getTestMilestoneCallerHandle()}** (user) / **McGBot** (bot) · Caption (${preview.caption?.length || 0} chars):\n` +
               `\`\`\`\n${preview.caption || ''}\n\`\`\``,
-            files: [file],
-            allowedMentions: { repliedUser: false }
+            files: [file]
           });
         } catch (e) {
           console.error('[!previewxmilestone]', e);
-          await replyText(message, `❌ ${e instanceof Error ? e.message : String(e)}`);
+          const errText = `❌ ${e instanceof Error ? e.message : String(e)}`;
+          if (ack) {
+            await ack.edit({ content: errText }).catch(() => replyText(message, errText));
+          } else {
+            await replyText(message, errText);
+          }
         }
 
         return;
@@ -3370,6 +3384,39 @@ if (lowerContent === '!scanner off') {
           );
         }
 
+        return;
+      }
+
+      if (lowerContent === '!previewdailydigest') {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        /** @type {import('discord.js').Message|null} */
+        let ack = null;
+        try {
+          const { buildDailyDigestCardPng } = require('./utils/dailyDigestPanel');
+          const { buildTerminalDigestCaption } = require('./utils/buildXPostText');
+          ack = await message.reply({
+            content: '⏳ Generating daily digest card (~5s)…',
+            allowedMentions: { repliedUser: false }
+          });
+          const png = await buildDailyDigestCardPng(new Date());
+          const caption = buildTerminalDigestCaption('daily');
+          const file = new AttachmentBuilder(png, { name: 'daily_digest_preview.png' });
+          await ack.edit({
+            content: `**Daily digest preview** (scheduled post style)\nCaption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
+            files: [file]
+          });
+        } catch (e) {
+          console.error('[!previewdailydigest]', e);
+          const errText = `❌ ${e instanceof Error ? e.message : String(e)}`;
+          if (ack) {
+            await ack.edit({ content: errText }).catch(() => replyText(message, errText));
+          } else {
+            await replyText(message, errText);
+          }
+        }
         return;
       }
 
@@ -4695,7 +4742,13 @@ if (lowerContent.startsWith('!truestats')) {
         return;
       }
 
-      await handleBasicCommands(message);
+      const handledBasic = await handleBasicCommands(message);
+      if (!handledBasic && cmd.length > 1) {
+        await replyTextBestEffort(
+          message,
+          `❓ Unknown command \`${cmd}\`. Try \`!commands\` for the list. Milestone previews: \`!previewxmilestone user|bot <sol_ca> [mult]\`.`
+        );
+      }
       return;
     }
 

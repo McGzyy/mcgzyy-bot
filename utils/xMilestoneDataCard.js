@@ -441,6 +441,7 @@ module.exports = {
   paintCardBackground,
   paintMgWatermark,
   drawSoftGlow,
+  drawMultiplier,
   CARD_WIDTH: W,
   CARD_HEIGHT: H
 };

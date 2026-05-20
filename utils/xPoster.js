@@ -397,8 +397,65 @@ function getXBotUsernameForCopy() {
   return cleaned || 'McGBot';
 }
 
+/**
+ * @param {string} tweetId
+ * @returns {Promise<{ id: string, createdAt?: string, likes: number, retweets: number, replies: number, quotes: number }|null>}
+ */
+async function fetchTweetPublicMetrics(tweetId) {
+  const id = String(tweetId || '').trim();
+  if (!id) return null;
+
+  const baseUrl = `${X_API_BASE}/tweets/${id}`;
+  try {
+    const response = await oauth1aGet(baseUrl, {
+      'tweet.fields': 'public_metrics,created_at'
+    });
+    const data = response?.data?.data;
+    if (!data) return null;
+    const pm = data.public_metrics || {};
+    return {
+      id,
+      createdAt: data.created_at || null,
+      likes: Number(pm.like_count) || 0,
+      retweets: Number(pm.retweet_count) || 0,
+      replies: Number(pm.reply_count) || 0,
+      quotes: Number(pm.quote_count) || 0
+    };
+  } catch (error) {
+    console.error('[XPoster] fetchTweetPublicMetrics failed:', error?.response?.data || error.message);
+    return null;
+  }
+}
+
+/**
+ * @param {string} tweetId
+ * @returns {Promise<{ success: boolean, id?: string, error?: unknown }>}
+ */
+async function deleteTweet(tweetId) {
+  const id = String(tweetId || '').trim();
+  if (!id) return { success: false, error: 'missing_tweet_id' };
+
+  const url = `${X_API_BASE}/tweets/${id}`;
+  try {
+    const authHeader = buildOAuthHeader('DELETE', url);
+    const response = await axios.delete(url, {
+      headers: { Authorization: authHeader }
+    });
+    const deleted = response?.data?.data?.deleted === true;
+    if (!deleted) {
+      console.warn('[XPoster] deleteTweet unexpected response:', response?.data);
+    }
+    return { success: deleted, id };
+  } catch (error) {
+    console.error('[XPoster] deleteTweet failed:', error?.response?.data || error.message);
+    return { success: false, error: error?.response?.data || error.message };
+  }
+}
+
 module.exports = {
   createPost,
+  deleteTweet,
+  fetchTweetPublicMetrics,
   uploadMediaPng,
   normalizePngUploadBuffer,
   buildOAuthHeader,

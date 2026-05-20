@@ -64,7 +64,8 @@ const {
   parseXmilestoneCommandParts,
   XMILESTONE_USAGE,
   defaultOriginalMilestoneX,
-  defaultReplyMilestoneX
+  defaultReplyMilestoneX,
+  getTestMilestoneCallerHandle
 } = require('./utils/milestoneXTestPost');
 const {
   buildOhlcvCandlestickBufferForTrackedCall
@@ -546,8 +547,8 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
     `• \`!xdigeststatus\` — Scheduled X digest / W·M engagement scheduler status + recent post audit (owner only)\n` +
     `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (desk summary cards), **7d** (weekday chart), or **monthly** (30d trend chart) digest to X (owner only)\n` +
-    `• \`!previewxmilestone user|bot <sol_ca> [mult]\` — **Preview card + caption in Discord** (no X; \`bot\` = green McGBot styling)\n` +
-    `• \`!testxmilestone user|bot\` — Post test milestone to X (optional \`<sol_ca>\`, \`[mult]\`, \`@caller\`). Quote test: \`!testxmilestone quote <post_id> user|bot [mult]\`\n` +
+    `• \`!previewxmilestone user|bot <sol_ca> [mult]\` — **Preview card + caption in Discord** (no X; omit CA for JUP default)\n` +
+    `• \`!testxmilestone user|bot <sol_ca> [mult]\` — **Live X post** (real Dex token; user tests credit **@McGzyy**). \`fresh\` skips auto-quote. Quote: \`!testxmilestone quote <post_id> user|bot [mult]\`\n` +
     `• \`!testweeklyrunner\` / \`!testtopcallermonth\` — Force **weekly runner** or **monthly top caller** X posts (owner only; monthly test skips Discord role)\n` +
     `• Scheduled daily digest is **on** when \`X_LEADERBOARD_DIGEST_ENABLED\` is on; set \`X_LEADERBOARD_DAILY_DIGEST_ENABLED=0\` to disable\n\n`;
 
@@ -3166,23 +3167,14 @@ if (lowerContent === '!scanner off') {
         }
 
         try {
+          const ownerId = String(process.env.BOT_OWNER_ID || '').trim();
           const callerId =
-            parsed.variant === 'user'
-              ? parsed.callerDiscordId || message.author.id
-              : null;
+            parsed.variant === 'user' ? ownerId || parsed.callerDiscordId || message.author.id : null;
           const preview = await buildMilestoneCardPreview({
             variant: parsed.variant,
             headlineMilestoneX: parsed.headlineMx,
             contractAddress: parsed.contractOverride,
-            firstCallerDiscordId: callerId,
-            discordMember: {
-              id: message.author.id,
-              username: message.author.username,
-              displayName:
-                message.member?.displayName ||
-                message.author.globalName ||
-                message.author.username
-            }
+            firstCallerDiscordId: callerId
           });
 
           if (!preview.success || !preview.png) {
@@ -3198,7 +3190,7 @@ if (lowerContent === '!scanner off') {
           await message.reply({
             content:
               `**${label} milestone preview** · **${parsed.headlineMx}×** · \`$${preview.tracked?.ticker || '?'}\` · ${preview.tracked?.tokenName || '—'}\n` +
-              `Live Dex: **${preview.liveOk ? 'yes' : 'fallback'}** · Caller: <@${callerId || message.author.id}> · Caption (${preview.caption?.length || 0} chars):\n` +
+              `Live Dex: **${preview.liveOk ? 'yes' : 'fallback'}** · Test caller: **@${getTestMilestoneCallerHandle()}** (user) / **McGBot** (bot) · Caption (${preview.caption?.length || 0} chars):\n` +
               `\`\`\`\n${preview.caption || ''}\n\`\`\``,
             files: [file],
             allowedMentions: { repliedUser: false }
@@ -3218,7 +3210,8 @@ if (lowerContent === '!scanner off') {
 
         const parsed = parseXmilestoneCommandParts(content, {
           defaultMx: defaultOriginalMilestoneX(),
-          allowReply: true
+          allowReply: true,
+          requireCa: true
         });
         if (!parsed.ok) {
           await replyText(message, parsed.error || XMILESTONE_USAGE);
@@ -3226,10 +3219,9 @@ if (lowerContent === '!scanner off') {
         }
 
         try {
+          const ownerId = String(process.env.BOT_OWNER_ID || '').trim();
           const callerId =
-            parsed.variant === 'user'
-              ? parsed.callerDiscordId || message.author.id
-              : null;
+            parsed.variant === 'user' ? ownerId || parsed.callerDiscordId || message.author.id : null;
           const result = await postTestMilestoneToX({
             variant: parsed.variant,
             quoteTweetId: parsed.quoteTweetId || parsed.replyToId || null,
@@ -3237,14 +3229,7 @@ if (lowerContent === '!scanner off') {
             headlineMilestoneX: parsed.headlineMx,
             contractAddress: parsed.contractOverride,
             firstCallerDiscordId: callerId,
-            discordMember: {
-              id: message.author.id,
-              username: message.author.username,
-              displayName:
-                message.member?.displayName ||
-                message.author.globalName ||
-                message.author.username
-            }
+            freshAnchor: parsed.freshAnchor === true
           });
 
           if (result.success) {
@@ -3261,7 +3246,14 @@ if (lowerContent === '!scanner off') {
                 quoteHint
             );
           } else {
-            await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
+            const extra =
+              result.hint || result.error === 'contract_address_required'
+                ? `\n${result.hint || 'Pass a Solana mint after user|bot.'}`
+                : '';
+            await replyText(
+              message,
+              `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}${extra}`
+            );
           }
         } catch (e) {
           console.error('[!testxmilestone]', e);

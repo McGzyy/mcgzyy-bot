@@ -3,6 +3,8 @@
 const { resolveScanThumbnailUrl } = require('./embedTokenThumbnail');
 const { formatDurationAgo, formatCoinAge } = require('./xCardRenderHelpers');
 const { buildAttributionLine } = require('./buildXPostText');
+const { resolveMcGBotAvatarPath } = require('./xBrandAssets');
+const { getXBotUsernameForCopy } = require('./xPoster');
 
 function getSupabaseForUserPrefs() {
   try {
@@ -146,13 +148,35 @@ async function buildMilestoneCardPayload(trackedCall, opts = {}) {
 
   const discordId = trackedCall?.firstCallerDiscordId || trackedCall?.firstCallerId || null;
   const profile = await fetchCallerProfile(discordId);
+  const testHandle = String(trackedCall?.testForceCallerXHandle || '').trim();
 
-  const callerName =
+  let callerName =
     profile.displayName ||
     trackedCall?.firstCallerPublicName ||
     trackedCall?.firstCallerDisplayName ||
     trackedCall?.firstCallerUsername ||
     (channel === 'bot' ? 'McGBot' : 'Community');
+
+  let callerAvatarUrl = profile.avatarUrl || null;
+  let callerAvatarLocalPath = '';
+  let callerXHandle =
+    profile.xVerified && profile.xHandle ? profile.xHandle : '';
+
+  if (channel === 'bot') {
+    callerName = 'McGBot';
+    callerXHandle = getXBotUsernameForCopy();
+    const botAvatarPath = resolveMcGBotAvatarPath();
+    if (botAvatarPath) {
+      callerAvatarLocalPath = botAvatarPath;
+      callerAvatarUrl = null;
+    }
+  } else if (testHandle) {
+    callerName = String(trackedCall?.firstCallerDisplayName || 'McGzyy').trim() || 'McGzyy';
+    callerXHandle = testHandle;
+    if (trackedCall?.testForceCallerAvatarUrl) {
+      callerAvatarUrl = String(trackedCall.testForceCallerAvatarUrl).trim();
+    }
+  }
 
   const attribution = await buildAttributionLine(trackedCall, displayX);
 
@@ -171,8 +195,9 @@ async function buildMilestoneCardPayload(trackedCall, opts = {}) {
     headlineMultiple,
     tokenImageUrl,
     callerName,
-    callerAvatarUrl: profile.avatarUrl || null,
-    callerXHandle: profile.xVerified && profile.xHandle ? profile.xHandle : '',
+    callerAvatarUrl,
+    callerAvatarLocalPath,
+    callerXHandle,
     attribution,
     calledAgo: formatDurationAgo(calledAtMs) || '—',
     coinAge: formatCoinAge({

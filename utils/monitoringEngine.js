@@ -153,15 +153,20 @@ function getResolutionLines(trackedCall) {
       : null;
 
     const latestId =
+      trackedCall.xActiveQuotePostId ||
       trackedCall.xLatestMilestonePostId ||
       trackedCall.xOriginalPostId ||
-      trackedCall.xLastReplyPostId ||
       null;
-    const postType = latestId
-      ? postedMilestones.length > 1
-        ? 'Standalone (quoted prior)'
-        : 'Standalone'
-      : 'Not Posted';
+    const kept = Array.isArray(trackedCall.xKeptQuotePostIds)
+      ? trackedCall.xKeptQuotePostIds.length
+      : 0;
+    const postType = trackedCall.xOriginalPostId
+      ? latestId === trackedCall.xActiveQuotePostId
+        ? `Anchor + live quote${kept ? ` (+${kept} kept)` : ''}`
+        : 'Anchor'
+      : latestId
+        ? 'Posted'
+        : 'Not Posted';
 
     lines.push(`**Posted to X:** ${latestId ? 'Yes' : 'No'}`);
     lines.push(`**Post Type:** ${postType}`);

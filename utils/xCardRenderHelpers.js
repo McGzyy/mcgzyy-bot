@@ -152,6 +152,23 @@ function formatCoinAge(p) {
  * @param {string} url
  * @returns {Promise<import('canvas').Image|null>}
  */
+/**
+ * @param {string} fileOrUrlPath absolute/relative file path
+ * @returns {Promise<import('canvas').Image|null>}
+ */
+async function loadLocalImage(fileOrUrlPath) {
+  const p = String(fileOrUrlPath || '').trim();
+  if (!p) return null;
+  try {
+    const fs = require('fs');
+    if (!fs.existsSync(p)) return null;
+    const { loadImage } = require('canvas');
+    return await loadImage(p);
+  } catch {
+    return null;
+  }
+}
+
 async function loadRemoteImage(url) {
   const u = String(url || '').trim();
   if (!u.startsWith('http')) return null;
@@ -244,6 +261,7 @@ module.exports = {
   formatDurationAgo,
   formatCoinAge,
   loadRemoteImage,
+  loadLocalImage,
   paintEliteBackground,
   channelAccent
 };

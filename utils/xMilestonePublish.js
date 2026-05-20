@@ -1,9 +1,10 @@
 'use strict';
 
-const { createPost } = require('./xPoster');
+const { createPost, deleteTweet } = require('./xPoster');
 const { buildXMilestonePostAssets } = require('./xMilestonePostAssets');
 const { computeApprovalAthX, getApprovalTriggerX } = require('./approvalMilestoneService');
 const { setXPostState } = require('./trackedCallsService');
+const { shouldKeepActiveQuote } = require('./xMilestoneQuotePolicy');
 
 const DEFAULT_BROADCAST_RUNGS = [10, 25, 50, 100];
 
@@ -13,9 +14,6 @@ function normalizeRungList(list) {
   );
 }
 
-/**
- * X feed rungs (subset of approval ladder). Env: `X_BROADCAST_MILESTONES=10,25,50,100`
- */
 function getBroadcastMilestoneLadder() {
   const trigger = getApprovalTriggerX();
   let rungs = DEFAULT_BROADCAST_RUNGS;
@@ -32,11 +30,6 @@ function getBroadcastMilestoneLadder() {
   return normalizeRungList(rungs.filter(r => r >= trigger));
 }
 
-/**
- * Highest broadcast rung the ATH qualifies for that is not yet on X (one post per invoke).
- * @param {number} currentX
- * @param {number[]} postedMilestones
- */
 function resolveNextBroadcastMilestone(currentX, postedMilestones = []) {
   const x = Number(currentX);
   if (!Number.isFinite(x) || x < 1) return 0;
@@ -73,13 +66,6 @@ function athCatchUpEnabled() {
   return raw !== '0' && raw !== 'false' && raw !== 'no';
 }
 
-function quoteTweetsEnabled() {
-  const raw = String(process.env.X_MILESTONE_QUOTE_PREVIOUS ?? '1')
-    .trim()
-    .toLowerCase();
-  return raw !== '0' && raw !== 'false' && raw !== 'no';
-}
-
 function previousPostedMilestone(postedMilestones = []) {
   const nums = (Array.isArray(postedMilestones) ? postedMilestones : [])
     .map(n => Number(n))
@@ -89,11 +75,11 @@ function previousPostedMilestone(postedMilestones = []) {
 }
 
 /**
- * What to post next: a new broadcast rung and/or an ATH catch-up between rungs.
  * @param {number} currentX
  * @param {object} trackedCall
  * @returns {{
  *   kind: 'broadcast'|'ath_catchup',
+ *   postMode: 'anchor'|'quote_update',
  *   broadcastRung: number,
  *   headlineX: number,
  *   quotePreviousAthX: number
@@ -113,56 +99,54 @@ function resolveMilestonePublishPlan(currentX, trackedCall) {
     Number(trackedCall?.xLastPostedAthX || 0) || previousPostedMilestone(posted)
   );
 
+  const hasAnchor = Boolean(String(trackedCall?.xOriginalPostId || '').trim());
+  let inner = null;
+
   const broadcast = resolveNextBroadcastMilestone(athX, posted);
   if (broadcast) {
-    const prevAth = lastPostedAthX > 0 ? lastPostedAthX : 0;
-    return {
+    inner = {
       kind: 'broadcast',
       broadcastRung: broadcast,
       headlineX: Math.max(broadcast, athX),
-      quotePreviousAthX: prevAth
+      quotePreviousAthX: lastPostedAthX > 0 ? lastPostedAthX : 0
     };
+  } else if (athCatchUpEnabled() && posted.length) {
+    const lastBroadcast = Math.max(...posted);
+    const ladder = getBroadcastMilestoneLadder();
+    const nextRung = ladder.find(r => r > lastBroadcast);
+    if (nextRung == null || athX < nextRung) {
+      if (!postedCatchUps.includes(lastBroadcast)) {
+        const baseAth = lastPostedAthX > 0 ? lastPostedAthX : lastBroadcast;
+        if (athX > baseAth + 0.05) {
+          const minRatio = parseEnvFloat('X_MILESTONE_ATH_CATCHUP_RATIO', 1.2);
+          const minDelta = parseEnvFloat('X_MILESTONE_ATH_CATCHUP_MIN_X', 12);
+          if (athX >= baseAth * minRatio || athX >= baseAth + minDelta) {
+            inner = {
+              kind: 'ath_catchup',
+              broadcastRung: lastBroadcast,
+              headlineX: athX,
+              quotePreviousAthX: baseAth
+            };
+          }
+        }
+      }
+    }
   }
 
-  if (!athCatchUpEnabled() || !posted.length) return null;
-
-  const lastBroadcast = Math.max(...posted);
-  const ladder = getBroadcastMilestoneLadder();
-  const nextRung = ladder.find(r => r > lastBroadcast);
-  if (nextRung != null && athX >= nextRung) return null;
-
-  if (postedCatchUps.includes(lastBroadcast)) return null;
-
-  const baseAth = lastPostedAthX > 0 ? lastPostedAthX : lastBroadcast;
-  if (athX <= baseAth + 0.05) return null;
-
-  const minRatio = parseEnvFloat('X_MILESTONE_ATH_CATCHUP_RATIO', 1.2);
-  const minDelta = parseEnvFloat('X_MILESTONE_ATH_CATCHUP_MIN_X', 12);
-  const grewEnough = athX >= baseAth * minRatio || athX >= baseAth + minDelta;
-  if (!grewEnough) return null;
+  if (!inner) return null;
 
   return {
-    kind: 'ath_catchup',
-    broadcastRung: lastBroadcast,
-    headlineX: athX,
-    quotePreviousAthX: baseAth
+    ...inner,
+    postMode: hasAnchor ? 'quote_update' : 'anchor'
   };
 }
 
-/**
- * Prior milestone tweet to quote (standalone chain only).
- * @param {object} trackedCall
- */
-function resolveQuoteTweetId(trackedCall) {
-  if (!quoteTweetsEnabled()) return null;
-  const id =
-    String(trackedCall?.xLatestMilestonePostId || '').trim() ||
-    String(trackedCall?.xOriginalPostId || '').trim();
-  return id || null;
+function normalizeKeptQuoteIds(trackedCall) {
+  const raw = Array.isArray(trackedCall?.xKeptQuotePostIds) ? trackedCall.xKeptQuotePostIds : [];
+  return [...new Set(raw.map(id => String(id || '').trim()).filter(Boolean))];
 }
 
 /**
- * Publish one standalone milestone (+ optional quote of the last milestone tweet).
  * @param {object} trackedCall
  * @param {{ latestScan?: object|null, auditCategory?: string }} [opts]
  */
@@ -184,13 +168,21 @@ async function publishMilestoneToX(trackedCall, opts = {}) {
     ? trackedCall.xPostedAthCatchUps
     : [];
 
-  const quoteTweetId = resolveQuoteTweetId(trackedCall);
+  const isAnchor = plan.postMode === 'anchor';
+  const anchorId = String(trackedCall?.xOriginalPostId || '').trim();
+  const quoteTargetId = isAnchor ? '' : anchorId;
+
+  if (!isAnchor && !quoteTargetId) {
+    return { success: false, reason: 'missing_anchor' };
+  }
+
   const quotePrev =
-    quoteTweetId && plan.quotePreviousAthX > 0 ? plan.quotePreviousAthX : 0;
+    !isAnchor && plan.quotePreviousAthX > 0 ? plan.quotePreviousAthX : 0;
 
   const assets = await buildXMilestonePostAssets(trackedCall, {
     milestoneX: plan.headlineX,
     headlineX: plan.headlineX,
+    postRole: isAnchor ? 'anchor' : 'update',
     isReply: false,
     latestScan: opts.latestScan || null,
     quotePreviousMilestone: quotePrev
@@ -209,14 +201,16 @@ async function publishMilestoneToX(trackedCall, opts = {}) {
         ? 'milestone_watch'
         : plan.kind === 'ath_catchup'
           ? 'milestone_ath_catchup'
-          : 'milestone_user');
+          : isAnchor
+            ? 'milestone_anchor'
+            : 'milestone_user');
 
   const result = await createPost(assets.caption, null, assets.png || undefined, {
-    quoteTweetId,
+    quoteTweetId: quoteTargetId || undefined,
     audit: {
       category: milestoneAuditCat,
       callSourceType: trackedCall.callSourceType || null,
-      quoted: Boolean(quoteTweetId)
+      quoted: Boolean(quoteTargetId)
     }
   });
 
@@ -226,8 +220,36 @@ async function publishMilestoneToX(trackedCall, opts = {}) {
       reason: 'x_post_failed',
       error: result.error || null,
       milestoneX: plan.headlineX,
-      kind: plan.kind
+      kind: plan.kind,
+      postMode: plan.postMode
     };
+  }
+
+  let deletedActiveQuote = false;
+  let keptActiveQuote = false;
+  const keptIds = normalizeKeptQuoteIds(trackedCall);
+  const activeQuoteId = String(trackedCall?.xActiveQuotePostId || '').trim();
+
+  if (!isAnchor && activeQuoteId && activeQuoteId !== result.id) {
+    const decision = await shouldKeepActiveQuote(
+      activeQuoteId,
+      trackedCall.xActiveQuotePostedAt || null
+    );
+    if (decision.keep) {
+      if (!keptIds.includes(activeQuoteId)) {
+        keptIds.push(activeQuoteId);
+      }
+      keptActiveQuote = true;
+      console.log(
+        `[XMilestone] Keeping quote ${activeQuoteId} (${decision.reason}; ${decision.ageHours?.toFixed(1)}h, ♥${decision.likes ?? 0})`
+      );
+    } else {
+      const del = await deleteTweet(activeQuoteId);
+      deletedActiveQuote = del.success === true;
+      console.log(
+        `[XMilestone] Replace quote ${activeQuoteId} (${decision.reason}; deleted=${deletedActiveQuote})`
+      );
+    }
   }
 
   let updatedMilestones = [...postedMilestones];
@@ -243,24 +265,32 @@ async function publishMilestoneToX(trackedCall, opts = {}) {
       .sort((a, b) => a - b);
   }
 
+  const nowIso = new Date().toISOString();
   const updates = {
-    xLastPostedAt: new Date().toISOString(),
+    xLastPostedAt: nowIso,
     xPostedMilestones: updatedMilestones,
     xPostedAthCatchUps: updatedCatchUps,
     xLatestMilestonePostId: result.id,
-    xLastPostedAthX: plan.headlineX
+    xLastPostedAthX: plan.headlineX,
+    xKeptQuotePostIds: keptIds
   };
 
-  if (!trackedCall.xOriginalPostId) {
+  if (isAnchor) {
     updates.xOriginalPostId = result.id;
+    updates.xActiveQuotePostId = null;
+    updates.xActiveQuotePostedAt = null;
+  } else {
+    updates.xActiveQuotePostId = result.id;
+    updates.xActiveQuotePostedAt = nowIso;
   }
 
   setXPostState(trackedCall.contractAddress, updates);
 
+  const modeLabel = isAnchor ? 'anchor' : 'quote update';
   const kindLabel = plan.kind === 'ath_catchup' ? 'ATH catch-up' : 'broadcast';
   console.log(
-    `[XMilestone] ${kindLabel} ${plan.headlineX}× (rung ${plan.broadcastRung}×) for ${trackedCall.tokenName || trackedCall.contractAddress}` +
-      (quoteTweetId ? ` (quote ${quoteTweetId})` : '')
+    `[XMilestone] ${modeLabel} ${kindLabel} ${plan.headlineX}× for ${trackedCall.tokenName || trackedCall.contractAddress}` +
+      (quoteTargetId ? ` (quote anchor ${quoteTargetId})` : '')
   );
 
   return {
@@ -268,8 +298,11 @@ async function publishMilestoneToX(trackedCall, opts = {}) {
     milestoneX: plan.headlineX,
     broadcastRung: plan.broadcastRung,
     kind: plan.kind,
+    postMode: plan.postMode,
     postId: result.id,
-    quoted: Boolean(quoteTweetId),
+    quoted: Boolean(quoteTargetId),
+    keptActiveQuote,
+    deletedActiveQuote,
     broadcast: plan.kind === 'broadcast'
   };
 }

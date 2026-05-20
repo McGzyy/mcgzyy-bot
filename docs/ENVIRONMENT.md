@@ -220,8 +220,12 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_MILESTONE_ATH_CATCHUP_ENABLED`** | Default **on** — if ATH grows **materially** after a broadcast post but **before** the next rung (default: **+20%** or **+12×**, one catch-up per rung), post an **ATH catch-up** (quote-tweet) so a 50× post is not left showing while peak was 72×. |
 | **`X_MILESTONE_ATH_CATCHUP_RATIO`** | Min ATH growth vs last posted tweet for catch-up (default `1.2` = 20% above). |
 | **`X_MILESTONE_ATH_CATCHUP_MIN_X`** | Min absolute ATH× gain vs last posted tweet for catch-up (default `12`). |
-| **`X_MILESTONE_QUOTE_PREVIOUS`** | Default **on** — follow-up broadcast milestones are **standalone quote-tweets** of the last milestone post (keeps prior engagement; peak visible in feed). Set `0` / `false` to disable. |
-| **`X_MILESTONE_CAPTION_INCLUDE_BIO_LINE`** | Default **on** — last caption line is `🔹 Dashboard link in bio 🔹`. Set `0` / `false` to omit. |
+| **`X_MILESTONE_QUOTE_KEEP_MIN_AGE_HOURS`** | Min age before a quote can be **kept** when rotating (default `4`). Younger quotes are replaced (deleted) when a newer milestone posts. |
+| **`X_MILESTONE_QUOTE_KEEP_MIN_LIKES`** | Keep quote if age ≥ min hours **and** likes ≥ this (default `10`). |
+| **`X_MILESTONE_QUOTE_KEEP_MIN_RETWEETS`** | Keep quote if age ≥ min hours **and** retweets ≥ this (default `2`). Either likes or retweets threshold can qualify. |
+| **`X_MILESTONE_CAPTION_INCLUDE_BIO_LINE`** | Legacy multi-line captions only. Default milestone caption is one line: `🔹 Call by: @… 🔹 Tracked LIVE via @McGBot 🔹 Dashboard link in bio 🔹`. |
+| **`X_TEST_MILESTONE_CALLER_HANDLE`** | X handle for `!testxmilestone user` card/caption (default `McGzyy`). Uses `BOT_OWNER_ID` Discord avatar when set. |
+| **`X_MILESTONE_MCGBOT_AVATAR_PATH`** | Optional path to McGBot profile PNG for **bot** milestone cards (default `branding/mcgbot-avatar.png`). |
 | **`X_MILESTONE_CAPTION_INCLUDE_LINK`** | Default **off** — set `1` / `true` to also append plain `mcgbot.xyz`. |
 | **`X_MILESTONE_CAPTION_INCLUDE_CA`** | Default **off** — set `1` / `true` to append a Dexscreener URL in the caption (stats stay on the card image). |
 | **`X_MILESTONE_CAPTION_LEGACY`** | Default **off** — set `1` / `true` for the old one-line caption (`Member call · 25× · TICKER`). |

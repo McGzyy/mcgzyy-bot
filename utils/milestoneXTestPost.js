@@ -15,6 +15,43 @@ const DEFAULT_TEST_MILESTONE_CA =
   String(process.env.X_TEST_MILESTONE_CONTRACT || '').trim() ||
   'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN';
 
+function stripAt(handle) {
+  return String(handle || '')
+    .trim()
+    .replace(/^@+/, '');
+}
+
+/** X handle shown on test cards/captions for the user variant (default @McGzyy). */
+function getTestMilestoneCallerHandle() {
+  return stripAt(process.env.X_TEST_MILESTONE_CALLER_HANDLE || 'McGzyy') || 'McGzyy';
+}
+
+/**
+ * Force synthetic milestone tests to credit the bot owner + test X handle.
+ * @param {object} tracked
+ * @param {'user'|'bot'} variant
+ */
+function applyTestMilestoneIdentity(tracked, variant) {
+  if (variant === 'bot') {
+    tracked.callSourceType = 'bot_call';
+    tracked.firstCallerDiscordId = null;
+    tracked.firstCallerUsername = 'McGBot';
+    tracked.firstCallerDisplayName = 'McGBot';
+    tracked.firstCallerPublicName = 'McGBot';
+    delete tracked.testForceCallerXHandle;
+    return;
+  }
+
+  tracked.callSourceType = 'user_call';
+  const ownerId = String(process.env.BOT_OWNER_ID || '').trim();
+  const handle = getTestMilestoneCallerHandle();
+  tracked.firstCallerDiscordId = ownerId || tracked.firstCallerDiscordId || null;
+  tracked.firstCallerUsername = handle;
+  tracked.firstCallerDisplayName = handle;
+  tracked.firstCallerPublicName = `@${handle}`;
+  tracked.testForceCallerXHandle = handle;
+}
+
 /** @deprecated use DEFAULT_TEST_MILESTONE_CA */
 const DEFAULT_WRAP_SOL = DEFAULT_TEST_MILESTONE_CA;
 
@@ -202,8 +239,10 @@ async function buildMilestoneCardPreview(p) {
     discordMember: p.discordMember || null
   });
   tracked.headlineMult = mx;
+  applyTestMilestoneIdentity(tracked, variant);
 
   const { tracked: enriched, latestScan, liveOk } = await enrichMilestoneTestFromLiveData(tracked, ca);
+  applyTestMilestoneIdentity(enriched, variant);
 
   const entry = Number(enriched.firstCalledMarketCap || 0);
   if (entry > 0) {
@@ -214,8 +253,18 @@ async function buildMilestoneCardPreview(p) {
   }
 
   const quotePrev = Number(p.quotePreviousMilestone) || 0;
+  const postRole =
+    p.postRole === 'anchor'
+      ? 'anchor'
+      : p.postRole === 'update'
+        ? 'update'
+        : quotePrev > 0
+          ? 'update'
+          : 'anchor';
   const { caption, png, usedDataCard } = await buildXMilestonePostAssets(enriched, {
     milestoneX: mx,
+    headlineX: mx,
+    postRole,
     isReply: false,
     latestScan,
     quotePreviousMilestone: quotePrev
@@ -244,21 +293,42 @@ async function buildMilestoneCardPreview(p) {
  */
 async function postTestMilestoneToX(p) {
   const variant = p.variant === 'bot' ? 'bot' : 'user';
-  const quoteTweetId = String(p.quoteTweetId || p.replyToTweetId || '').trim();
   const mx = Number(p.headlineMilestoneX);
   if (!Number.isFinite(mx) || mx < 2) {
     return { success: false, error: 'headlineMilestoneX must be >= 2' };
   }
 
+  const ca = String(p.contractAddress || '').trim();
+  if (!ca) {
+    return {
+      success: false,
+      error: 'contract_address_required',
+      hint: 'Pass a Solana mint: !testxmilestone user|bot <sol_ca> [mult]'
+    };
+  }
+
   const quotePrev = Number(p.quotePreviousMilestone) || 0;
+
+  let quoteTweetId = String(p.quoteTweetId || p.replyToTweetId || '').trim();
+  if (!quoteTweetId && !p.freshAnchor) {
+    try {
+      await initTrackedCallsStore();
+      const existing = getTrackedCall(ca);
+      const anchor = String(existing?.xOriginalPostId || '').trim();
+      if (anchor) quoteTweetId = anchor;
+    } catch {
+      /* optional */
+    }
+  }
 
   const preview = await buildMilestoneCardPreview({
     variant,
     headlineMilestoneX: mx,
-    contractAddress: p.contractAddress,
+    contractAddress: ca,
     firstCallerDiscordId: p.firstCallerDiscordId,
     discordMember: p.discordMember,
-    quotePreviousMilestone: quotePrev
+    quotePreviousMilestone: quotePrev,
+    postRole: quoteTweetId ? 'update' : 'anchor'
   });
 
   if (!preview.success) {
@@ -288,6 +358,20 @@ async function postTestMilestoneToX(p) {
       quoted: Boolean(quoteTweetId)
     }
   });
+
+  if (result.success && result.id && !quoteTweetId) {
+    try {
+      const { setXPostState } = require('./trackedCallsService');
+      setXPostState(ca, {
+        xOriginalPostId: result.id,
+        xActiveQuotePostId: null,
+        xActiveQuotePostedAt: null
+      });
+    } catch {
+      /* optional */
+    }
+  }
+
   return {
     success: !!result.success,
     id: result.id || null,
@@ -295,6 +379,7 @@ async function postTestMilestoneToX(p) {
     textLength: postText.length,
     chartAttached: !!chartBuf,
     quoted: Boolean(quoteTweetId),
+    quoteTweetId: quoteTweetId || null,
     dataCard: usedDataCard,
     liveToken: liveOk,
     ticker: tracked.ticker,
@@ -325,12 +410,12 @@ function defaultReplyMilestoneX() {
 
 const XMILESTONE_USAGE =
   '**Usage**\n' +
-  '• `!previewxmilestone user <sol_ca> [mult]` / `bot` — **Discord preview** (card + caption; no X)\n' +
-  '• `!testxmilestone user <sol_ca> [mult]` — post to X (member styling + caption)\n' +
-  '• `!testxmilestone bot <sol_ca> [mult]` — post to X (green McGBot card + caption)\n' +
-  '• `!testxmilestone quote <post_id> user|bot [mult]` — standalone **quote-tweet** test (optional `quotePreviousMilestone` via ladder)\n' +
-  '• Add `@member` before mult to use another caller’s Supabase avatar (user variant)\n' +
-  'Default mint: `X_TEST_MILESTONE_CONTRACT` env, else **JUP** (`JUPyiwrY…ZsDvCN`). Any Solana CA works.';
+  '• `!previewxmilestone user|bot <sol_ca> [mult]` — **Discord preview** (card + caption; no X). Omit CA for default **JUP**.\n' +
+  '• `!testxmilestone user <sol_ca> [mult]` — **live X post** (blue member card; caller **@McGzyy** via `X_TEST_MILESTONE_CALLER_HANDLE`)\n' +
+  '• `!testxmilestone bot <sol_ca> [mult]` — **live X post** (green McGBot card; McGBot avatar from `branding/mcgbot-avatar.png`)\n' +
+  '• `!testxmilestone quote <post_id> user|bot [mult]` — quote-tweet an existing anchor/update\n' +
+  '• `!testxmilestone fresh user|bot <sol_ca> [mult]` — same as above but ignores stored anchor when auto-quoting\n' +
+  'Synthetic **mult** and MC on the card; token name/logo from **live Dex**. `<sol_ca>` is **required** for `!testxmilestone`.';
 
 /**
  * @param {string} content full message
@@ -346,10 +431,16 @@ function parseXmilestoneCommandParts(content, opts) {
   let variant = null;
   let replyToId = '';
   let headlineMx = 0;
+  let freshAnchor = false;
   /** @type {string | null} */
   let contractOverride = null;
   /** @type {string | null} */
   let callerDiscordId = null;
+
+  if (parts[0] && String(parts[0]).toLowerCase() === 'fresh') {
+    freshAnchor = true;
+    parts.shift();
+  }
 
   const isLikelySolanaCA = s => /^[1-9A-HJ-NP-Za-km-z]{32,48}$/.test(String(s || '').trim());
   const mentionId = s => {
@@ -381,6 +472,15 @@ function parseXmilestoneCommandParts(content, opts) {
       parts[3] != null && parts[3] !== '' && Number.isFinite(Number(parts[3]))
         ? Number(parts[3])
         : defaultReplyMilestoneX();
+    if (opts.requireCa && !contractOverride) {
+      return {
+        ok: false,
+        error:
+          '❌ `!testxmilestone quote` needs a Solana mint when testing a specific token card.\n\n' +
+          XMILESTONE_USAGE
+      };
+    }
+
     return {
       ok: true,
       variant,
@@ -389,7 +489,8 @@ function parseXmilestoneCommandParts(content, opts) {
       headlineMx,
       quotePreviousMilestone: 10,
       contractOverride,
-      callerDiscordId
+      callerDiscordId,
+      freshAnchor
     };
   }
 
@@ -426,7 +527,25 @@ function parseXmilestoneCommandParts(content, opts) {
     return { ok: false, error: '❌ Multiplier must be a number ≥ 2.' };
   }
 
-  return { ok: true, variant, replyToId, headlineMx, contractOverride, callerDiscordId };
+  if (opts.requireCa && !contractOverride) {
+    return {
+      ok: false,
+      error:
+        '❌ `!testxmilestone` requires a Solana contract address.\n' +
+        'Example: `!testxmilestone user JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN 25`\n\n' +
+        XMILESTONE_USAGE
+    };
+  }
+
+  return {
+    ok: true,
+    variant,
+    replyToId,
+    headlineMx,
+    contractOverride,
+    callerDiscordId,
+    freshAnchor
+  };
 }
 
 module.exports = {
@@ -439,5 +558,7 @@ module.exports = {
   writeMilestonePreviewFile,
   DEFAULT_TEST_MILESTONE_CA,
   defaultOriginalMilestoneX,
-  defaultReplyMilestoneX
+  defaultReplyMilestoneX,
+  getTestMilestoneCallerHandle,
+  applyTestMilestoneIdentity
 };

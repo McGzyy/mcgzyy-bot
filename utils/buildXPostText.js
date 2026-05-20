@@ -1,6 +1,7 @@
 'use strict';
 
 const { formatDurationAgo } = require('./xCardRenderHelpers');
+const { getXBotUsernameForCopy } = require('./xPoster');
 
 /**
  * Premium X (Twitter) copy — milestones, approvals, and manual posts.
@@ -315,17 +316,47 @@ function milestoneDashboardBioLine(_trackedCall) {
 }
 
 /**
+ * @param {object} trackedCall
+ * @param {number} [multipleX]
+ * @returns {Promise<string>} e.g. @McGzyy
+ */
+async function resolveMilestoneCallerXTag(trackedCall, multipleX = 0) {
+  const testHandle = stripAt(trackedCall?.testForceCallerXHandle);
+  if (testHandle) return `@${testHandle}`;
+
+  if (trackedCall?.callSourceType === 'bot_call') {
+    return `@${getXBotUsernameForCopy()}`;
+  }
+
+  const attribution = await buildAttributionLine(trackedCall, multipleX);
+  return attributionToXTag(attribution) || 'Member';
+}
+
+/**
+ * One-line milestone caption (stats live on the card image).
+ * @param {object} trackedCall
+ * @param {number} [multipleX]
+ */
+async function buildMinimalXMilestoneCaption(trackedCall, multipleX = 0) {
+  const callerTag = await resolveMilestoneCallerXTag(trackedCall, multipleX);
+  const botTag = `@${getXBotUsernameForCopy()}`;
+  const segments = [
+    `Call by: ${callerTag}`,
+    `Tracked LIVE via ${botTag}`,
+    'Dashboard link in bio'
+  ];
+  return `🔹 ${segments.join(' 🔹 ')} 🔹`;
+}
+
+/**
  * Short X caption when stats live on the milestone data card image.
  * Reply milestones: empty caption (image-only once a reply card exists).
  * @param {object} trackedCall
- * @param {{ milestoneX?: number, isReply?: boolean, quotePreviousMilestone?: number }} [opts]
+ * @param {{ milestoneX?: number, isReply?: boolean, quotePreviousMilestone?: number, postRole?: 'anchor'|'update' }} [opts]
  */
 async function buildXMilestoneCaption(trackedCall, opts = {}) {
   const milestoneX = Number(opts.milestoneX) > 0 ? Number(opts.milestoneX) : 0;
   const isReply = opts.isReply === true;
-  const isBot = trackedCall?.callSourceType === 'bot_call';
-  const isWatch = trackedCall?.callSourceType === 'watch_only';
-  const quotePrev = Number(opts.quotePreviousMilestone) || 0;
 
   if (isReply) {
     return '';
@@ -335,6 +366,9 @@ async function buildXMilestoneCaption(trackedCall, opts = {}) {
     .trim()
     .replace(/^\$+/, '')
     .toUpperCase();
+
+  const isBot = trackedCall?.callSourceType === 'bot_call';
+  const isWatch = trackedCall?.callSourceType === 'watch_only';
 
   if (milestoneCaptionLegacyEnabled()) {
     const channel = isBot ? 'McGBot' : isWatch ? 'Watch' : 'Member call';
@@ -358,64 +392,9 @@ async function buildXMilestoneCaption(trackedCall, opts = {}) {
     firstCalledMc > 0 ? Number((latestMc / firstCalledMc).toFixed(2)) : 0;
   const athX =
     firstCalledMc > 0 ? Number((athVal / firstCalledMc).toFixed(2)) : 0;
-  const multLabel = formatMilestoneXLabel(milestoneX);
-  const entryStr = formatUsd(firstCalledMc);
-  const peakStr = formatUsd(athVal);
-  const hasMcStory = firstCalledMc > 0 && athVal > 0;
+  const displayX = athX > 0 ? athX : spotX > 0 ? spotX : milestoneX;
 
-  const calledAtRaw =
-    trackedCall?.firstCalledAt || trackedCall?.calledAt || trackedCall?.createdAt || null;
-  const calledAgo = formatDurationAgo(
-    calledAtRaw != null ? new Date(calledAtRaw).getTime() : null
-  );
-
-  const attribution = await buildAttributionLine(
-    trackedCall,
-    athX > 0 ? athX : spotX > 0 ? spotX : milestoneX
-  );
-  const callerTag = attributionToXTag(attribution);
-
-  const lines = [];
-  const prevLabel = quotePrev >= 1.01 ? formatMilestoneXLabel(quotePrev) : '';
-
-  if (prevLabel && multLabel) {
-    let hook = `Update · $${ticker} ${prevLabel} → ${multLabel}`;
-    if (hasMcStory) hook += ` · ${entryStr} → ${peakStr}`;
-    lines.push(hook);
-    if (isBot) {
-      lines.push(calledAgo ? `McGBot auto-call · called ${calledAgo}` : 'McGBot auto-call');
-    } else if (isWatch) {
-      lines.push(calledAgo ? `Watch alert · called ${calledAgo}` : 'Watch alert');
-    } else if (callerTag) {
-      lines.push(calledAgo ? `${callerTag} · called ${calledAgo}` : callerTag);
-    } else {
-      lines.push(calledAgo ? `Member call · called ${calledAgo}` : 'Member call');
-    }
-  } else if (isBot) {
-    let hook = `$${ticker}`;
-    if (multLabel) hook += ` hit ${multLabel}`;
-    if (hasMcStory) hook += ` — ${entryStr} → ${peakStr}`;
-    lines.push(hook);
-    lines.push(calledAgo ? `McGBot auto-call · called ${calledAgo}` : 'McGBot auto-call');
-  } else if (isWatch) {
-    let hook = `$${ticker}`;
-    if (multLabel) hook += ` · ${multLabel}`;
-    if (hasMcStory) hook += ` — ${entryStr} → ${peakStr}`;
-    lines.push(hook);
-    lines.push(calledAgo ? `Watch alert · called ${calledAgo}` : 'Watch alert');
-  } else {
-    let hook = `$${ticker}`;
-    if (multLabel) hook += ` hit ${multLabel}`;
-    if (hasMcStory) hook += ` — ${entryStr} → ${peakStr}`;
-    lines.push(hook);
-    if (callerTag) {
-      lines.push(calledAgo ? `${callerTag} · called ${calledAgo}` : callerTag);
-    } else {
-      lines.push(calledAgo ? `Member call · called ${calledAgo}` : 'Member call');
-    }
-  }
-
-  return appendMilestoneCaptionExtras(lines, trackedCall).join('\n').trim();
+  return buildMinimalXMilestoneCaption(trackedCall, displayX);
 }
 
 /**

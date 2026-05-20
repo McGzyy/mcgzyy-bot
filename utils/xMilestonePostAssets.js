@@ -17,7 +17,7 @@ function useLegacyHeroFallback() {
  * Caption + optional PNG for milestone X posts (original posts get the data card).
  *
  * @param {object} trackedCall
- * @param {{ milestoneX: number, headlineX?: number, isReply?: boolean, latestScan?: object|null, quotePreviousMilestone?: number }} opts
+ * @param {{ milestoneX: number, headlineX?: number, postRole?: 'anchor'|'update', isReply?: boolean, latestScan?: object|null, quotePreviousMilestone?: number }} opts
  * @returns {Promise<{ caption: string, png: Buffer|null, usedDataCard: boolean, replyPending?: boolean }>}
  */
 async function buildXMilestonePostAssets(trackedCall, opts = {}) {
@@ -26,10 +26,12 @@ async function buildXMilestonePostAssets(trackedCall, opts = {}) {
   const isReply = opts.isReply === true;
   const latestScan = opts.latestScan || null;
   const quotePreviousMilestone = Number(opts.quotePreviousMilestone) || 0;
+  const postRole = opts.postRole === 'anchor' ? 'anchor' : opts.postRole === 'update' ? 'update' : '';
 
   const caption = await buildXMilestoneCaption(trackedCall, {
     milestoneX: headlineX,
     isReply,
+    postRole,
     quotePreviousMilestone
   });
 

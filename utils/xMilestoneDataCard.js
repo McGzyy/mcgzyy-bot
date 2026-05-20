@@ -10,10 +10,11 @@ const {
   formatUsd,
   formatMultiple,
   loadRemoteImage,
+  loadLocalImage,
   channelAccent,
   roundRectPath
 } = require('./xCardRenderHelpers');
-const { loadMgMarkImage } = require('./xBrandAssets');
+const { loadMgMarkImage, loadMcGBotAvatarImage } = require('./xBrandAssets');
 
 const W = 1200;
 const H = 820;
@@ -298,9 +299,16 @@ async function buildMilestoneDataCardPng(payload) {
   const glow =
     payload.channel === 'bot' ? 'rgba(34, 197, 94, 0.16)' : 'rgba(59, 130, 246, 0.16)';
 
+  const avatarLoad =
+    payload.callerAvatarLocalPath
+      ? loadLocalImage(payload.callerAvatarLocalPath)
+      : payload.channel === 'bot'
+        ? loadMcGBotAvatarImage()
+        : loadRemoteImage(payload.callerAvatarUrl);
+
   const [tokenImg, avatarImg, mgImg] = await Promise.all([
     loadRemoteImage(payload.tokenImageUrl),
-    loadRemoteImage(payload.callerAvatarUrl),
+    avatarLoad,
     loadMgMarkImage()
   ]);
 

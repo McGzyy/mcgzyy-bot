@@ -132,6 +132,9 @@ function normalizeTrackedCall(call = {}) {
     lastPostedX: Number(call.lastPostedX || 0),
     xOriginalPostId: call.xOriginalPostId || null,
     xLatestMilestonePostId: call.xLatestMilestonePostId || null,
+    xActiveQuotePostId: call.xActiveQuotePostId || null,
+    xActiveQuotePostedAt: call.xActiveQuotePostedAt || null,
+    xKeptQuotePostIds: Array.isArray(call.xKeptQuotePostIds) ? call.xKeptQuotePostIds : [],
     xLastPostedAthX: Number(call.xLastPostedAthX || 0) || 0,
     xPostedAthCatchUps: Array.isArray(call.xPostedAthCatchUps)
       ? call.xPostedAthCatchUps
@@ -554,6 +557,11 @@ function saveTrackedCall(
       lastPostedX: Number(existing.lastPostedX || 0),
       xOriginalPostId: existing.xOriginalPostId || null,
       xLatestMilestonePostId: existing.xLatestMilestonePostId || null,
+      xActiveQuotePostId: existing.xActiveQuotePostId || null,
+      xActiveQuotePostedAt: existing.xActiveQuotePostedAt || null,
+      xKeptQuotePostIds: Array.isArray(existing.xKeptQuotePostIds)
+        ? existing.xKeptQuotePostIds
+        : [],
       xLastPostedAthX: Number(existing.xLastPostedAthX || 0) || 0,
       xPostedAthCatchUps: Array.isArray(existing.xPostedAthCatchUps)
         ? existing.xPostedAthCatchUps
@@ -636,6 +644,9 @@ function saveTrackedCall(
     lastPostedX: 0,
     xOriginalPostId: null,
     xLatestMilestonePostId: null,
+    xActiveQuotePostId: null,
+    xActiveQuotePostedAt: null,
+    xKeptQuotePostIds: [],
     xLastPostedAthX: 0,
     xPostedAthCatchUps: [],
     xLastReplyPostId: null,
@@ -921,21 +932,30 @@ function setApprovalStatus(
  * =========================
  */
 
+function xPostField(updates, key) {
+  return Object.prototype.hasOwnProperty.call(updates, key) ? updates[key] : undefined;
+}
+
 function setXPostState(contractAddress, updates = {}) {
   return updateTrackedCallData(contractAddress, {
     xApproved: updates.xApproved ?? undefined,
     xPostedMilestones: Array.isArray(updates.xPostedMilestones)
       ? updates.xPostedMilestones
       : undefined,
-    xOriginalPostId: updates.xOriginalPostId ?? undefined,
-    xLatestMilestonePostId: updates.xLatestMilestonePostId ?? undefined,
-    xLastPostedAthX: updates.xLastPostedAthX ?? undefined,
+    xOriginalPostId: xPostField(updates, 'xOriginalPostId'),
+    xLatestMilestonePostId: xPostField(updates, 'xLatestMilestonePostId'),
+    xActiveQuotePostId: xPostField(updates, 'xActiveQuotePostId'),
+    xActiveQuotePostedAt: xPostField(updates, 'xActiveQuotePostedAt'),
+    xKeptQuotePostIds: Array.isArray(updates.xKeptQuotePostIds)
+      ? updates.xKeptQuotePostIds
+      : undefined,
+    xLastPostedAthX: xPostField(updates, 'xLastPostedAthX'),
     xPostedAthCatchUps: Array.isArray(updates.xPostedAthCatchUps)
       ? updates.xPostedAthCatchUps
       : undefined,
-    xLastReplyPostId: updates.xLastReplyPostId ?? undefined,
-    xLastPostedAt: updates.xLastPostedAt ?? undefined,
-    lastPostedX: updates.lastPostedX ?? undefined
+    xLastReplyPostId: xPostField(updates, 'xLastReplyPostId'),
+    xLastPostedAt: xPostField(updates, 'xLastPostedAt'),
+    lastPostedX: xPostField(updates, 'lastPostedX')
   });
 }
 

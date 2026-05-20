@@ -10,8 +10,8 @@ const { loadScannerSettings } = require('./scannerSettingsService');
  *    Sorted rungs ≥ trigger. Used for **both**:
  *    - Which rung the next Discord approval card is for (`shouldCreateApprovalRequest` → highest
  *      eligible rung not yet recorded in `approvalMilestonesTriggered`).
- *    - Which ATH× rung to post on **X** after a mod approves (`getHighestEligibleApprovalMilestone` →
- *      original post + reply milestones; `xPostedMilestones` tracks what already went out).
+ *    - Which ATH× rung to post on **X** after mod approve (`resolveNextBroadcastMilestone` in
+ *      `xMilestonePublish.js` — standalone posts at broadcast rungs; quote-tweet prior milestone).
  *
  * FaSol / performance mirror uses the same functions once MC is refreshed — same two settings,
  * same behavior as the full scanner for mod + X (Discord embed milestones are separate; see

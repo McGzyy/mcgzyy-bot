@@ -131,6 +131,11 @@ function normalizeTrackedCall(call = {}) {
       : [],
     lastPostedX: Number(call.lastPostedX || 0),
     xOriginalPostId: call.xOriginalPostId || null,
+    xLatestMilestonePostId: call.xLatestMilestonePostId || null,
+    xLastPostedAthX: Number(call.xLastPostedAthX || 0) || 0,
+    xPostedAthCatchUps: Array.isArray(call.xPostedAthCatchUps)
+      ? call.xPostedAthCatchUps
+      : [],
     xLastReplyPostId: call.xLastReplyPostId || null,
     xLastPostedAt: call.xLastPostedAt || null
   };
@@ -548,6 +553,11 @@ function saveTrackedCall(
         : [],
       lastPostedX: Number(existing.lastPostedX || 0),
       xOriginalPostId: existing.xOriginalPostId || null,
+      xLatestMilestonePostId: existing.xLatestMilestonePostId || null,
+      xLastPostedAthX: Number(existing.xLastPostedAthX || 0) || 0,
+      xPostedAthCatchUps: Array.isArray(existing.xPostedAthCatchUps)
+        ? existing.xPostedAthCatchUps
+        : [],
       xLastReplyPostId: existing.xLastReplyPostId || null,
       xLastPostedAt: existing.xLastPostedAt || null
     });
@@ -625,6 +635,9 @@ function saveTrackedCall(
     xPostedMilestones: [],
     lastPostedX: 0,
     xOriginalPostId: null,
+    xLatestMilestonePostId: null,
+    xLastPostedAthX: 0,
+    xPostedAthCatchUps: [],
     xLastReplyPostId: null,
     xLastPostedAt: null
   });
@@ -915,8 +928,14 @@ function setXPostState(contractAddress, updates = {}) {
       ? updates.xPostedMilestones
       : undefined,
     xOriginalPostId: updates.xOriginalPostId ?? undefined,
+    xLatestMilestonePostId: updates.xLatestMilestonePostId ?? undefined,
+    xLastPostedAthX: updates.xLastPostedAthX ?? undefined,
+    xPostedAthCatchUps: Array.isArray(updates.xPostedAthCatchUps)
+      ? updates.xPostedAthCatchUps
+      : undefined,
     xLastReplyPostId: updates.xLastReplyPostId ?? undefined,
-    xLastPostedAt: updates.xLastPostedAt ?? undefined
+    xLastPostedAt: updates.xLastPostedAt ?? undefined,
+    lastPostedX: updates.lastPostedX ?? undefined
   });
 }
 

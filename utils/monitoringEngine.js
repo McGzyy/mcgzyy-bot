@@ -5,7 +5,6 @@ const {
   getTrackedCall,
   clearApprovalRequest,
   setApprovalStatus,
-  setXPostState,
   applyUserCallAutoXApproval
 } = require('./trackedCallsService');
 const {
@@ -18,11 +17,8 @@ const {
   createDumpEmbed
 } = require('./alertEmbeds');
 const { enqueueAlert } = require('./alertQueue');
-const { createPost } = require('./xPoster');
-const { buildXPostText } = require('./buildXPostText');
 const { AttachmentBuilder } = require('discord.js');
 const { buildOhlcvCandlestickBuffer, resolveOhlcvPairAddress } = require('./ohlcvCandlestickBuffer');
-const { buildMilestoneHeroPng } = require('./milestoneHeroImage');
 const { getCandlestickOverlayProps } = require('./candlestickOverlayFromTracked');
 const { persistChartMarkerEvents } = require('./chartEventPersistence');
 const { buildOhlcvTimeframeRows } = require('./ohlcvChartControls');
@@ -156,18 +152,21 @@ function getResolutionLines(trackedCall) {
       ? postedMilestones[postedMilestones.length - 1]
       : null;
 
-    const postType = trackedCall.xOriginalPostId && !trackedCall.xLastReplyPostId
-      ? 'Original Thread'
-      : trackedCall.xLastReplyPostId
-        ? 'Reply Post'
-        : trackedCall.xOriginalPostId
-          ? 'Original Thread'
-          : 'Not Posted';
+    const latestId =
+      trackedCall.xLatestMilestonePostId ||
+      trackedCall.xOriginalPostId ||
+      trackedCall.xLastReplyPostId ||
+      null;
+    const postType = latestId
+      ? postedMilestones.length > 1
+        ? 'Standalone (quoted prior)'
+        : 'Standalone'
+      : 'Not Posted';
 
-    lines.push(`**Posted to X:** ${trackedCall.xOriginalPostId || trackedCall.xLastReplyPostId ? 'Yes' : 'No'}`);
+    lines.push(`**Posted to X:** ${latestId ? 'Yes' : 'No'}`);
     lines.push(`**Post Type:** ${postType}`);
     lines.push(`**Last X Milestone:** ${lastMilestone ? `${lastMilestone}x` : 'N/A'}`);
-    lines.push(`**X Post ID:** ${trackedCall.xLastReplyPostId || trackedCall.xOriginalPostId || 'N/A'}`);
+    lines.push(`**X Post ID:** ${latestId || 'N/A'}`);
   }
 
   return lines;
@@ -204,104 +203,10 @@ function getPublicCallerLabel(trackedCall, fallback = 'Unknown') {
 
 async function maybePublishApprovedMilestoneToX(trackedCall, latestScan = null) {
   try {
-    if (!trackedCall || !trackedCall.xApproved) {
-      return { success: false, reason: 'not_approved' };
-    }
-
-    const ath = Number(
-      trackedCall.ath ||
-      trackedCall.athMc ||
-      trackedCall.athMarketCap ||
-      trackedCall.latestMarketCap ||
-      trackedCall.firstCalledMarketCap ||
-      0
-    );
-
-    const firstCalledMc = Number(trackedCall.firstCalledMarketCap || 0);
-    const currentX = firstCalledMc > 0 ? ath / firstCalledMc : 0;
-
-    const milestoneX = getHighestEligibleApprovalMilestone(currentX);
-
-    if (!milestoneX) {
-      return { success: false, reason: 'no_milestone' };
-    }
-
-    const postedMilestones = Array.isArray(trackedCall.xPostedMilestones)
-      ? trackedCall.xPostedMilestones
-      : [];
-
-    if (postedMilestones.includes(milestoneX)) {
-      return { success: false, reason: 'already_posted' };
-    }
-
-    const hasOriginal = !!trackedCall.xOriginalPostId;
-
-    const postText = await buildXPostText(trackedCall, {
-      milestoneX,
-      isReply: hasOriginal
-    });
-
-    let chartBuf = null;
-    if (!hasOriginal) {
-      try {
-        chartBuf = await buildMilestoneHeroPng({
-          milestoneX,
-          seedKey: trackedCall.contractAddress || trackedCall.ticker || '',
-          callSourceType: trackedCall.callSourceType,
-          ticker: trackedCall.ticker
-        });
-      } catch (_e) {
-        chartBuf = null;
-      }
-    }
-
-    const srcForAudit = String(trackedCall.callSourceType || 'user_call').toLowerCase();
-    const milestoneAuditCat =
-      srcForAudit === 'bot_call'
-        ? 'milestone_bot'
-        : srcForAudit === 'watch_only'
-          ? 'milestone_watch'
-          : 'milestone_user';
-
-    const result = await createPost(postText, hasOriginal ? trackedCall.xOriginalPostId : null, chartBuf || undefined, {
-      audit: { category: milestoneAuditCat, callSourceType: trackedCall.callSourceType || null }
-    });
-
-    if (!result.success || !result.id) {
-      return {
-        success: false,
-        reason: 'x_post_failed',
-        error: result.error || null
-      };
-    }
-
-    const updatedMilestones = [...postedMilestones, milestoneX].sort((a, b) => a - b);
-
-    const updates = {
-      xLastPostedAt: new Date().toISOString(),
-      xPostedMilestones: updatedMilestones
-    };
-
-    if (!hasOriginal) {
-      updates.xOriginalPostId = result.id;
-    } else {
-      updates.xLastReplyPostId = result.id;
-    }
-
-    setXPostState(trackedCall.contractAddress, updates);
-
-    console.log(
-      `[X AutoThread] Posted ${hasOriginal ? 'reply' : 'original'} for ${trackedCall.tokenName || trackedCall.contractAddress} at ${milestoneX}x`
-    );
-
-    return {
-      success: true,
-      milestoneX,
-      reply: hasOriginal,
-      postId: result.id
-    };
+    const { publishMilestoneToX } = require('./xMilestonePublish');
+    return await publishMilestoneToX(trackedCall, { latestScan });
   } catch (error) {
-    console.error('[X AutoThread] Failed to publish approved milestone:', error.message);
+    console.error('[XMilestone] Failed to publish approved milestone:', error.message);
     return {
       success: false,
       reason: 'exception',

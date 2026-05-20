@@ -216,11 +216,24 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_WEEKLY_STATS_MAX_CHARS`** | Optional. When set (e.g. `25000`), the **weekly stats snapshot** uses this budget even if `X_TWEET_MAX_CHARS` is missing on the bot host (prevents silent 280 truncation). |
 | **`X_WEEKLY_STATS_CHAR_FLOOR`** | Optional. Minimum character budget for the **weekly stats snapshot** and **leaderboard digests** (daily/7d X posts from `buildLeaderboardDigestBody`; default **12000**, capped by `X_TWEET_CHAR_HARD_CAP`). Digests used to cap at **280** when only the global default applied — they now share this resolver. |
 | **`X_POST_INCLUDE_GMGN`** | `1` / `true` — append GMGN link (uses more characters). |
+| **`X_BROADCAST_MILESTONES`** | Comma-separated ATH× rungs posted to **X** (default `10,25,50,100`). Must be ≥ `approvalTriggerX`. Only the **highest unposted** broadcast rung is posted per cycle (avoids spam). Card/caption **headline uses true ATH** when higher (e.g. broadcast 50× while ATH is 72× → card shows **72×**). |
+| **`X_MILESTONE_ATH_CATCHUP_ENABLED`** | Default **on** — if ATH grows **materially** after a broadcast post but **before** the next rung (default: **+20%** or **+12×**, one catch-up per rung), post an **ATH catch-up** (quote-tweet) so a 50× post is not left showing while peak was 72×. |
+| **`X_MILESTONE_ATH_CATCHUP_RATIO`** | Min ATH growth vs last posted tweet for catch-up (default `1.2` = 20% above). |
+| **`X_MILESTONE_ATH_CATCHUP_MIN_X`** | Min absolute ATH× gain vs last posted tweet for catch-up (default `12`). |
+| **`X_MILESTONE_QUOTE_PREVIOUS`** | Default **on** — follow-up broadcast milestones are **standalone quote-tweets** of the last milestone post (keeps prior engagement; peak visible in feed). Set `0` / `false` to disable. |
+| **`X_MILESTONE_CAPTION_INCLUDE_BIO_LINE`** | Default **on** — last caption line is `🔹 Dashboard link in bio 🔹`. Set `0` / `false` to omit. |
+| **`X_MILESTONE_CAPTION_INCLUDE_LINK`** | Default **off** — set `1` / `true` to also append plain `mcgbot.xyz`. |
+| **`X_MILESTONE_CAPTION_INCLUDE_CA`** | Default **off** — set `1` / `true` to append a Dexscreener URL in the caption (stats stay on the card image). |
+| **`X_MILESTONE_CAPTION_LEGACY`** | Default **off** — set `1` / `true` for the old one-line caption (`Member call · 25× · TICKER`). |
+| **`X_MILESTONE_CARD_LEGACY_FALLBACK`** | Default **on** — if the data card render fails, fall back to the decorative `milestoneHeroImage` PNG. |
+| **`X_MILESTONE_MG_LOGO_PATH`** | Optional absolute path to the **MG monogram** PNG (default `branding/0cba4845-0995-4280-be96-efbf30f9010f.png`). Used as a large background watermark + small corner mark on milestone cards. |
+| **`X_MILESTONE_MG_WATERMARK_ALPHA`** | Optional `0.03`–`0.2` opacity for the background MG watermark (default `0.09`; ~78% card width). |
 | **`X_AUTO_APPROVE_USER_CALLS`** | `1` / `true` — **user_call** rows skip `#mod-approvals` for X and go straight to `xApproved` (bot_call still needs mod approve). |
 | **`X_LEADERBOARD_DIGEST_ENABLED`** | `1` / `true` — enable scheduled digest tweets (off by default). |
 | **`X_LEADERBOARD_DAILY_DIGEST_ENABLED`** | Optional; default **on** when `X_LEADERBOARD_DIGEST_ENABLED` is on. Set `0` / `false` / `no` to **skip** the **rolling 24h** digest (still posts **7d** / **monthly** if those stay enabled). Daily post includes a **weekday avg ATH ×** chart (last completed UTC week). |
 | **`X_LEADERBOARD_MONTHLY_DIGEST_ENABLED`** | Optional; default **on** when digest is enabled. Set `0` / `false` / `no` to skip the **1st-of-month** digest. Post includes a **Jan–Dec avg ATH ×** chart (UTC year: on Jan 1 the chart is the **previous** full calendar year; on other months it is the **current** year to date). |
 | **`X_LEADERBOARD_DIGEST_UTC_HOUR`** | Hour `0–23` to post (default `16`). |
+| **`X_LEADERBOARD_DIGEST_GRACE_HOURS`** | Optional `0–6` extra UTC hours after the target hour to retry if the bot was down or an X post failed (default `2`). Dedupe keys in `data/xLeaderboardDigestState.json` prevent double posts. |
 | **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the **7d** leaderboard digest (default on when digest is enabled). |
 | **`X_LEADERBOARD_WEEKLY_UTC_WEEKDAY`** | `0` (Sun) … `6` (Sat); default `1` (Monday). |
 | **`X_WEEKLY_STATS_SNAPSHOT_ENABLED`** | `1` / `true` — post a **stats-only** weekly X summary (previous completed UTC Mon–Sun); **independent** of `X_LEADERBOARD_DIGEST_ENABLED`. |

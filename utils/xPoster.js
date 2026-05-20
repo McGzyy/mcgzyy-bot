@@ -293,12 +293,18 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null, options
       ? options.audit
       : null;
 
+  const quoteTweetId =
+    options && typeof options === 'object' && options.quoteTweetId != null
+      ? String(options.quoteTweetId).trim()
+      : '';
+
   const finalizeAudit = (success, mediaAttached, resultForErr) => {
     if (!audit || !audit.category) return;
     void appendXPostAuditEvent({
       success,
       category: String(audit.category),
       reply: Boolean(replyToId),
+      quoted: Boolean(quoteTweetId) || audit.quoted === true,
       media: Boolean(mediaAttached),
       callSourceType: audit.callSourceType != null ? String(audit.callSourceType) : null,
       errorSnippet: success ? null : shortenError(resultForErr?.error ?? resultForErr)
@@ -311,7 +317,9 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null, options
     text
   };
 
-  if (replyToId) {
+  if (quoteTweetId) {
+    body.quote_tweet_id = quoteTweetId;
+  } else if (replyToId) {
     body.reply = {
       in_reply_to_tweet_id: replyToId
     };
@@ -323,7 +331,7 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null, options
       : '';
 
   let mediaId = preUploadedMediaId || null;
-  if (!mediaId && mediaPngBuffer && !replyToId) {
+  if (!mediaId && mediaPngBuffer) {
     try {
       mediaId = await uploadMediaPng(mediaPngBuffer);
       if (!mediaId) {
@@ -337,8 +345,11 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null, options
       console.error('[XPoster] Media upload exception:', e?.message || e);
     }
   }
-  if (mediaId && !replyToId) {
+  if (mediaId) {
     body.media = { media_ids: [String(mediaId)] };
+    if (!String(text || '').trim()) {
+      body.text = '\u200B';
+    }
   }
 
   const authHeader = buildOAuthHeader('POST', url);

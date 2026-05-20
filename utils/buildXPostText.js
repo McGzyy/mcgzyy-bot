@@ -1,5 +1,7 @@
 'use strict';
 
+const { formatDurationAgo } = require('./xCardRenderHelpers');
+
 /**
  * Premium X (Twitter) copy — milestones, approvals, and manual posts.
  * Milestones share the same long-form budget as digests (`resolveWeeklyStatsTweetMaxChars`).
@@ -8,19 +10,17 @@
  * - Member calls: @handle when Supabase prefs allow tagging and multiple >= threshold; else generic credit
  */
 
-/** Classic digest / milestone section divider (full-width light rule on X). */
-const X_TERMINAL_SECTION_RULE = '\u2500'.repeat(32);
-
+/** Soft section break — blank lines only (Unicode rules render as ugly underscores on X). */
 function xTerminalSectionRule() {
-  return X_TERMINAL_SECTION_RULE;
+  return '';
 }
 
 function xTerminalSectionGap() {
-  return `\n${X_TERMINAL_SECTION_RULE}\n`;
+  return '\n\n';
 }
 
 function xTerminalFooterLine() {
-  return '🔹 Dashboard + Live Calls - Link in Bio 🔹';
+  return '🔹 mcgbot.xyz · live calls · link in bio 🔹';
 }
 
 /** Hard ceiling for long-form X posts (raise via env if APIs change). */
@@ -248,43 +248,33 @@ async function buildXPostText(trackedCall, opts = {}) {
 
   const attribution = await buildAttributionLine(trackedCall, displayXForAttribution);
 
-  const headline =
+  const channelLabel =
+    trackedCall?.callSourceType === 'bot_call' ? 'McGBot Calls' : 'Member Call';
+  const milestoneLabel =
     milestoneX > 0
       ? isReply
-        ? `🔥 ${milestoneX}× · milestone`
-        : `🔥 ${milestoneX}× · since first call`
-      : '📡 Live call';
+        ? `${milestoneX}× milestone`
+        : `${milestoneX}× since first call`
+      : 'live call';
 
-  const channelKicker =
-    trackedCall?.callSourceType === 'bot_call'
-      ? '🔹 McGBot Calls 🔹'
-      : '🔹 Member Call 🔹';
-  const sub =
+  const headerLine = `🔹 ${channelLabel} · ${milestoneLabel}`;
+
+  const perfLine =
     athX > 0
-      ? `$${ticker} · ${athX.toFixed(2)}× ATH · spot ${spotX.toFixed(2)}×`
+      ? `$${ticker} · ${athX.toFixed(2)}× ATH · ${spotX.toFixed(2)}× spot`
       : `$${ticker} · ${spotX.toFixed(2)}×`;
 
-  const heroBlock = [channelKicker, headline].join('\n');
-
-  const statsBlock = sub;
-
-  const detailLines = [
-    attribution,
-    '',
-    `Entry ${initialMcStr}  →  Peak ${athMcStr}`,
-    '',
-    'CA',
-    `\`${ca}\``,
-    '',
-    `Chart · https://dexscreener.com/solana/${ca}`
-  ];
-
-  if (includeGmgnLink() && ca) {
-    detailLines.push(`GMGN · https://gmgn.ai/sol/token/${ca}`);
+  const detailLines = [attribution, `Entry ${initialMcStr} → Peak ${athMcStr}`];
+  if (ca) {
+    detailLines.push(ca);
+    detailLines.push(`Chart https://dexscreener.com/solana/${ca}`);
+    if (includeGmgnLink()) {
+      detailLines.push(`GMGN https://gmgn.ai/sol/token/${ca}`);
+    }
   }
 
   const foot = xTerminalFooterLine();
-  const chunks = [heroBlock, statsBlock, detailLines.join('\n')];
+  const chunks = [headerLine, perfLine, detailLines.join('\n')];
   if (foot) {
     chunks.push(foot);
   }
@@ -295,6 +285,173 @@ async function buildXPostText(trackedCall, opts = {}) {
   return body;
 }
 
+function formatMilestoneXLabel(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n) || n < 1.01) return '';
+  const rounded = Math.round(n * 10) / 10;
+  return rounded % 1 === 0 ? `${Math.round(rounded)}×` : `${rounded.toFixed(1)}×`;
+}
+
+function milestoneCaptionLegacyEnabled() {
+  const raw = String(process.env.X_MILESTONE_CAPTION_LEGACY || '')
+    .trim()
+    .toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+/**
+ * @param {string} attributionLine from buildAttributionLine
+ * @returns {string|null} e.g. @handle
+ */
+function attributionToXTag(attributionLine) {
+  const m = String(attributionLine || '').match(/@([A-Za-z0-9_]{1,15})/);
+  return m ? `@${m[1]}` : null;
+}
+
+/** Blue diamond bookends for dashboard CTA (all channel types). */
+function milestoneDashboardBioLine(_trackedCall) {
+  const label = 'Dashboard link in bio';
+  return `🔹 ${label} 🔹`;
+}
+
+/**
+ * Short X caption when stats live on the milestone data card image.
+ * Reply milestones: empty caption (image-only once a reply card exists).
+ * @param {object} trackedCall
+ * @param {{ milestoneX?: number, isReply?: boolean, quotePreviousMilestone?: number }} [opts]
+ */
+async function buildXMilestoneCaption(trackedCall, opts = {}) {
+  const milestoneX = Number(opts.milestoneX) > 0 ? Number(opts.milestoneX) : 0;
+  const isReply = opts.isReply === true;
+  const isBot = trackedCall?.callSourceType === 'bot_call';
+  const isWatch = trackedCall?.callSourceType === 'watch_only';
+  const quotePrev = Number(opts.quotePreviousMilestone) || 0;
+
+  if (isReply) {
+    return '';
+  }
+
+  const ticker = String(trackedCall?.ticker || 'TOKEN')
+    .trim()
+    .replace(/^\$+/, '')
+    .toUpperCase();
+
+  if (milestoneCaptionLegacyEnabled()) {
+    const channel = isBot ? 'McGBot' : isWatch ? 'Watch' : 'Member call';
+    const lines = [`${channel} · ${milestoneX}× · ${ticker}`];
+    return appendMilestoneCaptionExtras(lines, trackedCall).join('\n').trim();
+  }
+
+  const firstCalledMc = Number(trackedCall?.firstCalledMarketCap || 0);
+  const latestMc = Number(
+    trackedCall?.latestMarketCap || trackedCall?.firstCalledMarketCap || 0
+  );
+  const athVal = Number(
+    trackedCall?.ath ||
+      trackedCall?.athMc ||
+      trackedCall?.athMarketCap ||
+      trackedCall?.latestMarketCap ||
+      trackedCall?.firstCalledMarketCap ||
+      0
+  );
+  const spotX =
+    firstCalledMc > 0 ? Number((latestMc / firstCalledMc).toFixed(2)) : 0;
+  const athX =
+    firstCalledMc > 0 ? Number((athVal / firstCalledMc).toFixed(2)) : 0;
+  const multLabel = formatMilestoneXLabel(milestoneX);
+  const entryStr = formatUsd(firstCalledMc);
+  const peakStr = formatUsd(athVal);
+  const hasMcStory = firstCalledMc > 0 && athVal > 0;
+
+  const calledAtRaw =
+    trackedCall?.firstCalledAt || trackedCall?.calledAt || trackedCall?.createdAt || null;
+  const calledAgo = formatDurationAgo(
+    calledAtRaw != null ? new Date(calledAtRaw).getTime() : null
+  );
+
+  const attribution = await buildAttributionLine(
+    trackedCall,
+    athX > 0 ? athX : spotX > 0 ? spotX : milestoneX
+  );
+  const callerTag = attributionToXTag(attribution);
+
+  const lines = [];
+  const prevLabel = quotePrev >= 1.01 ? formatMilestoneXLabel(quotePrev) : '';
+
+  if (prevLabel && multLabel) {
+    let hook = `Update · $${ticker} ${prevLabel} → ${multLabel}`;
+    if (hasMcStory) hook += ` · ${entryStr} → ${peakStr}`;
+    lines.push(hook);
+    if (isBot) {
+      lines.push(calledAgo ? `McGBot auto-call · called ${calledAgo}` : 'McGBot auto-call');
+    } else if (isWatch) {
+      lines.push(calledAgo ? `Watch alert · called ${calledAgo}` : 'Watch alert');
+    } else if (callerTag) {
+      lines.push(calledAgo ? `${callerTag} · called ${calledAgo}` : callerTag);
+    } else {
+      lines.push(calledAgo ? `Member call · called ${calledAgo}` : 'Member call');
+    }
+  } else if (isBot) {
+    let hook = `$${ticker}`;
+    if (multLabel) hook += ` hit ${multLabel}`;
+    if (hasMcStory) hook += ` — ${entryStr} → ${peakStr}`;
+    lines.push(hook);
+    lines.push(calledAgo ? `McGBot auto-call · called ${calledAgo}` : 'McGBot auto-call');
+  } else if (isWatch) {
+    let hook = `$${ticker}`;
+    if (multLabel) hook += ` · ${multLabel}`;
+    if (hasMcStory) hook += ` — ${entryStr} → ${peakStr}`;
+    lines.push(hook);
+    lines.push(calledAgo ? `Watch alert · called ${calledAgo}` : 'Watch alert');
+  } else {
+    let hook = `$${ticker}`;
+    if (multLabel) hook += ` hit ${multLabel}`;
+    if (hasMcStory) hook += ` — ${entryStr} → ${peakStr}`;
+    lines.push(hook);
+    if (callerTag) {
+      lines.push(calledAgo ? `${callerTag} · called ${calledAgo}` : callerTag);
+    } else {
+      lines.push(calledAgo ? `Member call · called ${calledAgo}` : 'Member call');
+    }
+  }
+
+  return appendMilestoneCaptionExtras(lines, trackedCall).join('\n').trim();
+}
+
+/**
+ * @param {string[]} lines
+ * @param {object} trackedCall
+ */
+function appendMilestoneCaptionExtras(lines, trackedCall) {
+  const out = [...lines];
+
+  const includeBio = String(process.env.X_MILESTONE_CAPTION_INCLUDE_BIO_LINE ?? '1')
+    .trim()
+    .toLowerCase();
+  if (includeBio !== '0' && includeBio !== 'false' && includeBio !== 'no') {
+    out.push(milestoneDashboardBioLine(trackedCall));
+  }
+
+  const includeLink = String(process.env.X_MILESTONE_CAPTION_INCLUDE_LINK || '0')
+    .trim()
+    .toLowerCase();
+  if (includeLink === '1' || includeLink === 'true' || includeLink === 'yes') {
+    out.push('mcgbot.xyz');
+  }
+
+  const includeCa = String(process.env.X_MILESTONE_CAPTION_INCLUDE_CA || '')
+    .trim()
+    .toLowerCase();
+  if (includeCa === '1' || includeCa === 'true' || includeCa === 'yes') {
+    const ca = String(trackedCall?.contractAddress || '').trim();
+    if (ca) {
+      out.push(`https://dexscreener.com/solana/${ca}`);
+    }
+  }
+
+  return out;
+}
+
 /** Short line for leaderboard / system posts (same voice). */
 function xBrandKicker() {
   return '▲ McGBot Terminal';
@@ -302,6 +459,7 @@ function xBrandKicker() {
 
 module.exports = {
   buildXPostText,
+  buildXMilestoneCaption,
   buildAttributionLine,
   xBrandKicker,
   xTerminalSectionRule,

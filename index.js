@@ -23,7 +23,8 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  AttachmentBuilder
 } = require('discord.js');
 
 const {
@@ -45,19 +46,23 @@ const {
 const { startAutoCallLoop, stopAutoCallLoop } = require('./utils/autoCallEngine');
 const { createPost, getXBotUsernameForCopy, normalizePngUploadBuffer } = require('./utils/xPoster');
 const { buildWeeklySnapshotModulesPng } = require('./utils/weeklySnapshotPanel');
-const { fitTweet, xBrandKicker, xTerminalSectionRule } = require('./utils/buildXPostText');
+const { fitTweet, xBrandKicker } = require('./utils/buildXPostText');
 const {
   startXLeaderboardDigestScheduler,
   buildLeaderboardDigestBody,
   buildWeeklyStatsSnapshotBody,
-  postLeaderboardDigestToX
+  postLeaderboardDigestToX,
+  getXDigestSchedulerStatus
 } = require('./utils/xLeaderboardDigest');
 const { setXEngagementDiscordClient } = require('./utils/xEngagementScheduler');
-const { postWeeklyRunnerToX, postMonthlyTopCallerToX } = require('./utils/xEngagementPosts');
+const { postWeeklyRunnerToX, postMonthlyTopCallerToX, readState } = require('./utils/xEngagementPosts');
 const { startXDmVerificationPoller } = require('./utils/xDmVerificationPoller');
 const { publishApprovedCoinToX } = require('./utils/publishApprovedCoinToX');
 const {
   postTestMilestoneToX,
+  buildMilestoneCardPreview,
+  parseXmilestoneCommandParts,
+  XMILESTONE_USAGE,
   defaultOriginalMilestoneX,
   defaultReplyMilestoneX
 } = require('./utils/milestoneXTestPost');
@@ -539,8 +544,10 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
+    `• \`!xdigeststatus\` — Scheduled X digest / W·M engagement scheduler status + recent post audit (owner only)\n` +
     `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (desk summary cards), **7d** (weekday chart), or **monthly** (30d trend chart) digest to X (owner only)\n` +
-    `• \`!testxmilestone user\` / \`bot\` — Sample **User Calls** or **McGBot Calls** X milestone (+ chart when not a reply). Optional \`<sol_ca>\` and \`[mult]\`. \`!testxmilestone reply <post_id> user|bot [mult]\` — test **reply** (no chart)\n` +
+    `• \`!previewxmilestone user|bot <sol_ca> [mult]\` — **Preview card + caption in Discord** (no X; \`bot\` = green McGBot styling)\n` +
+    `• \`!testxmilestone user|bot\` — Post test milestone to X (optional \`<sol_ca>\`, \`[mult]\`, \`@caller\`). Quote test: \`!testxmilestone quote <post_id> user|bot [mult]\`\n` +
     `• \`!testweeklyrunner\` / \`!testtopcallermonth\` — Force **weekly runner** or **monthly top caller** X posts (owner only; monthly test skips Discord role)\n` +
     `• Scheduled daily digest is **on** when \`X_LEADERBOARD_DIGEST_ENABLED\` is on; set \`X_LEADERBOARD_DAILY_DIGEST_ENABLED=0\` to disable\n\n`;
 
@@ -3127,12 +3134,7 @@ if (lowerContent === '!scanner off') {
 
         const result = await createPost(
           fitTweet(
-            [
-              xBrandKicker(),
-              '◆ Connection test',
-              xTerminalSectionRule(),
-              'McGBot · X posting verified.'
-            ].join('\n'),
+            [xBrandKicker(), 'Connection test', 'McGBot · X posting verified.'].join('\n\n'),
             280
           ),
           null,
@@ -3149,88 +3151,114 @@ if (lowerContent === '!scanner off') {
         return;
       }
 
+      if (lowerContent.startsWith('!previewxmilestone')) {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        const parsed = parseXmilestoneCommandParts(content, {
+          defaultMx: defaultOriginalMilestoneX(),
+          allowReply: false
+        });
+        if (!parsed.ok) {
+          await replyText(message, parsed.error || XMILESTONE_USAGE);
+          return;
+        }
+
+        try {
+          const callerId =
+            parsed.variant === 'user'
+              ? parsed.callerDiscordId || message.author.id
+              : null;
+          const preview = await buildMilestoneCardPreview({
+            variant: parsed.variant,
+            headlineMilestoneX: parsed.headlineMx,
+            contractAddress: parsed.contractOverride,
+            firstCallerDiscordId: callerId,
+            discordMember: {
+              id: message.author.id,
+              username: message.author.username,
+              displayName:
+                message.member?.displayName ||
+                message.author.globalName ||
+                message.author.username
+            }
+          });
+
+          if (!preview.success || !preview.png) {
+            await replyText(
+              message,
+              `❌ Preview failed\n${JSON.stringify(preview.error || 'no_png', null, 2)}`
+            );
+            return;
+          }
+
+          const label = parsed.variant === 'bot' ? 'McGBot' : 'User';
+          const file = new AttachmentBuilder(preview.png, { name: 'milestone_preview.png' });
+          await message.reply({
+            content:
+              `**${label} milestone preview** · **${parsed.headlineMx}×** · \`$${preview.tracked?.ticker || '?'}\` · ${preview.tracked?.tokenName || '—'}\n` +
+              `Live Dex: **${preview.liveOk ? 'yes' : 'fallback'}** · Caller: <@${callerId || message.author.id}> · Caption (${preview.caption?.length || 0} chars):\n` +
+              `\`\`\`\n${preview.caption || ''}\n\`\`\``,
+            files: [file],
+            allowedMentions: { repliedUser: false }
+          });
+        } catch (e) {
+          console.error('[!previewxmilestone]', e);
+          await replyText(message, `❌ ${e instanceof Error ? e.message : String(e)}`);
+        }
+
+        return;
+      }
+
       if (lowerContent.startsWith('!testxmilestone')) {
         if (!isBotOwnerDiscordId(message.author.id)) {
           return message.reply('❌ You do not have permission to use this command.');
         }
 
-        const parts = content.trim().split(/\s+/);
-        const usage =
-          '**Usage**\n' +
-          '• `!testxmilestone user` or `!testxmilestone bot` — first milestone (+ chart if OHLCV works). Optional: `<sol_ca>` then `[mult]`\n' +
-          '• `!testxmilestone reply <tweet_id> user` or `... bot` — **reply** on that post (no chart). Optional trailing `[mult]` (default = higher ladder rung).\n' +
-          'Default mint: `X_TEST_MILESTONE_CONTRACT` env, else wrapped SOL.';
-
-        if (parts.length < 2) {
-          await replyText(message, usage);
+        const parsed = parseXmilestoneCommandParts(content, {
+          defaultMx: defaultOriginalMilestoneX(),
+          allowReply: true
+        });
+        if (!parsed.ok) {
+          await replyText(message, parsed.error || XMILESTONE_USAGE);
           return;
         }
 
         try {
-          /** @type {'user' | 'bot' | null} */
-          let variant = null;
-          let replyToId = '';
-          let headlineMx = 0;
-          /** @type {string | null} */
-          let contractOverride = null;
-
-          if (parts[1].toLowerCase() === 'reply') {
-            replyToId = String(parts[2] || '').trim();
-            if (!/^\d{10,22}$/.test(replyToId)) {
-              await replyText(message, '❌ After `reply`, paste the **numeric X post ID** (10–22 digits).\n\n' + usage);
-              return;
-            }
-            const v = String(parts[3] || '').toLowerCase();
-            if (v !== 'user' && v !== 'bot') {
-              await replyText(message, '❌ After the post ID, specify **user** or **bot**.\n\n' + usage);
-              return;
-            }
-            variant = v === 'bot' ? 'bot' : 'user';
-            headlineMx =
-              parts[4] != null && parts[4] !== '' && Number.isFinite(Number(parts[4]))
-                ? Number(parts[4])
-                : defaultReplyMilestoneX();
-          } else {
-            const v = String(parts[1] || '').toLowerCase();
-            if (v !== 'user' && v !== 'bot') {
-              await replyText(message, usage);
-              return;
-            }
-            variant = v === 'bot' ? 'bot' : 'user';
-            let idx = 2;
-            if (parts[idx] && isLikelySolanaCA(parts[idx])) {
-              contractOverride = parts[idx];
-              idx += 1;
-            }
-            headlineMx =
-              parts[idx] != null && parts[idx] !== '' && Number.isFinite(Number(parts[idx]))
-                ? Number(parts[idx])
-                : defaultOriginalMilestoneX();
-          }
-
-          if (!Number.isFinite(headlineMx) || headlineMx < 2) {
-            await replyText(message, '❌ Multiplier must be a number ≥ 2.');
-            return;
-          }
-
+          const callerId =
+            parsed.variant === 'user'
+              ? parsed.callerDiscordId || message.author.id
+              : null;
           const result = await postTestMilestoneToX({
-            variant,
-            replyToTweetId: replyToId || null,
-            headlineMilestoneX: headlineMx,
-            contractAddress: contractOverride,
-            firstCallerDiscordId: variant === 'user' ? message.author.id : null
+            variant: parsed.variant,
+            quoteTweetId: parsed.quoteTweetId || parsed.replyToId || null,
+            quotePreviousMilestone: parsed.quotePreviousMilestone || 0,
+            headlineMilestoneX: parsed.headlineMx,
+            contractAddress: parsed.contractOverride,
+            firstCallerDiscordId: callerId,
+            discordMember: {
+              id: message.author.id,
+              username: message.author.username,
+              displayName:
+                message.member?.displayName ||
+                message.author.globalName ||
+                message.author.username
+            }
           });
 
           if (result.success) {
-            const label = variant === 'bot' ? 'McGBot Calls' : 'User Calls';
-            const replyHint = replyToId
-              ? ''
-              : `\nReply test: \`!testxmilestone reply ${result.id} ${variant} ${Math.min(100, Math.max(20, Math.floor(headlineMx * 2)))}\``;
+            const label = parsed.variant === 'bot' ? 'McGBot Calls' : 'User Calls';
+            const quoteHint =
+              parsed.quoteTweetId || parsed.replyToId
+                ? ` · quoted **${parsed.quoteTweetId || parsed.replyToId}**`
+                : `\nQuote test: \`!testxmilestone quote ${result.id} ${parsed.variant} ${Math.min(100, Math.max(20, Math.floor(parsed.headlineMx * 2)))}\``;
             await replyText(
               message,
               `✅ Posted **${label}** milestone test to X\nPost ID: **${result.id}**\n` +
-                `Headline multiple: **${headlineMx}×** · chart: **${result.chartAttached ? 'yes' : 'no'}** · chars: **${result.textLength ?? '—'}**` +
-                replyHint
+                `**$${result.ticker || '?'}** · ${result.tokenName || '—'} · live Dex **${result.liveToken ? 'yes' : 'no'}**\n` +
+                `**${parsed.headlineMx}×** · data card **${result.dataCard ? 'yes' : 'legacy'}** · image **${result.chartAttached ? 'yes' : 'no'}**` +
+                quoteHint
             );
           } else {
             await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result.error, null, 2)}`);
@@ -3284,6 +3312,70 @@ if (lowerContent === '!scanner off') {
         } catch (e) {
           console.error('[!test*engagement]', e);
           await replyText(message, `❌ ${e instanceof Error ? e.message : String(e)}`);
+        }
+
+        return;
+      }
+
+      if (lowerContent === '!xdigeststatus') {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        try {
+          const st = await getXDigestSchedulerStatus();
+          const eng = await readState();
+          const wdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+          const fmtTs = ts =>
+            ts && Number.isFinite(ts)
+              ? new Date(ts).toISOString().replace('T', ' ').slice(0, 16) + ' UTC'
+              : '—';
+          const fmtAudit = cat => {
+            const row = st.auditByCat[cat];
+            if (!row) return `${cat}: no events (14d)`;
+            return (
+              `${cat}: ok=${row.ok} fail=${row.fail} lastOk=${fmtTs(row.lastOkTs)}` +
+              (row.lastFailTs ? ` lastFail=${fmtTs(row.lastFailTs)}` : '') +
+              (row.lastError ? `\n  ↳ ${String(row.lastError).slice(0, 120)}` : '')
+            );
+          };
+
+          const lines = [
+            '**X scheduled posts — status**',
+            `Now: ${st.nowUtc}`,
+            `Digest window (hour ${st.targetHour}–${st.targetHour + st.graceHours} UTC): **${st.inDigestWindow ? 'OPEN' : 'closed'}**`,
+            '',
+            `X_LEADERBOARD_DIGEST_ENABLED: **${st.digestEnabled ? 'yes' : 'no'}**`,
+            `Daily / 7d / monthly digests: **${st.dailyDigestEnabled ? 'on' : 'off'}** / **${st.weeklyDigestEnabled ? 'on' : 'off'}** / **${st.monthlyDigestEnabled ? 'on' : 'off'}**`,
+            `X_WEEKLY_STATS_SNAPSHOT_ENABLED: **${st.weeklyStatsEnabled ? 'yes' : 'no'}** (${wdayNames[st.weeklyStatsWeekday] ?? st.weeklyStatsWeekday}, hour ${st.weeklyStatsHour} UTC)`,
+            `X_WEEKLY_RUNNER_ENABLED: **${st.weeklyRunnerEnabled ? 'yes' : 'no'}** (${wdayNames[st.weeklyRunnerWeekday] ?? st.weeklyRunnerWeekday})`,
+            `X_MONTHLY_TOP_CALLER_ENABLED: **${st.monthlyTopCallerEnabled ? 'yes' : 'no'}**`,
+            `X API credentials in env: **${st.xCredsOk ? 'present' : 'MISSING'}**`,
+            '',
+            '**Last successful keys (persisted)**',
+            `Daily: \`${st.persistedKeys.lastDailyKey || '—'}\``,
+            `7d digest: \`${st.persistedKeys.lastWeeklyKey || '—'}\``,
+            `Monthly digest: \`${st.persistedKeys.lastMonthlyKey || '—'}\``,
+            `Weekly stats snapshot: \`${st.persistedKeys.lastWeeklyStatsKey || '—'}\``,
+            '',
+            '**Engagement dedupe (xEngagementState.json)**',
+            `lastWeeklyRunnerWeekStartMs: ${eng.lastWeeklyRunnerWeekStartMs ?? '—'}`,
+            `lastTopMonthlyPeriodKey: \`${eng.lastTopMonthlyPeriodKey || '—'}\``,
+            '',
+            '**Audit (last 14 days)**',
+            fmtAudit('leaderboard_digest'),
+            fmtAudit('weekly_terminal_snapshot'),
+            fmtAudit('engagement_weekly_runner'),
+            fmtAudit('engagement_monthly_top_caller')
+          ];
+
+          await replyText(message, lines.join('\n'));
+        } catch (e) {
+          console.error('[!xdigeststatus]', e);
+          await replyText(
+            message,
+            `❌ Status failed: ${e instanceof Error ? e.message : String(e)}`
+          );
         }
 
         return;

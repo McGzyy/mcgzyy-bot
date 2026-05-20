@@ -333,17 +333,21 @@ async function resolveMilestoneCallerXTag(trackedCall, multipleX = 0) {
 }
 
 /**
- * One-line milestone caption (stats live on the card image).
- * @param {object} trackedCall
- * @param {number} [multipleX]
+ * Two-line terminal caption (fits mobile X without awkward wraps).
+ * @param {string} headline e.g. "McGBot Terminal · Daily snapshot"
+ * @param {string} botTag e.g. "@McGBot"
  */
+function buildMinimalTerminalCaption(headline, botTag) {
+  const bot = botTag.startsWith('@') ? botTag : `@${botTag}`;
+  return `🔹 ${headline}\nTracked LIVE via ${bot} · Dashboard link in bio 🔹`;
+}
+
 /**
  * Short caption for scheduled terminal digest cards (stats on image).
  * @param {'daily'|'weekly'|'monthly'|string} kind
  * @param {string} [windowLabel]
  */
 function buildTerminalDigestCaption(kind, windowLabel = '') {
-  const botTag = `@${getXBotUsernameForCopy()}`;
   const labels = {
     daily: 'Daily snapshot',
     weekly: '7d snapshot',
@@ -351,18 +355,17 @@ function buildTerminalDigestCaption(kind, windowLabel = '') {
   };
   const title =
     labels[kind] || String(windowLabel || 'McGBot Terminal').trim() || 'McGBot Terminal';
-  return `🔹 McGBot Terminal · ${title} 🔹 Tracked LIVE via ${botTag} 🔹 Dashboard link in bio 🔹`;
+  return buildMinimalTerminalCaption(`McGBot Terminal · ${title}`, getXBotUsernameForCopy());
 }
 
+/**
+ * Short milestone caption (stats live on the card image).
+ * @param {object} trackedCall
+ * @param {number} [multipleX]
+ */
 async function buildMinimalXMilestoneCaption(trackedCall, multipleX = 0) {
   const callerTag = await resolveMilestoneCallerXTag(trackedCall, multipleX);
-  const botTag = `@${getXBotUsernameForCopy()}`;
-  const segments = [
-    `Call by: ${callerTag}`,
-    `Tracked LIVE via ${botTag}`,
-    'Dashboard link in bio'
-  ];
-  return `🔹 ${segments.join(' 🔹 ')} 🔹`;
+  return buildMinimalTerminalCaption(`Call by: ${callerTag}`, getXBotUsernameForCopy());
 }
 
 /**
@@ -457,6 +460,7 @@ module.exports = {
   buildXPostText,
   buildXMilestoneCaption,
   buildTerminalDigestCaption,
+  buildMinimalTerminalCaption,
   buildAttributionLine,
   xBrandKicker,
   xTerminalSectionRule,

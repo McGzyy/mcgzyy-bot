@@ -1,6 +1,9 @@
 'use strict';
 
+const path = require('path');
+const { readJson, writeJson } = require('./jsonStore');
 const { createPost, normalizePngUploadBuffer } = require('./xPoster');
+const { loadXPostAuditEventsSince } = require('./xPostAudit');
 const {
   buildWeeklyAvgXpDigestPng,
   buildPast30DaysDigestPng
@@ -261,10 +264,84 @@ function buildWeeklyStatsSnapshotBody(snap) {
   return maxChars >= 2000 ? fitTweet(raw, maxChars) : fitTweetWholeLines(raw, maxChars);
 }
 
+const digestStatePath = path.join(__dirname, '../data/xLeaderboardDigestState.json');
+
 let lastDailyKey = '';
 let lastWeeklyKey = '';
 let lastMonthlyKey = '';
 let lastWeeklyStatsKey = '';
+let digestStateHydrated = false;
+
+function envTruthy(name) {
+  const v = String(process.env[name] || '')
+    .trim()
+    .toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+function envFalsy(name) {
+  const v = String(process.env[name] || '')
+    .trim()
+    .toLowerCase();
+  return v === '0' || v === 'false' || v === 'no';
+}
+
+function resolveDigestUtcHour() {
+  const n = Number(process.env.X_LEADERBOARD_DIGEST_UTC_HOUR ?? 16);
+  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : 16;
+}
+
+function resolveDigestGraceHours() {
+  const n = Number(process.env.X_LEADERBOARD_DIGEST_GRACE_HOURS ?? 2);
+  if (!Number.isFinite(n) || n < 0) return 2;
+  return Math.min(6, Math.floor(n));
+}
+
+/**
+ * Posting window: target UTC hour plus optional grace hours (bot restart / tick drift).
+ * Dedupe keys prevent double posts within the same calendar period.
+ */
+function isWithinDigestPostWindow(now, targetHour, graceHours) {
+  const hour = now.getUTCHours();
+  const end = Math.min(23, targetHour + graceHours);
+  return hour >= targetHour && hour <= end;
+}
+
+async function hydrateDigestStateFromDisk() {
+  if (digestStateHydrated) {
+    return;
+  }
+  try {
+    const j = await readJson(digestStatePath);
+    if (j && typeof j === 'object') {
+      lastDailyKey = String(j.lastDailyKey || '');
+      lastWeeklyKey = String(j.lastWeeklyKey || '');
+      lastMonthlyKey = String(j.lastMonthlyKey || '');
+      lastWeeklyStatsKey = String(j.lastWeeklyStatsKey || '');
+    }
+  } catch {
+    /* first run */
+  }
+  digestStateHydrated = true;
+}
+
+async function persistDigestState() {
+  await writeJson(digestStatePath, {
+    lastDailyKey,
+    lastWeeklyKey,
+    lastMonthlyKey,
+    lastWeeklyStatsKey,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+async function markDigestPosted(field, key) {
+  if (field === 'daily') lastDailyKey = key;
+  else if (field === 'weekly') lastWeeklyKey = key;
+  else if (field === 'monthly') lastMonthlyKey = key;
+  else if (field === 'weeklyStats') lastWeeklyStatsKey = key;
+  await persistDigestState();
+}
 
 /**
  * @param {{ windowLabel: string, days: number, topN: number }} p
@@ -327,89 +404,79 @@ async function postDigest(p, options = {}) {
 }
 
 async function tickXLeaderboardDigest() {
-  const enabled = String(process.env.X_LEADERBOARD_DIGEST_ENABLED || '')
-    .trim()
-    .toLowerCase();
-  if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
+  await hydrateDigestStateFromDisk();
+
+  if (!envTruthy('X_LEADERBOARD_DIGEST_ENABLED')) {
     return;
   }
 
   const now = new Date();
   const utcDate = now.toISOString().slice(0, 10);
-  const hour = now.getUTCHours();
-  const targetHour = Number(process.env.X_LEADERBOARD_DIGEST_UTC_HOUR ?? 16);
+  const targetHour = resolveDigestUtcHour();
+  const graceHours = resolveDigestGraceHours();
   /**
-   * IMPORTANT: scheduler tick is `setInterval(...)` and may not align to :00.
-   * A narrow "first 12 minutes" window can miss the entire day if the process
-   * starts at :14/:19/etc. We dedupe by day/week/month keys, so it's safe to
-   * allow the whole hour.
+   * Scheduler tick is `setInterval(...)` and may not align to :00.
+   * Allow target hour + grace; dedupe by day/week/month keys prevents doubles.
    */
-  if (hour !== targetHour) {
+  if (!isWithinDigestPostWindow(now, targetHour, graceHours)) {
     return;
   }
 
-  const dailyDigestOff = ['0', 'false', 'no'].includes(
-    String(process.env.X_LEADERBOARD_DAILY_DIGEST_ENABLED || '')
-      .trim()
-      .toLowerCase()
-  );
+  const dailyDigestOff = envFalsy('X_LEADERBOARD_DAILY_DIGEST_ENABLED');
   const dailyKey = `d:${utcDate}`;
   if (!dailyDigestOff && lastDailyKey !== dailyKey) {
-    lastDailyKey = dailyKey;
-    await postDigest(
+    const result = await postDigest(
       { windowLabel: 'Daily snapshot', days: 1, topN: 4 },
       { attachDailyDualPanel: true }
     );
+    if (result?.success) {
+      await markDigestPosted('daily', dailyKey);
+    }
   }
 
-  const weeklyOn = String(process.env.X_LEADERBOARD_WEEKLY_DIGEST_ENABLED ?? 'true')
-    .trim()
-    .toLowerCase();
-  const weeklyEnabled = weeklyOn !== '0' && weeklyOn !== 'false' && weeklyOn !== 'no';
+  const weeklyEnabled = !envFalsy('X_LEADERBOARD_WEEKLY_DIGEST_ENABLED');
   const wday = now.getUTCDay();
   const weeklyDay = Number(process.env.X_LEADERBOARD_WEEKLY_UTC_WEEKDAY ?? 1);
   if (weeklyEnabled && wday === weeklyDay) {
     const weekKey = `w:${utcDate}`;
     if (lastWeeklyKey !== weekKey) {
-      lastWeeklyKey = weekKey;
-      await postDigest(
+      const result = await postDigest(
         { windowLabel: '7d snapshot', days: 7, topN: 5 },
         { attachWeeklyAvgXChart: true }
       );
+      if (result?.success) {
+        await markDigestPosted('weekly', weekKey);
+      }
     }
   }
 
-  const monthlyDigestOff = ['0', 'false', 'no'].includes(
-    String(process.env.X_LEADERBOARD_MONTHLY_DIGEST_ENABLED || '')
-      .trim()
-      .toLowerCase()
-  );
+  const monthlyDigestOff = envFalsy('X_LEADERBOARD_MONTHLY_DIGEST_ENABLED');
   if (!monthlyDigestOff && now.getUTCDate() === 1) {
     const mKey = `m:${utcDate.slice(0, 7)}`;
     if (lastMonthlyKey !== mKey) {
-      lastMonthlyKey = mKey;
-      await postDigest(
+      const result = await postDigest(
         { windowLabel: 'Monthly snapshot', days: 30, topN: 8 },
         { attachPast30DaysChart: true }
       );
+      if (result?.success) {
+        await markDigestPosted('monthly', mKey);
+      }
     }
   }
 }
 
 async function tickWeeklyStatsSnapshot() {
-  const enabled = String(process.env.X_WEEKLY_STATS_SNAPSHOT_ENABLED || '')
-    .trim()
-    .toLowerCase();
-  if (enabled !== '1' && enabled !== 'true' && enabled !== 'yes') {
+  await hydrateDigestStateFromDisk();
+
+  if (!envTruthy('X_WEEKLY_STATS_SNAPSHOT_ENABLED')) {
     return;
   }
 
   const now = new Date();
-  const hour = now.getUTCHours();
-  const digestHour = Number(process.env.X_LEADERBOARD_DIGEST_UTC_HOUR ?? 16);
+  const digestHour = resolveDigestUtcHour();
   const targetHour = Number(process.env.X_WEEKLY_STATS_UTC_HOUR ?? digestHour);
-  // Same reasoning as `tickXLeaderboardDigest`: allow the whole hour and dedupe by key.
-  if (hour !== targetHour) {
+  const graceHours = resolveDigestGraceHours();
+  if (!isWithinDigestPostWindow(now, targetHour, graceHours)) {
     return;
   }
 
@@ -446,16 +513,101 @@ async function tickWeeklyStatsSnapshot() {
     console.error('[XWeeklyStatsSnapshot] post failed:', result.error || 'unknown');
     return;
   }
-  lastWeeklyStatsKey = key;
+  await markDigestPosted('weeklyStats', key);
   console.log(`[XWeeklyStatsSnapshot] posted week ${key} (${result.id || 'ok'})`);
 }
 
+const SCHEDULED_AUDIT_CATEGORIES = [
+  'leaderboard_digest',
+  'weekly_terminal_snapshot',
+  'engagement_weekly_runner',
+  'engagement_monthly_top_caller'
+];
+
+/**
+ * Ops snapshot for Discord `!xdigeststatus` (owner diagnostics).
+ */
+async function getXDigestSchedulerStatus() {
+  await hydrateDigestStateFromDisk();
+  const now = new Date();
+  const targetHour = resolveDigestUtcHour();
+  const graceHours = resolveDigestGraceHours();
+  const weeklyStatsHourRaw = process.env.X_WEEKLY_STATS_UTC_HOUR;
+  const weeklyStatsHour =
+    weeklyStatsHourRaw != null && String(weeklyStatsHourRaw).trim() !== ''
+      ? Number(weeklyStatsHourRaw)
+      : targetHour;
+
+  const sinceMs = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  const audit = await loadXPostAuditEventsSince(sinceMs);
+  /** @type {Record<string, { ok: number, fail: number, lastOkTs: number|null, lastFailTs: number|null, lastError: string|null }>} */
+  const auditByCat = {};
+  for (const e of audit) {
+    const cat = String(e.category || 'unknown');
+    if (!SCHEDULED_AUDIT_CATEGORIES.includes(cat)) continue;
+    if (!auditByCat[cat]) {
+      auditByCat[cat] = { ok: 0, fail: 0, lastOkTs: null, lastFailTs: null, lastError: null };
+    }
+    const row = auditByCat[cat];
+    const ts = Number(e.ts);
+    if (e.success) {
+      row.ok += 1;
+      if (!row.lastOkTs || ts > row.lastOkTs) row.lastOkTs = ts;
+    } else {
+      row.fail += 1;
+      if (!row.lastFailTs || ts > row.lastFailTs) row.lastFailTs = ts;
+      row.lastError = e.errorSnippet || row.lastError;
+    }
+  }
+
+  const xCredsOk = Boolean(
+    process.env.X_API_KEY &&
+      process.env.X_API_SECRET &&
+      process.env.X_ACCESS_TOKEN &&
+      process.env.X_ACCESS_TOKEN_SECRET
+  );
+
+  return {
+    nowUtc: now.toISOString(),
+    inDigestWindow: isWithinDigestPostWindow(now, targetHour, graceHours),
+    targetHour,
+    graceHours,
+    digestEnabled: envTruthy('X_LEADERBOARD_DIGEST_ENABLED'),
+    dailyDigestEnabled: envTruthy('X_LEADERBOARD_DIGEST_ENABLED') && !envFalsy('X_LEADERBOARD_DAILY_DIGEST_ENABLED'),
+    weeklyDigestEnabled:
+      envTruthy('X_LEADERBOARD_DIGEST_ENABLED') && !envFalsy('X_LEADERBOARD_WEEKLY_DIGEST_ENABLED'),
+    monthlyDigestEnabled:
+      envTruthy('X_LEADERBOARD_DIGEST_ENABLED') && !envFalsy('X_LEADERBOARD_MONTHLY_DIGEST_ENABLED'),
+    weeklyStatsEnabled: envTruthy('X_WEEKLY_STATS_SNAPSHOT_ENABLED'),
+    weeklyRunnerEnabled: envTruthy('X_WEEKLY_RUNNER_ENABLED'),
+    monthlyTopCallerEnabled: envTruthy('X_MONTHLY_TOP_CALLER_ENABLED'),
+    weeklyDigestWeekday: Number(process.env.X_LEADERBOARD_WEEKLY_UTC_WEEKDAY ?? 1),
+    weeklyStatsWeekday: Number(process.env.X_WEEKLY_STATS_UTC_WEEKDAY ?? 1),
+    weeklyRunnerWeekday: Number(process.env.X_WEEKLY_RUNNER_UTC_WEEKDAY ?? 2),
+    weeklyStatsHour: Number.isFinite(weeklyStatsHour) ? weeklyStatsHour : targetHour,
+    xCredsOk,
+    persistedKeys: {
+      lastDailyKey,
+      lastWeeklyKey,
+      lastMonthlyKey,
+      lastWeeklyStatsKey
+    },
+    auditByCat
+  };
+}
+
 function startXLeaderboardDigestScheduler() {
-  setInterval(() => {
+  const runTick = () => {
     void tickXLeaderboardDigest();
     void tickWeeklyStatsSnapshot();
     void tickXEngagementPosts();
-  }, 5 * 60 * 1000);
+  };
+
+  void hydrateDigestStateFromDisk().then(() => {
+    runTick();
+  });
+
+  setInterval(runTick, 5 * 60 * 1000);
 }
 
 /**
@@ -472,5 +624,6 @@ module.exports = {
   buildLeaderboardDigestBody,
   buildWeeklyStatsSnapshotBody,
   tickWeeklyStatsSnapshot,
-  postLeaderboardDigestToX
+  postLeaderboardDigestToX,
+  getXDigestSchedulerStatus
 };

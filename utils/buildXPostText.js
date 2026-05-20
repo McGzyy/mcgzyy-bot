@@ -333,39 +333,31 @@ async function resolveMilestoneCallerXTag(trackedCall, multipleX = 0) {
 }
 
 /**
- * Two-line terminal caption (fits mobile X without awkward wraps).
- * @param {string} headline e.g. "McGBot Terminal · Daily snapshot"
- * @param {string} botTag e.g. "@McGBot"
+ * One-line caption for data-card X posts (stats and titles live on the image).
+ * Override with `X_TERMINAL_CARD_CAPTION` in .env if needed.
  */
-function buildMinimalTerminalCaption(headline, botTag) {
-  const bot = botTag.startsWith('@') ? botTag : `@${botTag}`;
-  return `🔹 ${headline}\nTracked LIVE via ${bot} · Dashboard link in bio 🔹`;
+function buildMinimalTerminalCaption() {
+  const custom = String(process.env.X_TERMINAL_CARD_CAPTION || '').trim();
+  if (custom) return custom;
+  return 'Tracked live - link in bio';
 }
 
 /**
  * Short caption for scheduled terminal digest cards (stats on image).
- * @param {'daily'|'weekly'|'monthly'|string} kind
- * @param {string} [windowLabel]
+ * @param {'daily'|'weekly'|'monthly'|string} [_kind]
+ * @param {string} [_windowLabel]
  */
-function buildTerminalDigestCaption(kind, windowLabel = '') {
-  const labels = {
-    daily: 'Daily snapshot',
-    weekly: '7d snapshot',
-    monthly: 'Monthly snapshot'
-  };
-  const title =
-    labels[kind] || String(windowLabel || 'McGBot Terminal').trim() || 'McGBot Terminal';
-  return buildMinimalTerminalCaption(`McGBot Terminal · ${title}`, getXBotUsernameForCopy());
+function buildTerminalDigestCaption(_kind, _windowLabel = '') {
+  return buildMinimalTerminalCaption();
 }
 
 /**
  * Short milestone caption (stats live on the card image).
- * @param {object} trackedCall
- * @param {number} [multipleX]
+ * @param {object} _trackedCall
+ * @param {number} [_multipleX]
  */
-async function buildMinimalXMilestoneCaption(trackedCall, multipleX = 0) {
-  const callerTag = await resolveMilestoneCallerXTag(trackedCall, multipleX);
-  return buildMinimalTerminalCaption(`Call by: ${callerTag}`, getXBotUsernameForCopy());
+async function buildMinimalXMilestoneCaption(_trackedCall, _multipleX = 0) {
+  return buildMinimalTerminalCaption();
 }
 
 /**

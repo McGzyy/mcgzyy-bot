@@ -18,12 +18,35 @@ const {
   CARD_HEIGHT
 } = require('./xMilestoneDataCard');
 const { loadMgMarkImage, loadMcGBotAvatarImage } = require('./xBrandAssets');
+const { loadImage } = require('canvas');
 const {
   getUtcYesterdayAndPriorDeskAvgs,
   getCallerLeaderboardInTimeframe,
   getBestCallInTimeframe,
-  getBestBotCallInTimeframe
+  getBestBotCallInTimeframe,
+  getPreviousCompletedUtcWeekBounds,
+  getDeskAvgAthXPairForUtcRange,
+  getCallerLeaderboardInUtcWeekBounds,
+  getBestCallInUtcWeekBounds,
+  getBestBotCallInUtcWeekBounds,
+  startOfUtcCalendarDay
 } = require('./callerStatsService');
+const { buildWeeklyAvgXpDigestPng, buildPast30DaysDigestPng } = require('./digestPerformanceChart');
+
+const UTC_MO = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec'
+];
 
 const W = CARD_WIDTH;
 const H = CARD_HEIGHT;
@@ -54,6 +77,68 @@ function fmtDayOverDay(prev, cur) {
 }
 
 /**
+ * @param {number|null|undefined} prev
+ * @param {number|null|undefined} cur
+ */
+function fmtWeekOverWeek(prev, cur) {
+  if (prev == null || cur == null || !Number.isFinite(prev) || !Number.isFinite(cur)) {
+    return '—';
+  }
+  const d = cur - prev;
+  const sign = d > 0 ? '+' : '';
+  return `${sign}${d.toFixed(2)}× vs prior week`;
+}
+
+/**
+ * @param {number|null|undefined} prev
+ * @param {number|null|undefined} cur
+ */
+function fmt30dOverPrior30d(prev, cur) {
+  if (prev == null || cur == null || !Number.isFinite(prev) || !Number.isFinite(cur)) {
+    return '—';
+  }
+  const d = cur - prev;
+  const sign = d > 0 ? '+' : '';
+  return `${sign}${d.toFixed(2)}× vs prior 30d`;
+}
+
+/** @param {Date} startInclusive @param {Date} endExclusive */
+function formatUtcDateRangeLabel(startInclusive, endExclusive) {
+  const lastDay = new Date(endExclusive.getTime() - 86400000);
+  const sm = UTC_MO[startInclusive.getUTCMonth()];
+  const sd = startInclusive.getUTCDate();
+  const em = UTC_MO[lastDay.getUTCMonth()];
+  const ed = lastDay.getUTCDate();
+  const y = startInclusive.getUTCFullYear();
+  const y2 = lastDay.getUTCFullYear();
+  if (y === y2 && startInclusive.getUTCMonth() === lastDay.getUTCMonth()) {
+    return `${sm} ${sd}–${ed}, ${y}`;
+  }
+  if (y === y2) {
+    return `${sm} ${sd}–${em} ${ed}, ${y}`;
+  }
+  const yShort = String(y).slice(-2);
+  const y2Short = String(y2).slice(-2);
+  return `${sm} ${sd} '${yShort} – ${em} ${ed} '${y2Short}`;
+}
+
+/** @param {Date} [anchor] */
+function getUtcRolling30AndPrior30Bounds(anchor = new Date()) {
+  const endExclusive = startOfUtcCalendarDay(anchor);
+  const curStart = new Date(endExclusive);
+  curStart.setUTCDate(curStart.getUTCDate() - 30);
+  const priorEnd = new Date(curStart);
+  const priorStart = new Date(priorEnd);
+  priorStart.setUTCDate(priorStart.getUTCDate() - 30);
+  return { curStart, endExclusive, priorStart, priorEnd: priorEnd };
+}
+
+/** @param {Date} startInclusive @param {Date} endExclusive */
+function formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive) {
+  return formatUtcDateRangeLabel(startInclusive, endExclusive);
+}
+
+/**
  * @param {number|null|undefined} mX
  * @param {number|null|undefined} bX
  */
@@ -80,7 +165,7 @@ function buildSampleDailyDigestData(anchor = new Date()) {
   const caller = getTestCallerHandle();
 
   return {
-    dateLabel,
+    dateLabel: `UTC ${dateLabel}`,
     isSample: true,
     memberAvgX: 4.82,
     priorMemberAvgX: 3.91,
@@ -107,7 +192,7 @@ function buildLiveDailyDigestData(anchor = new Date()) {
   const bestBot = getBestBotCallInTimeframe(1);
 
   return {
-    dateLabel: yesterdayLabel,
+    dateLabel: `UTC ${yesterdayLabel}`,
     isSample: false,
     memberAvgX:
       yesterday.memberAvgX != null && Number.isFinite(Number(yesterday.memberAvgX))
@@ -143,6 +228,184 @@ function resolveDailyDigestData(anchor = new Date(), opts = {}) {
   }
   return buildLiveDailyDigestData(anchor);
 }
+
+/**
+ * @returns {import('./dailyDigestPanel').WeeklyDigestData}
+ */
+function buildSampleWeeklyDigestData(anchor = new Date()) {
+  const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(anchor);
+  const caller = getTestCallerHandle();
+
+  return {
+    dateLabel: formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive),
+    isSample: true,
+    memberAvgX: 5.12,
+    priorMemberAvgX: 4.44,
+    botAvgX: 4.01,
+    leaderboard: [
+      { username: caller, avgX: 9.8, totalCalls: 5 },
+      { username: 'SolHunter', avgX: 7.2, totalCalls: 4 },
+      { username: 'DegenMike', avgX: 5.9, totalCalls: 6 },
+      { username: 'ChartWizard', avgX: 4.8, totalCalls: 3 },
+      { username: 'AlphaSeeker', avgX: 3.9, totalCalls: 2 }
+    ],
+    bestHuman: { ticker: 'BONK', x: 24.1 },
+    bestBot: { ticker: 'OMNIPHX', x: 41.5 }
+  };
+}
+
+/**
+ * @param {Date} anchor
+ * @returns {import('./dailyDigestPanel').WeeklyDigestData}
+ */
+function buildLiveWeeklyDigestData(anchor = new Date()) {
+  const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(anchor);
+  const cur = getDeskAvgAthXPairForUtcRange(startInclusive, endExclusive);
+  const prevStart = new Date(startInclusive);
+  prevStart.setUTCDate(prevStart.getUTCDate() - 7);
+  const prior = getDeskAvgAthXPairForUtcRange(prevStart, startInclusive);
+  const rows = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, 5);
+  const bestHuman = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
+  const bestBot = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
+
+  return {
+    dateLabel: formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive),
+    isSample: false,
+    memberAvgX:
+      cur.memberAvgX != null && Number.isFinite(Number(cur.memberAvgX))
+        ? Number(cur.memberAvgX)
+        : null,
+    priorMemberAvgX:
+      prior.memberAvgX != null && Number.isFinite(Number(prior.memberAvgX))
+        ? Number(prior.memberAvgX)
+        : null,
+    botAvgX:
+      cur.botAvgX != null && Number.isFinite(Number(cur.botAvgX)) ? Number(cur.botAvgX) : null,
+    leaderboard: rows.map(r => ({
+      username: r.username,
+      avgX: r.avgX,
+      totalCalls: r.totalCalls
+    })),
+    bestHuman: bestHuman
+      ? { ticker: bestHuman.ticker, x: Number(bestHuman.x) || 0 }
+      : null,
+    bestBot: bestBot ? { ticker: bestBot.ticker, x: Number(bestBot.x) || 0 } : null
+  };
+}
+
+/**
+ * @param {Date} [anchor]
+ * @param {{ sampleData?: boolean }} [opts]
+ */
+function resolveWeeklyDigestData(anchor = new Date(), opts = {}) {
+  if (opts.sampleData === true) {
+    return buildSampleWeeklyDigestData(anchor);
+  }
+  return buildLiveWeeklyDigestData(anchor);
+}
+
+/**
+ * @returns {import('./dailyDigestPanel').MonthlyDigestData}
+ */
+function buildSampleMonthlyDigestData(anchor = new Date()) {
+  const { curStart, endExclusive } = getUtcRolling30AndPrior30Bounds(anchor);
+  const caller = getTestCallerHandle();
+
+  return {
+    dateLabel: formatUtcDateRangeLabel(curStart, endExclusive),
+    isSample: true,
+    memberAvgX: 4.68,
+    priorMemberAvgX: 4.12,
+    botAvgX: 3.88,
+    leaderboard: [
+      { username: caller, avgX: 11.2, totalCalls: 18 },
+      { username: 'SolHunter', avgX: 8.4, totalCalls: 14 },
+      { username: 'DegenMike', avgX: 6.1, totalCalls: 22 },
+      { username: 'ChartWizard', avgX: 5.3, totalCalls: 11 },
+      { username: 'AlphaSeeker', avgX: 4.7, totalCalls: 9 },
+      { username: 'MoonRunner', avgX: 4.1, totalCalls: 7 },
+      { username: 'TapeReader', avgX: 3.6, totalCalls: 6 },
+      { username: 'EdgeFinder', avgX: 3.2, totalCalls: 5 }
+    ],
+    bestHuman: { ticker: 'PEPE', x: 28.4 },
+    bestBot: { ticker: 'OMNIPHX', x: 45.2 }
+  };
+}
+
+/**
+ * @param {Date} anchor
+ * @returns {import('./dailyDigestPanel').MonthlyDigestData}
+ */
+function buildLiveMonthlyDigestData(anchor = new Date()) {
+  const { curStart, endExclusive, priorStart, priorEnd } = getUtcRolling30AndPrior30Bounds(anchor);
+  const cur = getDeskAvgAthXPairForUtcRange(curStart, endExclusive);
+  const prior = getDeskAvgAthXPairForUtcRange(priorStart, priorEnd);
+  const rows = getCallerLeaderboardInTimeframe(30, 8);
+  const bestHuman = getBestCallInTimeframe(30);
+  const bestBot = getBestBotCallInTimeframe(30);
+
+  return {
+    dateLabel: formatUtcDateRangeLabel(curStart, endExclusive),
+    isSample: false,
+    memberAvgX:
+      cur.memberAvgX != null && Number.isFinite(Number(cur.memberAvgX))
+        ? Number(cur.memberAvgX)
+        : null,
+    priorMemberAvgX:
+      prior.memberAvgX != null && Number.isFinite(Number(prior.memberAvgX))
+        ? Number(prior.memberAvgX)
+        : null,
+    botAvgX:
+      cur.botAvgX != null && Number.isFinite(Number(cur.botAvgX)) ? Number(cur.botAvgX) : null,
+    leaderboard: rows.map(r => ({
+      username: r.username,
+      avgX: r.avgX,
+      totalCalls: r.totalCalls
+    })),
+    bestHuman: bestHuman
+      ? { ticker: bestHuman.ticker, x: Number(bestHuman.x) || 0 }
+      : null,
+    bestBot: bestBot ? { ticker: bestBot.ticker, x: Number(bestBot.x) || 0 } : null
+  };
+}
+
+/**
+ * @param {Date} [anchor]
+ * @param {{ sampleData?: boolean }} [opts]
+ */
+function resolveMonthlyDigestData(anchor = new Date(), opts = {}) {
+  if (opts.sampleData === true) {
+    return buildSampleMonthlyDigestData(anchor);
+  }
+  return buildLiveMonthlyDigestData(anchor);
+}
+
+const DAILY_CARD_CFG = {
+  title: 'Daily snapshot',
+  memberSub: 'Avg ATH × · last UTC day',
+  leaderboardSub: 'Top 4 · avg ATH × · rolling 24h',
+  quietMessage: 'Quiet day — no qualifying desk calls',
+  fmtPeriodOverPeriod: fmtDayOverDay,
+  maxLeaderboardRows: 4
+};
+
+const WEEKLY_CARD_CFG = {
+  title: '7d snapshot',
+  memberSub: 'Avg ATH × · completed UTC week',
+  leaderboardSub: 'Top 5 · avg ATH × · completed week',
+  quietMessage: 'Quiet week — no qualifying desk calls',
+  fmtPeriodOverPeriod: fmtWeekOverWeek,
+  maxLeaderboardRows: 5
+};
+
+const MONTHLY_CARD_CFG = {
+  title: 'Monthly snapshot',
+  memberSub: 'Avg ATH × · last 30 UTC days',
+  leaderboardSub: 'Top 8 · avg ATH × · rolling 30d',
+  quietMessage: 'Quiet month — no qualifying desk calls',
+  fmtPeriodOverPeriod: fmt30dOverPrior30d,
+  maxLeaderboardRows: 8
+};
 
 function metricGrad(isGood) {
   if (isGood == null) {
@@ -361,16 +624,26 @@ function formatHighlight(call) {
 /**
  * @param {import('canvas').CanvasRenderingContext2D} ctx
  * @param {object} data
+ * @param {{
+ *   title: string,
+ *   memberSub: string,
+ *   leaderboardSub: string,
+ *   quietMessage: string,
+ *   fmtPeriodOverPeriod: (prev: number|null, cur: number|null) => string,
+ *   maxLeaderboardRows?: number
+ * }} cfg
  * @param {{ primary: string, soft: string, grad: string[] }} accent
  * @param {import('canvas').Image|null} botAvatar
+ * @param {import('canvas').Image|null} [chartImage]
  */
-function renderDailyDigestCard(ctx, data, accent, botAvatar) {
+function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage = null) {
   const mY = data.memberAvgX;
   const bY = data.botAvgX;
   const mP = data.priorMemberAvgX;
-  const dod = fmtDayOverDay(mP, mY);
+  const periodFoot = cfg.fmtPeriodOverPeriod(mP, mY);
   const spread = fmtMemberBotSpread(mY, bY);
   const botAccent = channelAccent('bot');
+  const maxRows = Number(cfg.maxLeaderboardRows) > 0 ? Number(cfg.maxLeaderboardRows) : 4;
 
   const mOk = mY != null && Number.isFinite(mY);
   const memberHero = mOk ? `${Number(mY).toFixed(2)}×` : '—';
@@ -378,14 +651,14 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
   const spreadGood = spread.memberAhead;
 
   const headerH = 108;
-  drawTitleGradient(ctx, 'Daily snapshot', PAD, PAD + 18, 52, accent.grad);
+  drawTitleGradient(ctx, cfg.title, PAD, PAD + 18, 52, accent.grad);
   ctx.fillStyle = accent.primary;
   ctx.font = '700 12px system-ui, "Segoe UI", sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText('TERMINAL · DESK PERFORMANCE', PAD, PAD);
 
-  drawDateChip(ctx, W - PAD, PAD + 4, `UTC ${data.dateLabel}`, accent.primary);
+  drawDateChip(ctx, W - PAD, PAD + 4, data.dateLabel, accent.primary);
   if (data.isSample) {
     drawPreviewBadge(ctx, W - PAD, PAD + 36, 'LAYOUT PREVIEW', accent.primary);
   }
@@ -403,10 +676,10 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
     statsH,
     {
       label: 'Member desk',
-      sub: 'Avg ATH × · last UTC day',
+      sub: cfg.memberSub,
       hero: memberHero,
       grad: metricGrad(memberGood),
-      foot: dod
+      foot: periodFoot
     },
     accent
   );
@@ -441,11 +714,11 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
   ctx.fillText('Caller leaderboard', PAD + 24, bodyY + 20);
   ctx.fillStyle = MUTED;
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText('Top 4 · avg ATH × · rolling 24h', PAD + 24, bodyY + 48);
+  ctx.fillText(cfg.leaderboardSub, PAD + 24, bodyY + 48);
 
   const rows = data.leaderboard || [];
   const rowStart = bodyY + 78;
-  const rowH = Math.min(44, Math.floor((bodyH - 90) / Math.max(4, rows.length || 1)));
+  const rowH = Math.min(44, Math.floor((bodyH - 90) / Math.max(maxRows, rows.length || 1)));
   const multX = PAD + lbW - 24;
   const callsX = multX - 108;
 
@@ -515,12 +788,13 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
     ctx.font = '600 15px system-ui, "Segoe UI", sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('Quiet day — no qualifying desk calls', PAD + 24, rowStart + 12);
+    ctx.fillText(cfg.quietMessage, PAD + 24, rowStart + 12);
   }
 
   const sideX = PAD + lbW + colGap;
   const hiGap = 16;
-  const hiH = Math.floor((bodyH - hiGap) / 2);
+  const hiH = chartImage ? 76 : Math.floor((bodyH - hiGap) / 2);
+  const chartH = chartImage ? bodyH - hiH * 2 - hiGap * 2 : 0;
   const hiHuman = formatHighlight(data.bestHuman);
   const hiBot = formatHighlight(data.bestBot);
 
@@ -595,6 +869,16 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
   drawHighlightCard(bodyY, 'Best member call', hiHuman, accent, null);
   drawHighlightCard(bodyY + hiH + hiGap, 'Best McGBot call', hiBot, botAccent, botAvatar);
 
+  if (chartImage && chartH > 40) {
+    const chartY = bodyY + hiH * 2 + hiGap * 2;
+    drawGlassPanel(ctx, sideX, chartY, sideW, chartH, 16, accent);
+    ctx.save();
+    roundRectPath(ctx, sideX + 8, chartY + 8, sideW - 16, chartH - 16, 12);
+    ctx.clip();
+    ctx.drawImage(chartImage, sideX + 8, chartY + 8, sideW - 16, chartH - 16);
+    ctx.restore();
+  }
+
   const footerY = H - PAD - 4;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
@@ -623,7 +907,81 @@ async function buildDailyDigestCardPng(anchor = new Date(), opts = {}) {
   const ctx = canvas.getContext('2d');
   paintCardBackground(ctx, W, H, glow, accent.primary);
   paintMgWatermark(ctx, mgImg, W, H);
-  renderDailyDigestCard(ctx, data, accent, botAvatar);
+  renderTerminalDigestCard(ctx, data, DAILY_CARD_CFG, accent, botAvatar);
+
+  return canvas.toBuffer('image/png');
+}
+
+/**
+ * Elite weekly digest card (1200×820) — terminal layout + embedded weekday avg× chart.
+ * @param {Date} [anchor]
+ * @param {{ sampleData?: boolean }} [opts]
+ * @returns {Promise<Buffer>}
+ */
+async function buildWeeklyDigestCardPng(anchor = new Date(), opts = {}) {
+  const data = resolveWeeklyDigestData(anchor, opts);
+  const accent = channelAccent('member');
+  const glow = accent.soft;
+  const [mgImg, botAvatar, chartBuf] = await Promise.all([
+    loadMgMarkImage(),
+    loadMcGBotAvatarImage(),
+    buildWeeklyAvgXpDigestPng(anchor).catch(err => {
+      console.error('[buildWeeklyDigestCardPng] weekday chart failed:', err?.message || err);
+      return null;
+    })
+  ]);
+
+  let chartImage = null;
+  if (chartBuf) {
+    try {
+      chartImage = await loadImage(chartBuf);
+    } catch (err) {
+      console.error('[buildWeeklyDigestCardPng] chart image load failed:', err?.message || err);
+    }
+  }
+
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  paintCardBackground(ctx, W, H, glow, accent.primary);
+  paintMgWatermark(ctx, mgImg, W, H);
+  renderTerminalDigestCard(ctx, data, WEEKLY_CARD_CFG, accent, botAvatar, chartImage);
+
+  return canvas.toBuffer('image/png');
+}
+
+/**
+ * Elite monthly digest card (1200×820) — terminal layout + embedded 30d avg× trend chart.
+ * @param {Date} [anchor]
+ * @param {{ sampleData?: boolean }} [opts]
+ * @returns {Promise<Buffer>}
+ */
+async function buildMonthlyDigestCardPng(anchor = new Date(), opts = {}) {
+  const data = resolveMonthlyDigestData(anchor, opts);
+  const accent = channelAccent('member');
+  const glow = accent.soft;
+  const [mgImg, botAvatar, chartBuf] = await Promise.all([
+    loadMgMarkImage(),
+    loadMcGBotAvatarImage(),
+    buildPast30DaysDigestPng(anchor, 30).catch(err => {
+      console.error('[buildMonthlyDigestCardPng] 30d chart failed:', err?.message || err);
+      return null;
+    })
+  ]);
+
+  let chartImage = null;
+  if (chartBuf) {
+    try {
+      chartImage = await loadImage(chartBuf);
+    } catch (err) {
+      console.error('[buildMonthlyDigestCardPng] chart image load failed:', err?.message || err);
+    }
+  }
+
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  paintCardBackground(ctx, W, H, glow, accent.primary);
+  paintMgWatermark(ctx, mgImg, W, H);
+  renderTerminalDigestCard(ctx, data, MONTHLY_CARD_CFG, accent, botAvatar, chartImage);
 
   return canvas.toBuffer('image/png');
 }
@@ -635,8 +993,16 @@ async function buildDailySnapshotModulesPng(anchor = new Date()) {
 
 module.exports = {
   buildDailyDigestCardPng,
+  buildWeeklyDigestCardPng,
+  buildMonthlyDigestCardPng,
   buildDailySnapshotModulesPng,
   buildSampleDailyDigestData,
   buildLiveDailyDigestData,
-  resolveDailyDigestData
+  resolveDailyDigestData,
+  buildSampleWeeklyDigestData,
+  buildLiveWeeklyDigestData,
+  resolveWeeklyDigestData,
+  buildSampleMonthlyDigestData,
+  buildLiveMonthlyDigestData,
+  resolveMonthlyDigestData
 };

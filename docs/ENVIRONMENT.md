@@ -194,7 +194,7 @@ Payment (Stripe/SOL) calls **`syncMembershipDiscordRoles`**: active Basic → Tr
 
 | Variable | Used in | Purpose |
 |----------|---------|---------|
-| **`BOT_OWNER_ID`** | `index.js`, `commands/basicCommands.js` | Discord user snowflake; gates `!testx`, `!testweeklyrunner`, `!testtopcallermonth`, `!testweeklysnapshot`, `!testdailydigest`, `!test7ddigest`, `!testmonthlydigest`, `!setminmc`, sanity `!setsanity*`, etc. If unset, owner checks fail closed where implemented. |
+| **`BOT_OWNER_ID`** | `index.js`, `commands/basicCommands.js` | Discord user snowflake; gates `!testx`, `!testweeklyrunner`, `!testtopcallermonth`, `!testweeklysnapshot`, `!previewdailydigest`, `!previewweeklydigest`, `!previewmonthlydigest`, `!testdailydigest`, `!test7ddigest`, `!testmonthlydigest`, `!setminmc`, sanity `!setsanity*`, etc. If unset, owner checks fail closed where implemented. |
 
 ### 7.3 Required for X (Twitter) posting
 
@@ -223,7 +223,7 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_MILESTONE_QUOTE_KEEP_MIN_AGE_HOURS`** | Min age before a quote can be **kept** when rotating (default `4`). Younger quotes are replaced (deleted) when a newer milestone posts. |
 | **`X_MILESTONE_QUOTE_KEEP_MIN_LIKES`** | Keep quote if age ≥ min hours **and** likes ≥ this (default `10`). |
 | **`X_MILESTONE_QUOTE_KEEP_MIN_RETWEETS`** | Keep quote if age ≥ min hours **and** retweets ≥ this (default `2`). Either likes or retweets threshold can qualify. |
-| **`X_TERMINAL_CARD_CAPTION`** | Optional override for data-card post captions (milestones + daily digest). Default: `🔹 Tracked live - link in bio 🔹` (caller/stats on the image). |
+| **`X_TERMINAL_CARD_CAPTION`** | Optional override for data-card post captions (milestones + daily/weekly digest cards). Default: `🔹 Tracked live - link in bio 🔹` (caller/stats on the image). |
 | **`X_MILESTONE_CAPTION_INCLUDE_BIO_LINE`** | Legacy multi-line captions only (`X_MILESTONE_CAPTION_LEGACY=1`). |
 | **`X_TEST_MILESTONE_CALLER_HANDLE`** | X handle for `!testxmilestone user` card/caption (default `McGzyy`). Uses `BOT_OWNER_ID` Discord avatar when set. |
 | **`X_MILESTONE_MCGBOT_AVATAR_PATH`** | Optional path to McGBot profile PNG for **bot** milestone cards (default `branding/mcgbot-avatar.png`). |
@@ -236,10 +236,10 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_AUTO_APPROVE_USER_CALLS`** | `1` / `true` — **user_call** rows skip `#mod-approvals` for X and go straight to `xApproved` (bot_call still needs mod approve). |
 | **`X_LEADERBOARD_DIGEST_ENABLED`** | `1` / `true` — enable scheduled digest tweets (off by default). |
 | **`X_LEADERBOARD_DAILY_DIGEST_ENABLED`** | Optional; default **on** when `X_LEADERBOARD_DIGEST_ENABLED` is on. Set `0` / `false` / `no` to **skip** the **rolling 24h** digest (still posts **7d** / **monthly** if those stay enabled). Daily post uses the **terminal data card** (1200×820, same shell as milestone cards) + one-line caption; stats on the image. Owner preview: `!previewdailydigest`. |
-| **`X_LEADERBOARD_MONTHLY_DIGEST_ENABLED`** | Optional; default **on** when digest is enabled. Set `0` / `false` / `no` to skip the **1st-of-month** digest. Post includes a **Jan–Dec avg ATH ×** chart (UTC year: on Jan 1 the chart is the **previous** full calendar year; on other months it is the **current** year to date). |
+| **`X_LEADERBOARD_MONTHLY_DIGEST_ENABLED`** | Optional; default **on** when digest is enabled. Set `0` / `false` / `no` to skip the **1st-of-month** digest. Monthly post uses the **terminal data card** (1200×820) with embedded **30d avg× trend** chart + one-line caption; stats on the image. Owner preview: `!previewmonthlydigest`. |
 | **`X_LEADERBOARD_DIGEST_UTC_HOUR`** | Hour `0–23` to post (default `16`). |
 | **`X_LEADERBOARD_DIGEST_GRACE_HOURS`** | Optional `0–6` extra UTC hours after the target hour to retry if the bot was down or an X post failed (default `2`). Dedupe keys in `data/xLeaderboardDigestState.json` prevent double posts. |
-| **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the **7d** leaderboard digest (default on when digest is enabled). |
+| **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the **7d** leaderboard digest (default on when digest is enabled). Weekly post uses the **terminal data card** (1200×820) with embedded weekday avg× chart + one-line caption; stats on the image. Owner preview: `!previewweeklydigest`. |
 | **`X_LEADERBOARD_WEEKLY_UTC_WEEKDAY`** | `0` (Sun) … `6` (Sat); default `1` (Monday). |
 | **`X_WEEKLY_STATS_SNAPSHOT_ENABLED`** | `1` / `true` — post a **stats-only** weekly X summary (previous completed UTC Mon–Sun); **independent** of `X_LEADERBOARD_DIGEST_ENABLED`. |
 | **`X_WEEKLY_STATS_UTC_WEEKDAY`** | `0`–`6`; default `1` (Monday). |

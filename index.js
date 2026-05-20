@@ -546,9 +546,10 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
     `• \`!xdigeststatus\` — Scheduled X digest / W·M engagement scheduler status + recent post audit (owner only)\n` +
-    `• \`!previewdailydigest\` — **Discord preview** with **sample stats** (layout). Add \`live\` for real data.\n` +
+    `• \`!previewdailydigest\` / \`!previewweeklydigest\` / \`!previewmonthlydigest\` — **Discord preview** with **sample stats** (layout). Add \`live\` for real data.\n` +
     `• \`!testdailydigest\` — Post daily card to X. \`!testdailydigest sample\` uses filler; default is **live** stats.\n` +
-    `• \`!test7ddigest\` / \`!testmonthlydigest\` — **7d** (weekday chart) or **monthly** (30d trend) to X (owner only)\n` +
+    `• \`!test7ddigest\` — Post weekly card to X. \`!test7ddigest sample\` uses filler; default is **live** stats.\n` +
+    `• \`!testmonthlydigest\` — Post monthly card to X. \`!testmonthlydigest sample\` uses filler; default is **live** stats.\n` +
     `• \`!previewxmilestone user|bot <sol_ca> [mult]\` — **Preview card + caption in Discord** (no X; omit CA for JUP default)\n` +
     `• \`!testxmilestone user|bot <sol_ca> [mult]\` — **Live X post** (real Dex token; user tests credit **@McGzyy**). \`fresh\` skips auto-quote. Quote: \`!testxmilestone quote <post_id> user|bot [mult]\`\n` +
     `• \`!testweeklyrunner\` / \`!testtopcallermonth\` — Force **weekly runner** or **monthly top caller** X posts (owner only; monthly test skips Discord role)\n` +
@@ -3426,6 +3427,82 @@ if (lowerContent === '!scanner off') {
         return;
       }
 
+      if (lowerContent === '!previewweeklydigest' || lowerContent.startsWith('!previewweeklydigest ')) {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        const useLive = /\blive\b/i.test(content);
+        const useSample = !useLive;
+
+        /** @type {import('discord.js').Message|null} */
+        let ack = null;
+        try {
+          const { buildWeeklyDigestCardPng } = require('./utils/dailyDigestPanel');
+          const { buildTerminalDigestCaption } = require('./utils/buildXPostText');
+          ack = await message.reply({
+            content: `⏳ Generating weekly digest card (${useSample ? 'sample layout' : 'live data'})…`,
+            allowedMentions: { repliedUser: false }
+          });
+          const png = await buildWeeklyDigestCardPng(new Date(), { sampleData: useSample });
+          const caption = buildTerminalDigestCaption('weekly');
+          const file = new AttachmentBuilder(png, { name: 'weekly_digest_preview.png' });
+          await ack.edit({
+            content:
+              `**Weekly digest preview** · ${useSample ? '**sample stats** (add `live` for real data)' : '**live data**'}\n` +
+              `Caption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
+            files: [file]
+          });
+        } catch (e) {
+          console.error('[!previewweeklydigest]', e);
+          const errText = `❌ ${e instanceof Error ? e.message : String(e)}`;
+          if (ack) {
+            await ack.edit({ content: errText }).catch(() => replyText(message, errText));
+          } else {
+            await replyText(message, errText);
+          }
+        }
+        return;
+      }
+
+      if (lowerContent === '!previewmonthlydigest' || lowerContent.startsWith('!previewmonthlydigest ')) {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        const useLive = /\blive\b/i.test(content);
+        const useSample = !useLive;
+
+        /** @type {import('discord.js').Message|null} */
+        let ack = null;
+        try {
+          const { buildMonthlyDigestCardPng } = require('./utils/dailyDigestPanel');
+          const { buildTerminalDigestCaption } = require('./utils/buildXPostText');
+          ack = await message.reply({
+            content: `⏳ Generating monthly digest card (${useSample ? 'sample layout' : 'live data'})…`,
+            allowedMentions: { repliedUser: false }
+          });
+          const png = await buildMonthlyDigestCardPng(new Date(), { sampleData: useSample });
+          const caption = buildTerminalDigestCaption('monthly');
+          const file = new AttachmentBuilder(png, { name: 'monthly_digest_preview.png' });
+          await ack.edit({
+            content:
+              `**Monthly digest preview** · ${useSample ? '**sample stats** (add `live` for real data)' : '**live data**'}\n` +
+              `Caption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
+            files: [file]
+          });
+        } catch (e) {
+          console.error('[!previewmonthlydigest]', e);
+          const errText = `❌ ${e instanceof Error ? e.message : String(e)}`;
+          if (ack) {
+            await ack.edit({ content: errText }).catch(() => replyText(message, errText));
+          } else {
+            await replyText(message, errText);
+          }
+        }
+        return;
+      }
+
       if (
         lowerContent === '!testdailydigest' ||
         lowerContent === '!test7ddigest' ||
@@ -3442,16 +3519,18 @@ if (lowerContent === '!scanner off') {
           let result;
           let label = 'digest';
           if (isMonthly) {
-            label = 'monthly (+ 30d chart)';
+            const useSample = /\bsample\b/i.test(content);
+            label = useSample ? 'monthly (sample layout)' : 'monthly (live)';
             result = await postLeaderboardDigestToX(
               { windowLabel: 'Monthly snapshot', days: 30, topN: 8 },
-              { attachPast30DaysChart: true }
+              { attachPast30DaysChart: true, sampleData: useSample }
             );
           } else if (is7d) {
-            label = '7d (+ weekday chart)';
+            const useSample = /\bsample\b/i.test(content);
+            label = useSample ? '7d (sample layout)' : '7d (live)';
             result = await postLeaderboardDigestToX(
               { windowLabel: '7d snapshot', days: 7, topN: 5 },
-              { attachWeeklyAvgXChart: true }
+              { attachWeeklyAvgXChart: true, sampleData: useSample }
             );
           } else {
             const useSample = /\bsample\b/i.test(content);

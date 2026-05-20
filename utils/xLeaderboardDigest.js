@@ -4,12 +4,12 @@ const path = require('path');
 const { readJson, writeJson } = require('./jsonStore');
 const { createPost, normalizePngUploadBuffer } = require('./xPoster');
 const { loadXPostAuditEventsSince } = require('./xPostAudit');
-const {
-  buildWeeklyAvgXpDigestPng,
-  buildPast30DaysDigestPng
-} = require('./digestPerformanceChart');
 const { buildWeeklySnapshotModulesPng } = require('./weeklySnapshotPanel');
-const { buildDailyDigestCardPng } = require('./dailyDigestPanel');
+const {
+  buildDailyDigestCardPng,
+  buildWeeklyDigestCardPng,
+  buildMonthlyDigestCardPng
+} = require('./dailyDigestPanel');
 const { tickXEngagementPosts } = require('./xEngagementScheduler');
 const {
   getCallerLeaderboardInTimeframe,
@@ -346,7 +346,7 @@ async function markDigestPosted(field, key) {
 
 /**
  * @param {{ windowLabel: string, days: number, topN: number }} p
- * @param {{ attachDailyDualPanel?: boolean, attachDailyDigestCard?: boolean, attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean, sampleData?: boolean }} [options]
+ * @param {{ attachDailyDualPanel?: boolean, attachDailyDigestCard?: boolean, attachWeeklyDigestCard?: boolean, attachWeeklyAvgXChart?: boolean, attachMonthlyDigestCard?: boolean, attachPast30DaysChart?: boolean, sampleData?: boolean }} [options]
  */
 async function postDigest(p, options = {}) {
   const { windowLabel, days, topN } = p;
@@ -354,6 +354,8 @@ async function postDigest(p, options = {}) {
   let png = null;
 
   const useTerminalDailyCard = options.attachDailyDualPanel || options.attachDailyDigestCard;
+  const useTerminalWeeklyCard = options.attachWeeklyDigestCard || options.attachWeeklyAvgXChart;
+  const useTerminalMonthlyCard = options.attachMonthlyDigestCard || options.attachPast30DaysChart;
 
   if (useTerminalDailyCard) {
     try {
@@ -367,33 +369,39 @@ async function postDigest(p, options = {}) {
     } catch (err) {
       console.error('[XLeaderboardDigest] daily digest card failed:', err?.message || err);
     }
-  } else if (options.attachWeeklyAvgXChart) {
+  } else if (useTerminalWeeklyCard) {
     try {
-      const raw = await buildWeeklyAvgXpDigestPng(new Date());
+      const raw = await buildWeeklyDigestCardPng(new Date(), {
+        sampleData: options.sampleData === true
+      });
       png = normalizePngUploadBuffer(raw);
       if (!png) {
-        console.error('[XLeaderboardDigest] weekly chart: render did not produce a valid PNG buffer');
+        console.error('[XLeaderboardDigest] weekly digest card: render did not produce a valid PNG buffer');
       }
     } catch (err) {
-      console.error('[XLeaderboardDigest] weekly avg× chart failed:', err?.message || err);
+      console.error('[XLeaderboardDigest] weekly digest card failed:', err?.message || err);
     }
-  }
-
-  if (options.attachPast30DaysChart) {
+  } else if (useTerminalMonthlyCard) {
     try {
-      const raw = await buildPast30DaysDigestPng(new Date(), 30);
+      const raw = await buildMonthlyDigestCardPng(new Date(), {
+        sampleData: options.sampleData === true
+      });
       png = normalizePngUploadBuffer(raw);
       if (!png) {
-        console.error('[XLeaderboardDigest] 30d trend chart: render did not produce a valid PNG buffer');
+        console.error('[XLeaderboardDigest] monthly digest card: render did not produce a valid PNG buffer');
       }
     } catch (err) {
-      console.error('[XLeaderboardDigest] 30d trend chart failed:', err?.message || err);
+      console.error('[XLeaderboardDigest] monthly digest card failed:', err?.message || err);
     }
   }
 
   let text;
   if (useTerminalDailyCard) {
     text = buildTerminalDigestCaption('daily', windowLabel);
+  } else if (useTerminalWeeklyCard) {
+    text = buildTerminalDigestCaption('weekly', windowLabel);
+  } else if (useTerminalMonthlyCard) {
+    text = buildTerminalDigestCaption('monthly', windowLabel);
   } else {
     text = buildLeaderboardDigestBody({ windowLabel, days, topN });
     const maxChars = resolveWeeklyStatsTweetMaxChars();
@@ -623,7 +631,7 @@ function startXLeaderboardDigestScheduler() {
 /**
  * Post a leaderboard digest to X (same path as the scheduler). For Discord test commands.
  * @param {{ windowLabel: string, days: number, topN: number }} body
- * @param {{ attachDailyDualPanel?: boolean, attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean }} [opts]
+ * @param {{ attachDailyDualPanel?: boolean, attachWeeklyDigestCard?: boolean, attachWeeklyAvgXChart?: boolean, attachMonthlyDigestCard?: boolean, attachPast30DaysChart?: boolean, sampleData?: boolean }} [opts]
  */
 async function postLeaderboardDigestToX(body, opts = {}) {
   return postDigest(body, opts);

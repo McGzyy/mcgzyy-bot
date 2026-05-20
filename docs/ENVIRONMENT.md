@@ -223,7 +223,7 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_MILESTONE_QUOTE_KEEP_MIN_AGE_HOURS`** | Min age before a quote can be **kept** when rotating (default `4`). Younger quotes are replaced (deleted) when a newer milestone posts. |
 | **`X_MILESTONE_QUOTE_KEEP_MIN_LIKES`** | Keep quote if age ≥ min hours **and** likes ≥ this (default `10`). |
 | **`X_MILESTONE_QUOTE_KEEP_MIN_RETWEETS`** | Keep quote if age ≥ min hours **and** retweets ≥ this (default `2`). Either likes or retweets threshold can qualify. |
-| **`X_TERMINAL_CARD_CAPTION`** | Optional override for data-card post captions (milestones + daily digest). Default: `Tracked live - link in bio` (caller/stats on the image). |
+| **`X_TERMINAL_CARD_CAPTION`** | Optional override for data-card post captions (milestones + daily digest). Default: `🔹 Tracked live - link in bio 🔹` (caller/stats on the image). |
 | **`X_MILESTONE_CAPTION_INCLUDE_BIO_LINE`** | Legacy multi-line captions only (`X_MILESTONE_CAPTION_LEGACY=1`). |
 | **`X_TEST_MILESTONE_CALLER_HANDLE`** | X handle for `!testxmilestone user` card/caption (default `McGzyy`). Uses `BOT_OWNER_ID` Discord avatar when set. |
 | **`X_MILESTONE_MCGBOT_AVATAR_PATH`** | Optional path to McGBot profile PNG for **bot** milestone cards (default `branding/mcgbot-avatar.png`). |

@@ -339,7 +339,7 @@ async function resolveMilestoneCallerXTag(trackedCall, multipleX = 0) {
 function buildMinimalTerminalCaption() {
   const custom = String(process.env.X_TERMINAL_CARD_CAPTION || '').trim();
   if (custom) return custom;
-  return 'Tracked live - link in bio';
+  return '🔹 Tracked live - link in bio 🔹';
 }
 
 /**

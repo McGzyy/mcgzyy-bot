@@ -546,8 +546,9 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
     `• \`!xdigeststatus\` — Scheduled X digest / W·M engagement scheduler status + recent post audit (owner only)\n` +
-    `• \`!previewdailydigest\` — **Discord preview** of the daily terminal card + caption (no X)\n` +
-    `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Post **daily** (terminal data card + short caption), **7d** (weekday chart), or **monthly** (30d trend) to X (owner only)\n` +
+    `• \`!previewdailydigest\` — **Discord preview** with **sample stats** (layout). Add \`live\` for real data.\n` +
+    `• \`!testdailydigest\` — Post daily card to X. \`!testdailydigest sample\` uses filler; default is **live** stats.\n` +
+    `• \`!test7ddigest\` / \`!testmonthlydigest\` — **7d** (weekday chart) or **monthly** (30d trend) to X (owner only)\n` +
     `• \`!previewxmilestone user|bot <sol_ca> [mult]\` — **Preview card + caption in Discord** (no X; omit CA for JUP default)\n` +
     `• \`!testxmilestone user|bot <sol_ca> [mult]\` — **Live X post** (real Dex token; user tests credit **@McGzyy**). \`fresh\` skips auto-quote. Quote: \`!testxmilestone quote <post_id> user|bot [mult]\`\n` +
     `• \`!testweeklyrunner\` / \`!testtopcallermonth\` — Force **weekly runner** or **monthly top caller** X posts (owner only; monthly test skips Discord role)\n` +
@@ -3387,10 +3388,13 @@ if (lowerContent === '!scanner off') {
         return;
       }
 
-      if (lowerContent === '!previewdailydigest') {
+      if (lowerContent === '!previewdailydigest' || lowerContent.startsWith('!previewdailydigest ')) {
         if (!isBotOwnerDiscordId(message.author.id)) {
           return message.reply('❌ You do not have permission to use this command.');
         }
+
+        const useLive = /\blive\b/i.test(content);
+        const useSample = !useLive;
 
         /** @type {import('discord.js').Message|null} */
         let ack = null;
@@ -3398,14 +3402,16 @@ if (lowerContent === '!scanner off') {
           const { buildDailyDigestCardPng } = require('./utils/dailyDigestPanel');
           const { buildTerminalDigestCaption } = require('./utils/buildXPostText');
           ack = await message.reply({
-            content: '⏳ Generating daily digest card (~5s)…',
+            content: `⏳ Generating daily digest card (${useSample ? 'sample layout' : 'live data'})…`,
             allowedMentions: { repliedUser: false }
           });
-          const png = await buildDailyDigestCardPng(new Date());
+          const png = await buildDailyDigestCardPng(new Date(), { sampleData: useSample });
           const caption = buildTerminalDigestCaption('daily');
           const file = new AttachmentBuilder(png, { name: 'daily_digest_preview.png' });
           await ack.edit({
-            content: `**Daily digest preview** (scheduled post style)\nCaption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
+            content:
+              `**Daily digest preview** · ${useSample ? '**sample stats** (add `live` for real data)' : '**live data**'}\n` +
+              `Caption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
             files: [file]
           });
         } catch (e) {
@@ -3448,10 +3454,11 @@ if (lowerContent === '!scanner off') {
               { attachWeeklyAvgXChart: true }
             );
           } else {
-            label = 'daily (+ desk cards)';
+            const useSample = /\bsample\b/i.test(content);
+            label = useSample ? 'daily (sample layout)' : 'daily (live)';
             result = await postLeaderboardDigestToX(
               { windowLabel: 'Daily snapshot', days: 1, topN: 4 },
-              { attachDailyDualPanel: true }
+              { attachDailyDualPanel: true, sampleData: useSample }
             );
           }
           if (result?.success) {

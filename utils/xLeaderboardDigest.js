@@ -346,7 +346,7 @@ async function markDigestPosted(field, key) {
 
 /**
  * @param {{ windowLabel: string, days: number, topN: number }} p
- * @param {{ attachDailyDualPanel?: boolean, attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean }} [options]
+ * @param {{ attachDailyDualPanel?: boolean, attachDailyDigestCard?: boolean, attachWeeklyAvgXChart?: boolean, attachPast30DaysChart?: boolean, sampleData?: boolean }} [options]
  */
 async function postDigest(p, options = {}) {
   const { windowLabel, days, topN } = p;
@@ -357,7 +357,9 @@ async function postDigest(p, options = {}) {
 
   if (useTerminalDailyCard) {
     try {
-      const raw = await buildDailyDigestCardPng(new Date());
+      const raw = await buildDailyDigestCardPng(new Date(), {
+        sampleData: options.sampleData === true
+      });
       png = normalizePngUploadBuffer(raw);
       if (!png) {
         console.error('[XLeaderboardDigest] daily digest card: render did not produce a valid PNG buffer');

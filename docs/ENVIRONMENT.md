@@ -239,7 +239,8 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_LEADERBOARD_MONTHLY_DIGEST_ENABLED`** | Optional; default **on** when digest is enabled. Set `0` / `false` / `no` to skip the **1st-of-month** digest. Monthly post uses the **terminal data card** (1200×820) with embedded **30d avg× trend** chart + one-line caption; stats on the image. Owner preview: `!previewmonthlydigest`. |
 | **`X_LEADERBOARD_DIGEST_UTC_HOUR`** | Hour `0–23` to post (default `16`). |
 | **`X_LEADERBOARD_DIGEST_GRACE_HOURS`** | Optional `0–6` extra UTC hours after the target hour to retry if the bot was down or an X post failed (default `2`). Dedupe keys in `data/xLeaderboardDigestState.json` prevent double posts. |
-| **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the **7d** leaderboard digest (default on when digest is enabled). Weekly post uses the **terminal data card** (1200×820) with embedded weekday avg× chart + one-line caption; stats on the image. Owner preview: `!previewweeklydigest`. |
+| **`X_LEADERBOARD_WEEKLY_DIGEST_ENABLED`** | `0` / `false` to skip the **7d** leaderboard digest (default on when digest is enabled). Owner preview: `!previewweeklydigest`. |
+| **`X_DIGEST_CAROUSEL`** | Multi-image X digest posts. Default **`monthly`** → 3 slides (desk stats · top callers · trend). **`monthly,weekly`** adds weekly 2-slide carousel (summary + chart). **`0`** / **`false`** = single combined card. Preview: **`single`** forces one image. |
 | **`X_LEADERBOARD_WEEKLY_UTC_WEEKDAY`** | `0` (Sun) … `6` (Sat); default `1` (Monday). |
 | **`X_WEEKLY_STATS_SNAPSHOT_ENABLED`** | `1` / `true` — post a **stats-only** weekly X summary (previous completed UTC Mon–Sun); **independent** of `X_LEADERBOARD_DIGEST_ENABLED`. |
 | **`X_WEEKLY_STATS_UTC_WEEKDAY`** | `0`–`6`; default `1` (Monday). |

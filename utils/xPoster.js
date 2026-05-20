@@ -330,23 +330,37 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null, options
       ? String(options.preUploadedMediaId).trim()
       : '';
 
-  let mediaId = preUploadedMediaId || null;
-  if (!mediaId && mediaPngBuffer) {
-    try {
-      mediaId = await uploadMediaPng(mediaPngBuffer);
-      if (!mediaId) {
-        const n = normalizePngUploadBuffer(mediaPngBuffer)?.length ?? 0;
-        console.error(
-          `[XPoster] Media upload skipped or failed (png bytes=${n}). Tweet will be text-only.`
-        );
+  const preUploadedIds =
+    options && typeof options === 'object' && Array.isArray(options.preUploadedMediaIds)
+      ? options.preUploadedMediaIds.map(id => String(id).trim()).filter(Boolean)
+      : [];
+
+  /** @type {string[]} */
+  let mediaIds = [...preUploadedIds];
+  if (!mediaIds.length && mediaPngBuffer) {
+    const buffers = Array.isArray(mediaPngBuffer) ? mediaPngBuffer : [mediaPngBuffer];
+    for (const raw of buffers.slice(0, 4)) {
+      const buf = normalizePngUploadBuffer(raw);
+      if (!buf) continue;
+      try {
+        const id = await uploadMediaPng(buf);
+        if (id) mediaIds.push(String(id));
+      } catch (e) {
+        console.error('[XPoster] Media upload exception:', e?.message || e);
       }
-    } catch (e) {
-      mediaId = null;
-      console.error('[XPoster] Media upload exception:', e?.message || e);
     }
+    if (!mediaIds.length && buffers.length) {
+      const n = normalizePngUploadBuffer(buffers[0])?.length ?? 0;
+      console.error(
+        `[XPoster] Media upload skipped or failed (png bytes=${n}). Tweet will be text-only.`
+      );
+    }
+  } else if (!mediaIds.length && preUploadedMediaId) {
+    mediaIds = [String(preUploadedMediaId)];
   }
-  if (mediaId) {
-    body.media = { media_ids: [String(mediaId)] };
+
+  if (mediaIds.length) {
+    body.media = { media_ids: mediaIds.slice(0, 4) };
     if (!String(text || '').trim()) {
       body.text = '\u200B';
     }

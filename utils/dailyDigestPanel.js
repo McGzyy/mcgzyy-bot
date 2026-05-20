@@ -51,6 +51,10 @@ const W = CARD_WIDTH;
 const H = CARD_HEIGHT;
 const PAD = 52;
 const MEMBER_AVG_GOOD_AT = 2;
+/** Subtle section separators (editorial, not dashboard panels). */
+const SECTION_LINE = 'rgba(255,255,255,0.12)';
+const SECTION_LINE_SOFT = 'rgba(255,255,255,0.065)';
+const CHART_BAND_FULL = 258;
 
 function stripAt(handle) {
   return String(handle || '')
@@ -425,7 +429,7 @@ function metricGrad(isGood) {
  * @param {number} x1
  * @param {string} [color]
  */
-function drawHairlineH(ctx, y, x0, x1, color = 'rgba(255,255,255,0.07)') {
+function drawHairlineH(ctx, y, x0, x1, color = SECTION_LINE_SOFT) {
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -434,14 +438,91 @@ function drawHairlineH(ctx, y, x0, x1, color = 'rgba(255,255,255,0.07)') {
   ctx.stroke();
 }
 
+/** Full-width section rule between major bands. */
+function drawSectionRule(ctx, y, strong = true) {
+  drawHairlineH(ctx, y, PAD, W - PAD, strong ? SECTION_LINE : SECTION_LINE_SOFT);
+}
+
+/**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {object} data
+ * @param {{ title: string }} cfg
+ * @param {{ primary: string, grad: string[] }} accent
+ * @param {{ compact?: boolean, slideTag?: string, chartKicker?: string }} [opts]
+ */
+function drawDigestHeader(ctx, data, cfg, accent, opts = {}) {
+  const compact = opts.compact === true;
+  const titleSize = compact ? 40 : 56;
+  const titleY = compact ? PAD + 14 : PAD + 20;
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(255,255,255,0.38)';
+  ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('McGBot Terminal', PAD, PAD);
+
+  drawTitleGradient(ctx, cfg.title, PAD, titleY, titleSize, accent.grad);
+
+  if (opts.chartKicker) {
+    ctx.fillStyle = MUTED;
+    ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText(opts.chartKicker, PAD, titleY + titleSize + 10);
+  }
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = MUTED;
+  ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(data.dateLabel, W - PAD, PAD + (compact ? 20 : 26));
+  if (data.isSample) {
+    ctx.fillStyle = accent.primary + 'aa';
+    ctx.font = '500 11px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText('Preview layout', W - PAD, PAD + (compact ? 38 : 48));
+  }
+  if (opts.slideTag) {
+    ctx.fillStyle = DIM;
+    ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText(opts.slideTag, W - PAD, PAD + (compact ? 56 : 66));
+  }
+}
+
+/**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ */
+function drawDigestFooter(ctx) {
+  const footerY = H - PAD;
+  drawSectionRule(ctx, footerY - 22, false);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = DIM;
+  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('🔹 Tracked live · link in bio', PAD, footerY);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(170, 170, 182, 0.95)';
+  ctx.font = '600 14px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('mcgbot.xyz', W - PAD, footerY);
+}
+
+/**
+ * Digest carousel: monthly = 3 slides; weekly = 2. Daily stays single image.
+ * @param {'daily'|'weekly'|'monthly'} kind
+ */
+function digestCarouselEnabled(kind) {
+  const raw = String(process.env.X_DIGEST_CAROUSEL ?? 'monthly').trim().toLowerCase();
+  if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return false;
+  if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'all') return true;
+  const kinds = raw.split(/[\s,]+/).filter(Boolean);
+  if (kinds.includes('all')) return true;
+  return kinds.includes(String(kind || '').toLowerCase());
+}
+
 /**
  * @param {import('canvas').CanvasRenderingContext2D} ctx
  * @param {number} x
  * @param {number} y0
  * @param {number} y1
  */
-function drawHairlineV(ctx, x, y0, y1) {
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+function drawHairlineV(ctx, x, y0, y1, color = SECTION_LINE_SOFT) {
+  ctx.strokeStyle = color;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(x + 0.5, y0);
@@ -577,11 +658,12 @@ function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
 function drawChartBand(ctx, bandY, bandH, chartImage) {
   const x = PAD;
   const w = W - PAD * 2;
-  drawHairlineH(ctx, bandY, x, x + w, 'rgba(255,255,255,0.1)');
+  const padY = 10;
+  drawHairlineH(ctx, bandY, x, x + w, SECTION_LINE);
 
   ctx.save();
-  ctx.globalAlpha = 0.94;
-  ctx.drawImage(chartImage, x, bandY + 6, w, bandH - 12);
+  ctx.globalAlpha = 0.96;
+  ctx.drawImage(chartImage, x, bandY + padY, w, Math.max(40, bandH - padY * 2));
   ctx.restore();
 
   const fade = ctx.createLinearGradient(x, bandY, x, bandY + Math.min(72, bandH * 0.35));
@@ -598,77 +680,39 @@ function drawChartBand(ctx, bandY, bandH, chartImage) {
 }
 
 /**
- * Premium editorial digest — open layout, no dashboard panels.
  * @param {import('canvas').CanvasRenderingContext2D} ctx
  * @param {object} data
- * @param {{
- *   title: string,
- *   memberSub: string,
- *   leaderboardSub: string,
- *   quietMessage: string,
- *   fmtPeriodOverPeriod: (prev: number|null, cur: number|null) => string,
- *   maxLeaderboardRows?: number,
- *   displayLeaderboardRows?: number
- * }} cfg
+ * @param {object} cfg
  * @param {{ primary: string, soft: string, grad: string[] }} accent
- * @param {import('canvas').Image|null} botAvatar
- * @param {import('canvas').Image|null} [chartImage]
+ * @param {number} heroY
+ * @param {number} heroH
  */
-function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage = null) {
+function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
   const mY = data.memberAvgX;
   const bY = data.botAvgX;
   const mP = data.priorMemberAvgX;
   const periodFoot = cfg.fmtPeriodOverPeriod(mP, mY);
   const spread = fmtMemberBotSpread(mY, bY);
-  const botAccent = channelAccent('bot');
-  const maxRows = Number(cfg.maxLeaderboardRows) > 0 ? Number(cfg.maxLeaderboardRows) : 4;
-  const displayCap =
-    Number(cfg.displayLeaderboardRows) > 0 ? Number(cfg.displayLeaderboardRows) : maxRows;
-
   const mOk = mY != null && Number.isFinite(mY);
   const memberHero = mOk ? `${Number(mY).toFixed(2)}×` : '—';
   const memberGood = !mOk ? null : Number(mY) >= MEMBER_AVG_GOOD_AT;
   const spreadGood = spread.memberAhead;
-
-  const footerH = 32;
-  const chartBandH = chartImage ? 198 : 0;
-  const contentBottom = H - PAD - footerH - chartBandH;
-
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = 'rgba(255,255,255,0.38)';
-  ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText('McGBot Terminal', PAD, PAD);
-
-  drawTitleGradient(ctx, cfg.title, PAD, PAD + 20, 56, accent.grad);
-
-  ctx.textAlign = 'right';
-  ctx.fillStyle = MUTED;
-  ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText(data.dateLabel, W - PAD, PAD + 26);
-  if (data.isSample) {
-    ctx.fillStyle = accent.primary + 'aa';
-    ctx.font = '500 11px system-ui, "Segoe UI", sans-serif';
-    ctx.fillText('Preview layout', W - PAD, PAD + 48);
-  }
-
-  const heroY = PAD + 92;
-  const heroH = 168;
   const splitX = PAD + Math.floor((W - PAD * 2) * 0.58);
 
   drawSoftGlow(ctx, PAD + 200, heroY + heroH * 0.45, 280, accent.soft);
 
   ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
   ctx.fillStyle = MUTED;
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
   ctx.fillText(cfg.memberSub, PAD, heroY + 4);
 
-  const memberSize = fitFontSize(ctx, memberHero, splitX - PAD - 24, 108, 56, '800');
+  const memberSize = fitFontSize(ctx, memberHero, splitX - PAD - 24, 120, 56, '800');
   drawGradientNumber(
     ctx,
     memberHero,
     PAD,
-    heroY + 36 + memberSize,
+    heroY + 40 + memberSize,
     memberSize,
     metricGrad(memberGood),
     accent.primary,
@@ -679,7 +723,7 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
   ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
   ctx.fillText(periodFoot, PAD, heroY + heroH - 28);
 
-  drawHairlineV(ctx, splitX, heroY + 8, heroY + heroH - 8);
+  drawHairlineV(ctx, splitX, heroY + 8, heroY + heroH - 8, SECTION_LINE);
 
   const spreadX = splitX + 36;
   const spreadRight = W - PAD;
@@ -687,12 +731,12 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
   ctx.fillText('Member vs McGBot', spreadX, heroY + 4);
 
-  const spreadSize = fitFontSize(ctx, spread.line, spreadRight - spreadX, 72, 44, '800');
+  const spreadSize = fitFontSize(ctx, spread.line, spreadRight - spreadX, 80, 44, '800');
   drawGradientNumber(
     ctx,
     spread.line,
     spreadRight,
-    heroY + 40 + spreadSize,
+    heroY + 44 + spreadSize,
     spreadSize,
     metricGrad(spreadGood),
     accent.primary,
@@ -702,11 +746,29 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
   ctx.textAlign = 'left';
   ctx.fillStyle = DIM;
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
-  const spreadFoot = truncateToWidth(ctx, spread.foot, spreadRight - spreadX, '500 13px system-ui, "Segoe UI", sans-serif');
+  const spreadFoot = truncateToWidth(
+    ctx,
+    spread.foot,
+    spreadRight - spreadX,
+    '500 13px system-ui, "Segoe UI", sans-serif'
+  );
   ctx.fillText(spreadFoot, spreadX, heroY + heroH - 28);
+}
 
-  const mainY = heroY + heroH + 28;
-  drawHairlineH(ctx, mainY - 12, PAD, W - PAD);
+/**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {object} data
+ * @param {object} cfg
+ * @param {{ primary: string, soft: string, grad: string[] }} accent
+ * @param {import('canvas').Image|null} botAvatar
+ * @param {number} mainY
+ * @param {number} contentBottom
+ */
+function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom) {
+  const botAccent = channelAccent('bot');
+  const maxRows = Number(cfg.maxLeaderboardRows) > 0 ? Number(cfg.maxLeaderboardRows) : 4;
+  const displayCap =
+    Number(cfg.displayLeaderboardRows) > 0 ? Number(cfg.displayLeaderboardRows) : maxRows;
 
   const colGap = 40;
   const lbW = Math.floor((W - PAD * 2 - colGap) * 0.54);
@@ -714,6 +776,8 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
   const sideW = W - PAD - sideX;
   const mainH = contentBottom - mainY;
 
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = '700 11px system-ui, "Segoe UI", sans-serif';
   ctx.fillText('TOP CALLERS', PAD, mainY);
@@ -725,7 +789,7 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
   const visibleCount = Math.min(displayCap, rows.length);
   const overflow = rows.length - visibleCount;
   const rowStart = mainY + 44;
-  const rowH = Math.min(38, Math.floor((mainH - 52) / Math.max(visibleCount || 1, 1)));
+  const rowH = Math.min(40, Math.floor((mainH - 52) / Math.max(visibleCount || 1, 1)));
   const multX = PAD + lbW - 8;
   const callsX = multX - 96;
 
@@ -734,17 +798,14 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
       const r = rows[i];
       const ry = rowStart + i * rowH;
       const rankCy = ry + rowH / 2;
-
       if (i > 0) {
-        drawHairlineH(ctx, ry, PAD, PAD + lbW - 8, 'rgba(255,255,255,0.04)');
+        drawHairlineH(ctx, ry, PAD, PAD + lbW - 8, SECTION_LINE_SOFT);
       }
-
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = i === 0 ? accent.primary : DIM;
       ctx.font = `600 ${i === 0 ? 13 : 12}px system-ui, "Segoe UI", sans-serif`;
       ctx.fillText(String(i + 1).padStart(2, '0'), PAD, rankCy);
-
       ctx.fillStyle = i === 0 ? TEXT : 'rgba(235, 235, 240, 0.92)';
       ctx.font = `600 ${i === 0 ? 17 : 15}px system-ui, "Segoe UI", sans-serif`;
       const name = truncateToWidth(
@@ -754,7 +815,6 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
         `600 ${i === 0 ? 17 : 15}px system-ui, "Segoe UI", sans-serif`
       );
       ctx.fillText(name, PAD + 32, rankCy);
-
       const multStr = `${Number(r.avgX).toFixed(2)}×`;
       ctx.textAlign = 'right';
       if (i === 0) {
@@ -774,7 +834,6 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
         ctx.font = '600 15px system-ui, "Segoe UI", sans-serif';
         ctx.fillText(multStr, multX, rankCy);
       }
-
       ctx.fillStyle = DIM;
       ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
       ctx.fillText(`${r.totalCalls} calls`, callsX, rankCy);
@@ -789,12 +848,10 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
   } else {
     ctx.fillStyle = DIM;
     ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
     ctx.fillText(cfg.quietMessage, PAD, rowStart);
   }
 
-  drawHairlineV(ctx, sideX - 20, mainY, contentBottom - 8);
+  drawHairlineV(ctx, sideX - 20, mainY, contentBottom - 8, SECTION_LINE);
 
   ctx.fillStyle = 'rgba(255,255,255,0.55)';
   ctx.font = '700 11px system-ui, "Segoe UI", sans-serif';
@@ -802,9 +859,8 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
 
   const hiHuman = formatHighlight(data.bestHuman);
   const hiBot = formatHighlight(data.bestBot);
-  const stripGap = 8;
+  const stripGap = 10;
   const stripH = Math.floor((mainH - 24 - stripGap) / 2);
-
   drawBestCallStrip(ctx, sideX, mainY + 28, sideW, stripH, 'Best member call', hiHuman, accent, null);
   drawBestCallStrip(
     ctx,
@@ -817,23 +873,266 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
     botAccent,
     botAvatar
   );
+}
 
-  if (chartImage && chartBandH > 0) {
-    const bandY = contentBottom + 8;
-    drawChartBand(ctx, bandY, chartBandH - 8, chartImage);
+/**
+ * Carousel slide 1 — desk performance hero.
+ */
+function renderDigestHeroSlide(ctx, data, cfg, accent, slideTag) {
+  drawDigestHeader(ctx, data, cfg, accent, { slideTag });
+  drawSectionRule(ctx, PAD + 78);
+  const heroY = PAD + 96;
+  const heroH = H - PAD - 120 - heroY;
+  paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH);
+  drawSectionRule(ctx, H - PAD - 44);
+  drawDigestFooter(ctx);
+}
+
+/**
+ * Carousel slide 2 — leaderboard + best calls.
+ */
+function renderDigestBodySlide(ctx, data, cfg, accent, botAvatar, slideTag) {
+  drawDigestHeader(ctx, data, cfg, accent, { compact: true, slideTag });
+  drawSectionRule(ctx, PAD + 68);
+  const mainY = PAD + 84;
+  const contentBottom = H - PAD - 40;
+  paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom);
+  drawSectionRule(ctx, H - PAD - 44);
+  drawDigestFooter(ctx);
+}
+
+/**
+ * Carousel slide — full-width trend chart.
+ */
+function renderDigestChartSlide(ctx, data, cfg, accent, chartImage, slideTag) {
+  drawDigestHeader(ctx, data, cfg, accent, {
+    compact: true,
+    slideTag,
+    chartKicker: 'Avg ATH × · member vs McGBot'
+  });
+  drawSectionRule(ctx, PAD + 100);
+  const bandY = PAD + 116;
+  const bandH = H - PAD - 52 - bandY;
+  if (chartImage && bandH > 80) {
+    drawChartBand(ctx, bandY, bandH, chartImage);
+  } else {
+    ctx.fillStyle = DIM;
+    ctx.font = '500 15px system-ui, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Trend chart unavailable', W / 2, bandY + bandH / 2);
+  }
+  drawSectionRule(ctx, H - PAD - 44, false);
+  drawDigestFooter(ctx);
+}
+
+/**
+ * Weekly carousel slide 1 — hero + desk (no chart).
+ */
+function renderDigestSummarySlide(ctx, data, cfg, accent, botAvatar, slideTag) {
+  drawDigestHeader(ctx, data, cfg, accent, { slideTag });
+  drawSectionRule(ctx, PAD + 78);
+  const heroY = PAD + 96;
+  const heroH = 200;
+  paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH);
+  drawSectionRule(ctx, heroY + heroH + 16);
+  const mainY = heroY + heroH + 32;
+  const contentBottom = H - PAD - 40;
+  paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom);
+  drawSectionRule(ctx, H - PAD - 44);
+  drawDigestFooter(ctx);
+}
+
+/**
+ * Premium editorial digest — open layout, no dashboard panels.
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {object} data
+ * @param {{
+ *   title: string,
+ *   memberSub: string,
+ *   leaderboardSub: string,
+ *   quietMessage: string,
+ *   fmtPeriodOverPeriod: (prev: number|null, cur: number|null) => string,
+ *   maxLeaderboardRows?: number,
+ *   displayLeaderboardRows?: number
+ * }} cfg
+ * @param {{ primary: string, soft: string, grad: string[] }} accent
+ * @param {import('canvas').Image|null} botAvatar
+ * @param {import('canvas').Image|null} [chartImage]
+ * @param {'full'|'hero'|'body'|'chart'|'summary'} [mode]
+ * @param {string} [slideTag]
+ */
+function renderTerminalDigestCard(
+  ctx,
+  data,
+  cfg,
+  accent,
+  botAvatar,
+  chartImage = null,
+  mode = 'full',
+  slideTag = ''
+) {
+  if (mode === 'hero') {
+    renderDigestHeroSlide(ctx, data, cfg, accent, slideTag || '1 / 3');
+    return;
+  }
+  if (mode === 'body') {
+    renderDigestBodySlide(ctx, data, cfg, accent, botAvatar, slideTag || '2 / 3');
+    return;
+  }
+  if (mode === 'chart') {
+    renderDigestChartSlide(ctx, data, cfg, accent, chartImage, slideTag);
+    return;
+  }
+  if (mode === 'summary') {
+    renderDigestSummarySlide(ctx, data, cfg, accent, botAvatar, slideTag || '1 / 2');
+    return;
   }
 
-  const footerY = H - PAD;
-  drawHairlineH(ctx, footerY - 22, PAD, W - PAD, 'rgba(255,255,255,0.06)');
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = DIM;
-  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText('🔹 Tracked live · link in bio', PAD, footerY);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(170, 170, 182, 0.95)';
-  ctx.font = '600 14px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText('mcgbot.xyz', W - PAD, footerY);
+  const footerH = 36;
+  const chartBandH = chartImage ? CHART_BAND_FULL : 0;
+  const contentBottom = H - PAD - footerH - chartBandH;
+
+  drawDigestHeader(ctx, data, cfg, accent);
+  drawSectionRule(ctx, PAD + 78);
+
+  const heroY = PAD + 96;
+  const heroH = 168;
+  paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH);
+
+  const mainY = heroY + heroH + 24;
+  drawSectionRule(ctx, mainY - 10);
+  paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom);
+
+  if (chartImage && chartBandH > 0) {
+    drawSectionRule(ctx, contentBottom + 6);
+    drawChartBand(ctx, contentBottom + 14, chartBandH - 14, chartImage);
+  }
+
+  drawDigestFooter(ctx);
+}
+
+/**
+ * @param {object} data
+ * @param {object} cfg
+ * @param {{ primary: string, soft: string, grad: string[] }} accent
+ * @param {import('canvas').Image|null} botAvatar
+ * @param {import('canvas').Image|null} chartImage
+ * @param {'full'|'hero'|'body'|'chart'|'summary'} mode
+ * @param {import('canvas').Image|null} mgImg
+ */
+async function renderDigestSlideBuffer(data, cfg, accent, botAvatar, chartImage, mode, mgImg, slideTag = '') {
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext('2d');
+  paintCardBackground(ctx, W, H, accent.soft, accent.primary);
+  paintMgWatermark(ctx, mgImg, W, H);
+  renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage, mode, slideTag);
+  return canvas.toBuffer('image/png');
+}
+
+/**
+ * @param {Date} anchor
+ * @param {{ sampleData?: boolean }} opts
+ * @returns {Promise<Buffer[]>}
+ */
+async function buildMonthlyDigestCarouselPngs(anchor = new Date(), opts = {}) {
+  const data = resolveMonthlyDigestData(anchor, opts);
+  const accent = channelAccent('member');
+  const [mgImg, botAvatar, chartBuf] = await Promise.all([
+    loadMgMarkImage(),
+    loadMcGBotAvatarImage(),
+    buildPast30DaysDigestPng(anchor, 30).catch(() => null)
+  ]);
+  let chartImage = null;
+  if (chartBuf) {
+    try {
+      chartImage = await loadImage(chartBuf);
+    } catch {
+      chartImage = null;
+    }
+  }
+  const slides = await Promise.all([
+    renderDigestSlideBuffer(data, MONTHLY_CARD_CFG, accent, botAvatar, null, 'hero', mgImg),
+    renderDigestSlideBuffer(data, MONTHLY_CARD_CFG, accent, botAvatar, null, 'body', mgImg)
+  ]);
+  if (chartImage) {
+    slides.push(
+      await renderDigestSlideBuffer(
+        data,
+        MONTHLY_CARD_CFG,
+        accent,
+        botAvatar,
+        chartImage,
+        'chart',
+        mgImg,
+        '3 / 3'
+      )
+    );
+  }
+  return slides;
+}
+
+/**
+ * @param {Date} anchor
+ * @param {{ sampleData?: boolean }} opts
+ * @returns {Promise<Buffer[]>}
+ */
+async function buildWeeklyDigestCarouselPngs(anchor = new Date(), opts = {}) {
+  const data = resolveWeeklyDigestData(anchor, opts);
+  const accent = channelAccent('member');
+  const [mgImg, botAvatar, chartBuf] = await Promise.all([
+    loadMgMarkImage(),
+    loadMcGBotAvatarImage(),
+    buildWeeklyAvgXpDigestPng(anchor).catch(() => null)
+  ]);
+  let chartImage = null;
+  if (chartBuf) {
+    try {
+      chartImage = await loadImage(chartBuf);
+    } catch {
+      chartImage = null;
+    }
+  }
+  const slides = [
+    await renderDigestSlideBuffer(data, WEEKLY_CARD_CFG, accent, botAvatar, null, 'summary', mgImg)
+  ];
+  if (chartImage) {
+    slides.push(
+      await renderDigestSlideBuffer(
+        data,
+        WEEKLY_CARD_CFG,
+        accent,
+        botAvatar,
+        chartImage,
+        'chart',
+        mgImg,
+        '2 / 2'
+      )
+    );
+  }
+  return slides;
+}
+
+/**
+ * @param {'weekly'|'monthly'} kind
+ * @param {Date} anchor
+ * @param {{ sampleData?: boolean }} opts
+ * @returns {Promise<Buffer[]>}
+ */
+async function buildDigestMediaPngs(kind, anchor = new Date(), opts = {}) {
+  if (kind === 'monthly' && digestCarouselEnabled('monthly')) {
+    return buildMonthlyDigestCarouselPngs(anchor, opts);
+  }
+  if (kind === 'weekly' && digestCarouselEnabled('weekly')) {
+    return buildWeeklyDigestCarouselPngs(anchor, opts);
+  }
+  if (kind === 'monthly') {
+    return [await buildMonthlyDigestCardPng(anchor, opts)];
+  }
+  if (kind === 'weekly') {
+    return [await buildWeeklyDigestCardPng(anchor, opts)];
+  }
+  return [];
 }
 
 /**
@@ -940,6 +1239,10 @@ module.exports = {
   buildDailyDigestCardPng,
   buildWeeklyDigestCardPng,
   buildMonthlyDigestCardPng,
+  buildDigestMediaPngs,
+  buildMonthlyDigestCarouselPngs,
+  buildWeeklyDigestCarouselPngs,
+  digestCarouselEnabled,
   buildDailySnapshotModulesPng,
   buildSampleDailyDigestData,
   buildLiveDailyDigestData,

@@ -7,8 +7,7 @@ const { loadXPostAuditEventsSince } = require('./xPostAudit');
 const { buildWeeklySnapshotModulesPng } = require('./weeklySnapshotPanel');
 const {
   buildDailyDigestCardPng,
-  buildWeeklyDigestCardPng,
-  buildMonthlyDigestCardPng
+  buildDigestMediaPngs
 } = require('./dailyDigestPanel');
 const { tickXEngagementPosts } = require('./xEngagementScheduler');
 const {
@@ -350,49 +349,39 @@ async function markDigestPosted(field, key) {
  */
 async function postDigest(p, options = {}) {
   const { windowLabel, days, topN } = p;
-  /** Same attach path as milestone `createPost(text, null, chartBuf)` — upload inside `createPost`. */
-  let png = null;
+  /** @type {Buffer[]} */
+  let pngBuffers = [];
 
   const useTerminalDailyCard = options.attachDailyDualPanel || options.attachDailyDigestCard;
   const useTerminalWeeklyCard = options.attachWeeklyDigestCard || options.attachWeeklyAvgXChart;
   const useTerminalMonthlyCard = options.attachMonthlyDigestCard || options.attachPast30DaysChart;
 
-  if (useTerminalDailyCard) {
-    try {
-      const raw = await buildDailyDigestCardPng(new Date(), {
-        sampleData: options.sampleData === true
-      });
-      png = normalizePngUploadBuffer(raw);
-      if (!png) {
+  const anchor = new Date();
+  const sampleData = options.sampleData === true;
+
+  try {
+    if (useTerminalDailyCard) {
+      const raw = await buildDailyDigestCardPng(anchor, { sampleData });
+      const b = normalizePngUploadBuffer(raw);
+      if (b) pngBuffers = [b];
+      else {
         console.error('[XLeaderboardDigest] daily digest card: render did not produce a valid PNG buffer');
       }
-    } catch (err) {
-      console.error('[XLeaderboardDigest] daily digest card failed:', err?.message || err);
-    }
-  } else if (useTerminalWeeklyCard) {
-    try {
-      const raw = await buildWeeklyDigestCardPng(new Date(), {
-        sampleData: options.sampleData === true
-      });
-      png = normalizePngUploadBuffer(raw);
-      if (!png) {
-        console.error('[XLeaderboardDigest] weekly digest card: render did not produce a valid PNG buffer');
+    } else if (useTerminalWeeklyCard) {
+      const raws = await buildDigestMediaPngs('weekly', anchor, { sampleData });
+      pngBuffers = raws.map(r => normalizePngUploadBuffer(r)).filter(Boolean);
+      if (!pngBuffers.length) {
+        console.error('[XLeaderboardDigest] weekly digest: no valid PNG buffers');
       }
-    } catch (err) {
-      console.error('[XLeaderboardDigest] weekly digest card failed:', err?.message || err);
-    }
-  } else if (useTerminalMonthlyCard) {
-    try {
-      const raw = await buildMonthlyDigestCardPng(new Date(), {
-        sampleData: options.sampleData === true
-      });
-      png = normalizePngUploadBuffer(raw);
-      if (!png) {
-        console.error('[XLeaderboardDigest] monthly digest card: render did not produce a valid PNG buffer');
+    } else if (useTerminalMonthlyCard) {
+      const raws = await buildDigestMediaPngs('monthly', anchor, { sampleData });
+      pngBuffers = raws.map(r => normalizePngUploadBuffer(r)).filter(Boolean);
+      if (!pngBuffers.length) {
+        console.error('[XLeaderboardDigest] monthly digest: no valid PNG buffers');
       }
-    } catch (err) {
-      console.error('[XLeaderboardDigest] monthly digest card failed:', err?.message || err);
     }
+  } catch (err) {
+    console.error('[XLeaderboardDigest] digest render failed:', err?.message || err);
   }
 
   let text;
@@ -410,15 +399,16 @@ async function postDigest(p, options = {}) {
     }
   }
 
-  const result = await createPost(text, null, png, { audit: { category: 'leaderboard_digest' } });
+  const mediaArg = pngBuffers.length > 1 ? pngBuffers : pngBuffers[0] || null;
+  const result = await createPost(text, null, mediaArg, { audit: { category: 'leaderboard_digest' } });
   if (!result.success) {
     console.error('[XLeaderboardDigest] post failed:', result.error || 'unknown');
   } else {
     console.log(
-      `[XLeaderboardDigest] posted ${windowLabel} (${result.id || 'ok'}) media=${png ? 'yes' : 'no'} len=${text.length}`
+      `[XLeaderboardDigest] posted ${windowLabel} (${result.id || 'ok'}) media=${pngBuffers.length} len=${text.length}`
     );
   }
-  return { ...result, textLength: text.length };
+  return { ...result, textLength: text.length, mediaCount: pngBuffers.length };
 }
 
 async function tickXLeaderboardDigest() {

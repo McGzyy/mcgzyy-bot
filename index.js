@@ -3438,20 +3438,33 @@ if (lowerContent === '!scanner off') {
         /** @type {import('discord.js').Message|null} */
         let ack = null;
         try {
-          const { buildWeeklyDigestCardPng } = require('./utils/dailyDigestPanel');
+          const {
+            buildWeeklyDigestCardPng,
+            buildDigestMediaPngs,
+            digestCarouselEnabled
+          } = require('./utils/dailyDigestPanel');
           const { buildTerminalDigestCaption } = require('./utils/buildXPostText');
+          const forceSingle = /\bsingle\b/i.test(content);
+          const useCarousel = !forceSingle && digestCarouselEnabled('weekly');
           ack = await message.reply({
-            content: `⏳ Generating weekly digest card (${useSample ? 'sample layout' : 'live data'})…`,
+            content: `⏳ Generating weekly digest (${useSample ? 'sample' : 'live'}${useCarousel ? ' · carousel' : ''})…`,
             allowedMentions: { repliedUser: false }
           });
-          const png = await buildWeeklyDigestCardPng(new Date(), { sampleData: useSample });
+          const pngs = forceSingle
+            ? [await buildWeeklyDigestCardPng(new Date(), { sampleData: useSample })]
+            : await buildDigestMediaPngs('weekly', new Date(), { sampleData: useSample });
           const caption = buildTerminalDigestCaption('weekly');
-          const file = new AttachmentBuilder(png, { name: 'weekly_digest_preview.png' });
+          const files = pngs.map(
+            (png, i) =>
+              new AttachmentBuilder(png, {
+                name: useCarousel ? `weekly_digest_${i + 1}.png` : 'weekly_digest_preview.png'
+              })
+          );
           await ack.edit({
             content:
-              `**Weekly digest preview** · ${useSample ? '**sample stats** (add `live` for real data)' : '**live data**'}\n` +
+              `**Weekly digest preview** · ${pngs.length} image${pngs.length === 1 ? '' : 's'} · ${useSample ? '**sample** (`live` for real, `single` for one card)' : '**live data**'}\n` +
               `Caption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
-            files: [file]
+            files
           });
         } catch (e) {
           console.error('[!previewweeklydigest]', e);
@@ -3476,20 +3489,33 @@ if (lowerContent === '!scanner off') {
         /** @type {import('discord.js').Message|null} */
         let ack = null;
         try {
-          const { buildMonthlyDigestCardPng } = require('./utils/dailyDigestPanel');
+          const {
+            buildMonthlyDigestCardPng,
+            buildDigestMediaPngs,
+            digestCarouselEnabled
+          } = require('./utils/dailyDigestPanel');
           const { buildTerminalDigestCaption } = require('./utils/buildXPostText');
+          const forceSingle = /\bsingle\b/i.test(content);
+          const useCarousel = !forceSingle && digestCarouselEnabled('monthly');
           ack = await message.reply({
-            content: `⏳ Generating monthly digest card (${useSample ? 'sample layout' : 'live data'})…`,
+            content: `⏳ Generating monthly digest (${useSample ? 'sample' : 'live'}${useCarousel ? ' · 3-slide carousel' : ''})…`,
             allowedMentions: { repliedUser: false }
           });
-          const png = await buildMonthlyDigestCardPng(new Date(), { sampleData: useSample });
+          const pngs = forceSingle
+            ? [await buildMonthlyDigestCardPng(new Date(), { sampleData: useSample })]
+            : await buildDigestMediaPngs('monthly', new Date(), { sampleData: useSample });
           const caption = buildTerminalDigestCaption('monthly');
-          const file = new AttachmentBuilder(png, { name: 'monthly_digest_preview.png' });
+          const files = pngs.map(
+            (png, i) =>
+              new AttachmentBuilder(png, {
+                name: useCarousel ? `monthly_digest_${i + 1}.png` : 'monthly_digest_preview.png'
+              })
+          );
           await ack.edit({
             content:
-              `**Monthly digest preview** · ${useSample ? '**sample stats** (add `live` for real data)' : '**live data**'}\n` +
+              `**Monthly digest preview** · ${pngs.length} image${pngs.length === 1 ? '' : 's'} · ${useSample ? '**sample** (`live` for real, `single` for one card)' : '**live data**'}\n` +
               `Caption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
-            files: [file]
+            files
           });
         } catch (e) {
           console.error('[!previewmonthlydigest]', e);

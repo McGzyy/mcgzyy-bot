@@ -180,31 +180,41 @@ function drawCoinAgeTag(ctx, ageText, tokenX, tokenY, tokenSize, accent) {
   ctx.fillText(short, x + bw / 2, y + bh / 2 + 1);
 }
 
-function drawMultiplier(ctx, text, rightX, baselineY, size, grad, accent) {
-  ctx.textAlign = 'right';
+function drawGradientNumber(ctx, text, x, baselineY, size, grad, accent, opts = {}) {
+  const align = opts.align === 'left' ? 'left' : 'right';
+  ctx.textAlign = align;
   ctx.textBaseline = 'alphabetic';
   ctx.font = `800 ${size}px system-ui, "Segoe UI", sans-serif`;
 
-  ctx.shadowColor = grad[1];
-  ctx.shadowBlur = 48;
-  ctx.fillStyle = grad[1] + '18';
-  ctx.fillText(text, rightX, baselineY);
-  ctx.shadowBlur = 0;
+  const glow = opts.glow !== false;
+  if (glow) {
+    ctx.shadowColor = grad[1];
+    ctx.shadowBlur = opts.shadowBlur != null ? opts.shadowBlur : 48;
+    ctx.fillStyle = grad[1] + '18';
+    ctx.fillText(text, x, baselineY);
+    ctx.shadowBlur = 0;
+  }
 
   const w = ctx.measureText(text).width;
-  const g = ctx.createLinearGradient(rightX - w, baselineY - size, rightX, baselineY);
+  const g =
+    align === 'left'
+      ? ctx.createLinearGradient(x, baselineY - size, x + w, baselineY)
+      : ctx.createLinearGradient(x - w, baselineY - size, x, baselineY);
   g.addColorStop(0, grad[0]);
   g.addColorStop(0.45, grad[1]);
   g.addColorStop(1, grad[2]);
   ctx.fillStyle = g;
-  ctx.fillText(text, rightX, baselineY);
+  ctx.fillText(text, x, baselineY);
 
   ctx.strokeStyle = 'rgba(0,0,0,0.5)';
   ctx.lineWidth = Math.max(3, size * 0.035);
-  ctx.strokeText(text, rightX, baselineY);
+  ctx.strokeText(text, x, baselineY);
   ctx.fillStyle = g;
-  ctx.fillText(text, rightX, baselineY);
+  ctx.fillText(text, x, baselineY);
+}
 
+function drawMultiplier(ctx, text, rightX, baselineY, size, grad, accent) {
+  drawGradientNumber(ctx, text, rightX, baselineY, size, grad, accent);
   ctx.fillStyle = accent + 'cc';
   ctx.font = `700 ${Math.max(11, size * 0.09)}px system-ui, sans-serif`;
   ctx.textAlign = 'right';
@@ -442,6 +452,7 @@ module.exports = {
   paintMgWatermark,
   drawSoftGlow,
   drawMultiplier,
+  drawGradientNumber,
   CARD_WIDTH: W,
   CARD_HEIGHT: H
 };

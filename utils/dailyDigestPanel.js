@@ -6,7 +6,6 @@ const {
   MUTED,
   DIM,
   fitFontSize,
-  truncate,
   channelAccent,
   roundRectPath
 } = require('./xCardRenderHelpers');
@@ -14,7 +13,7 @@ const {
   paintCardBackground,
   paintMgWatermark,
   drawSoftGlow,
-  drawMultiplier,
+  drawGradientNumber,
   CARD_WIDTH,
   CARD_HEIGHT
 } = require('./xMilestoneDataCard');
@@ -263,6 +262,22 @@ function drawPreviewBadge(ctx, x, y, text, color) {
 
 /**
  * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {string} text
+ * @param {number} maxWidth
+ * @param {string} font
+ */
+function truncateToWidth(ctx, text, maxWidth, font) {
+  let s = String(text || '');
+  ctx.font = font;
+  if (ctx.measureText(s).width <= maxWidth) return s;
+  while (s.length > 1 && ctx.measureText(`${s}…`).width > maxWidth) {
+    s = s.slice(0, -1);
+  }
+  return `${s}…`;
+}
+
+/**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
  * @param {number} x
  * @param {number} y
  * @param {number} w
@@ -272,25 +287,35 @@ function drawPreviewBadge(ctx, x, y, text, color) {
  */
 function drawHeroMetricPanel(ctx, x, y, w, h, p, accent) {
   drawGlassPanel(ctx, x, y, w, h, 22, accent);
-  drawSoftGlow(ctx, x + w - 80, y + h - 50, Math.min(w * 0.55, 200), accent.soft);
 
-  const inner = x + 24;
+  ctx.save();
+  roundRectPath(ctx, x, y, w, h, 22);
+  ctx.clip();
+
+  const inner = x + 22;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = accent.primary;
-  ctx.font = '700 14px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText(p.label.toUpperCase(), inner, y + 18);
+  ctx.font = '700 13px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(p.label.toUpperCase(), inner, y + 16);
   ctx.fillStyle = MUTED;
   ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText(p.sub, inner, y + 38);
+  ctx.fillText(p.sub, inner, y + 36);
 
-  const heroSize = fitFontSize(ctx, p.hero, w - 48, Math.min(96, h * 0.42), 44, '800');
-  const heroBase = y + h - 36;
-  drawMultiplier(ctx, p.hero, x + w - 24, heroBase, heroSize, p.grad, accent.primary);
+  const footFont = '600 13px system-ui, "Segoe UI", sans-serif';
+  const footText = truncateToWidth(ctx, p.foot, w * 0.58, footFont);
+  ctx.font = footFont;
+  ctx.fillStyle = p.foot === '—' ? DIM : 'rgba(220, 220, 228, 0.92)';
+  ctx.fillText(footText, inner, y + h - 28);
 
-  ctx.font = '600 14px system-ui, "Segoe UI", sans-serif';
-  ctx.fillStyle = p.foot === '—' ? DIM : 'rgba(220, 220, 228, 0.95)';
-  ctx.fillText(p.foot, inner, y + h - 32);
+  const heroMaxW = w * 0.62;
+  const heroSize = fitFontSize(ctx, p.hero, heroMaxW, Math.min(88, h * 0.38), 40, '800');
+  const heroBaseline = y + 56 + (h - 56 - 44) * 0.62;
+  drawGradientNumber(ctx, p.hero, x + w - 20, heroBaseline, heroSize, p.grad, accent.primary, {
+    shadowBlur: 28
+  });
+
+  ctx.restore();
 }
 
 /**
@@ -421,6 +446,8 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
   const rows = data.leaderboard || [];
   const rowStart = bodyY + 78;
   const rowH = Math.min(44, Math.floor((bodyH - 90) / Math.max(4, rows.length || 1)));
+  const multX = PAD + lbW - 24;
+  const callsX = multX - 108;
 
   if (rows.length) {
     for (let i = 0; i < rows.length; i += 1) {
@@ -444,26 +471,34 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = i === 0 ? TEXT : 'rgba(235, 235, 240, 0.95)';
-      ctx.font = `700 ${i === 0 ? 19 : 17}px system-ui, "Segoe UI", sans-serif`;
-      ctx.fillText(truncate(r.username, 14), rowPad + 44, rankCy);
+      ctx.font = `700 ${i === 0 ? 18 : 16}px system-ui, "Segoe UI", sans-serif`;
+      const nameMaxW = callsX - (rowPad + 48) - 12;
+      const name = truncateToWidth(
+        ctx,
+        r.username,
+        nameMaxW,
+        `700 ${i === 0 ? 18 : 16}px system-ui, "Segoe UI", sans-serif`
+      );
+      ctx.fillText(name, rowPad + 48, rankCy);
 
       const multStr = `${Number(r.avgX).toFixed(2)}×`;
-      const multSize = fitFontSize(ctx, multStr, 120, i === 0 ? 26 : 22, 16, '800');
+      const multSize = fitFontSize(ctx, multStr, 96, i === 0 ? 24 : 20, 15, '800');
       if (i === 0) {
-        drawMultiplier(
+        drawGradientNumber(
           ctx,
           multStr,
-          PAD + lbW - 28,
-          rankCy + multSize * 0.35,
+          multX,
+          rankCy + multSize * 0.32,
           multSize,
           accent.grad,
-          accent.primary
+          accent.primary,
+          { shadowBlur: 20 }
         );
       } else {
         ctx.textAlign = 'right';
         ctx.fillStyle = accent.primary;
         ctx.font = `800 ${multSize}px system-ui, "Segoe UI", sans-serif`;
-        ctx.fillText(multStr, PAD + lbW - 28, rankCy);
+        ctx.fillText(multStr, multX, rankCy);
       }
 
       ctx.textAlign = 'right';
@@ -471,7 +506,7 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
       ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
       ctx.fillText(
         `${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`,
-        PAD + lbW - 100,
+        callsX,
         rankCy
       );
     }
@@ -498,11 +533,17 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
    */
   function drawHighlightCard(hy, label, hi, col, avatar) {
     drawGlassPanel(ctx, sideX, hy, sideW, hiH, 18, col);
-    drawSoftGlow(ctx, sideX + sideW - 40, hy + hiH * 0.55, 120, col.soft);
+
+    ctx.save();
+    roundRectPath(ctx, sideX, hy, sideW, hiH, 18);
+    ctx.clip();
+
+    const av = avatar ? 48 : 0;
+    const avPad = 16;
+    const textMaxW = sideW - av - avPad * 2 - (avatar ? 12 : 0);
 
     if (avatar) {
-      const av = 52;
-      const ax = sideX + sideW - av - 18;
+      const ax = sideX + sideW - av - avPad;
       const ay = hy + (hiH - av) / 2;
       ctx.save();
       ctx.beginPath();
@@ -521,30 +562,34 @@ function renderDailyDigestCard(ctx, data, accent, botAvatar) {
     ctx.textBaseline = 'top';
     ctx.fillStyle = col.primary;
     ctx.font = '700 11px system-ui, "Segoe UI", sans-serif';
-    ctx.fillText(label.toUpperCase(), sideX + 20, hy + 16);
+    ctx.fillText(label.toUpperCase(), sideX + avPad, hy + 14);
 
     if (!hi) {
       ctx.fillStyle = DIM;
       ctx.font = '600 16px system-ui, "Segoe UI", sans-serif';
-      ctx.fillText('—', sideX + 20, hy + 44);
+      ctx.fillText('—', sideX + avPad, hy + 40);
+      ctx.restore();
       return;
     }
 
     ctx.fillStyle = TEXT;
-    const tickSize = fitFontSize(ctx, hi.ticker, sideW - 100, 34, 22, '800');
+    const tickSize = fitFontSize(ctx, hi.ticker, textMaxW, 30, 20, '800');
     ctx.font = `800 ${tickSize}px system-ui, "Segoe UI", sans-serif`;
-    ctx.fillText(hi.ticker, sideX + 20, hy + 38);
+    ctx.fillText(hi.ticker, sideX + avPad, hy + 36);
 
-    const multSize = fitFontSize(ctx, hi.mult, sideW - 48, 56, 32, '800');
-    drawMultiplier(
+    const multSize = fitFontSize(ctx, hi.mult, textMaxW, 48, 28, '800');
+    drawGradientNumber(
       ctx,
       hi.mult,
-      sideX + sideW - 20,
-      hy + hiH - 22,
+      sideX + avPad,
+      hy + hiH - 24,
       multSize,
       col.grad,
-      col.primary
+      col.primary,
+      { shadowBlur: avatar ? 16 : 22, align: 'left' }
     );
+
+    ctx.restore();
   }
 
   drawHighlightCard(bodyY, 'Best member call', hiHuman, accent, null);

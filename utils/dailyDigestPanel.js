@@ -6,8 +6,7 @@ const {
   MUTED,
   DIM,
   fitFontSize,
-  channelAccent,
-  roundRectPath
+  channelAccent
 } = require('./xCardRenderHelpers');
 const {
   paintCardBackground,
@@ -382,29 +381,32 @@ function resolveMonthlyDigestData(anchor = new Date(), opts = {}) {
 
 const DAILY_CARD_CFG = {
   title: 'Daily snapshot',
-  memberSub: 'Avg ATH × · last UTC day',
-  leaderboardSub: 'Top 4 · avg ATH × · rolling 24h',
+  memberSub: 'Member desk · avg ATH ×',
+  leaderboardSub: 'Top callers · rolling 24h',
   quietMessage: 'Quiet day — no qualifying desk calls',
   fmtPeriodOverPeriod: fmtDayOverDay,
-  maxLeaderboardRows: 4
+  maxLeaderboardRows: 4,
+  displayLeaderboardRows: 4
 };
 
 const WEEKLY_CARD_CFG = {
   title: '7d snapshot',
-  memberSub: 'Avg ATH × · completed UTC week',
-  leaderboardSub: 'Top 5 · avg ATH × · completed week',
+  memberSub: 'Member desk · avg ATH ×',
+  leaderboardSub: 'Top callers · completed week',
   quietMessage: 'Quiet week — no qualifying desk calls',
   fmtPeriodOverPeriod: fmtWeekOverWeek,
-  maxLeaderboardRows: 5
+  maxLeaderboardRows: 5,
+  displayLeaderboardRows: 5
 };
 
 const MONTHLY_CARD_CFG = {
   title: 'Monthly snapshot',
-  memberSub: 'Avg ATH × · last 30 UTC days',
-  leaderboardSub: 'Top 8 · avg ATH × · rolling 30d',
+  memberSub: 'Member desk · avg ATH ×',
+  leaderboardSub: 'Top callers · rolling 30d',
   quietMessage: 'Quiet month — no qualifying desk calls',
   fmtPeriodOverPeriod: fmt30dOverPrior30d,
-  maxLeaderboardRows: 8
+  maxLeaderboardRows: 8,
+  displayLeaderboardRows: 5
 };
 
 function metricGrad(isGood) {
@@ -418,38 +420,33 @@ function metricGrad(isGood) {
 
 /**
  * @param {import('canvas').CanvasRenderingContext2D} ctx
- * @param {number} x
  * @param {number} y
- * @param {number} w
- * @param {number} h
- * @param {number} r
- * @param {{ primary: string, soft: string }} accent
+ * @param {number} x0
+ * @param {number} x1
+ * @param {string} [color]
  */
-function drawGlassPanel(ctx, x, y, w, h, r, accent) {
-  roundRectPath(ctx, x, y, w, h, r);
-  const fill = ctx.createLinearGradient(x, y, x, y + h);
-  fill.addColorStop(0, 'rgba(22, 22, 34, 0.96)');
-  fill.addColorStop(1, 'rgba(6, 6, 12, 0.98)');
-  ctx.fillStyle = fill;
-  ctx.fill();
-
-  ctx.strokeStyle = 'rgba(255,255,255,0.09)';
+function drawHairlineH(ctx, y, x0, x1, color = 'rgba(255,255,255,0.07)') {
+  ctx.strokeStyle = color;
   ctx.lineWidth = 1;
-  roundRectPath(ctx, x, y, w, h, r);
+  ctx.beginPath();
+  ctx.moveTo(x0, y + 0.5);
+  ctx.lineTo(x1, y + 0.5);
   ctx.stroke();
+}
 
-  ctx.strokeStyle = accent.primary + '44';
-  roundRectPath(ctx, x + 1, y + 1, w - 2, h - 2, Math.max(4, r - 1));
+/**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {number} x
+ * @param {number} y0
+ * @param {number} y1
+ */
+function drawHairlineV(ctx, x, y0, y1) {
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + 0.5, y0);
+  ctx.lineTo(x + 0.5, y1);
   ctx.stroke();
-
-  ctx.save();
-  roundRectPath(ctx, x + 2, y + 2, w - 4, Math.min(h * 0.42, 72), r - 2);
-  const shine = ctx.createLinearGradient(x, y, x, y + 80);
-  shine.addColorStop(0, 'rgba(255,255,255,0.08)');
-  shine.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = shine;
-  ctx.fill();
-  ctx.restore();
 }
 
 /**
@@ -475,56 +472,6 @@ function drawTitleGradient(ctx, text, x, y, size, grad) {
 
 /**
  * @param {import('canvas').CanvasRenderingContext2D} ctx
- * @param {number} x
- * @param {number} y
- * @param {string} text
- * @param {string} color
- */
-function drawDateChip(ctx, x, y, text, color) {
-  ctx.font = '600 12px system-ui, "Segoe UI", sans-serif';
-  const tw = ctx.measureText(text).width;
-  const bw = tw + 22;
-  const bh = 26;
-  roundRectPath(ctx, x - bw, y, bw, bh, 10);
-  ctx.fillStyle = 'rgba(255,255,255,0.05)';
-  ctx.fill();
-  ctx.strokeStyle = color + '66';
-  ctx.lineWidth = 1;
-  roundRectPath(ctx, x - bw, y, bw, bh, 10);
-  ctx.stroke();
-  ctx.fillStyle = MUTED;
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, x - 11, y + bh / 2);
-}
-
-/**
- * @param {import('canvas').CanvasRenderingContext2D} ctx
- * @param {number} x
- * @param {number} y
- * @param {string} text
- * @param {string} color
- */
-function drawPreviewBadge(ctx, x, y, text, color) {
-  ctx.font = '700 10px system-ui, "Segoe UI", sans-serif';
-  const tw = ctx.measureText(text).width;
-  const bw = tw + 16;
-  const bh = 20;
-  roundRectPath(ctx, x - bw, y, bw, bh, 6);
-  ctx.fillStyle = color + '18';
-  ctx.fill();
-  ctx.strokeStyle = color + '77';
-  ctx.lineWidth = 1;
-  roundRectPath(ctx, x - bw, y, bw, bh, 6);
-  ctx.stroke();
-  ctx.fillStyle = color;
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, x - 8, y + bh / 2);
-}
-
-/**
- * @param {import('canvas').CanvasRenderingContext2D} ctx
  * @param {string} text
  * @param {number} maxWidth
  * @param {string} font
@@ -537,74 +484,6 @@ function truncateToWidth(ctx, text, maxWidth, font) {
     s = s.slice(0, -1);
   }
   return `${s}…`;
-}
-
-/**
- * @param {import('canvas').CanvasRenderingContext2D} ctx
- * @param {number} x
- * @param {number} y
- * @param {number} w
- * @param {number} h
- * @param {{ label: string, sub: string, hero: string, grad: string[], foot: string }} p
- * @param {{ primary: string, soft: string, grad: string[] }} accent
- */
-function drawHeroMetricPanel(ctx, x, y, w, h, p, accent) {
-  drawGlassPanel(ctx, x, y, w, h, 22, accent);
-
-  ctx.save();
-  roundRectPath(ctx, x, y, w, h, 22);
-  ctx.clip();
-
-  const inner = x + 22;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = accent.primary;
-  ctx.font = '700 13px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText(p.label.toUpperCase(), inner, y + 16);
-  ctx.fillStyle = MUTED;
-  ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText(p.sub, inner, y + 36);
-
-  const footFont = '600 13px system-ui, "Segoe UI", sans-serif';
-  const footText = truncateToWidth(ctx, p.foot, w * 0.58, footFont);
-  ctx.font = footFont;
-  ctx.fillStyle = p.foot === '—' ? DIM : 'rgba(220, 220, 228, 0.92)';
-  ctx.fillText(footText, inner, y + h - 28);
-
-  const heroMaxW = w * 0.62;
-  const heroSize = fitFontSize(ctx, p.hero, heroMaxW, Math.min(88, h * 0.38), 40, '800');
-  const heroBaseline = y + 56 + (h - 56 - 44) * 0.62;
-  drawGradientNumber(ctx, p.hero, x + w - 20, heroBaseline, heroSize, p.grad, accent.primary, {
-    shadowBlur: 28
-  });
-
-  ctx.restore();
-}
-
-/**
- * @param {import('canvas').CanvasRenderingContext2D} ctx
- * @param {number} cx
- * @param {number} cy
- * @param {number} rank
- */
-function drawRankBadge(ctx, cx, cy, rank) {
-  const colors = ['#fbbf24', '#d4d4d8', '#b45309', 'rgba(255,255,255,0.14)'];
-  const fill = colors[Math.min(rank - 1, 3)];
-  const r = rank === 1 ? 17 : 14;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (rank > 1) {
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-  ctx.fillStyle = rank <= 3 ? '#0a0a0f' : MUTED;
-  ctx.font = `800 ${rank === 1 ? 14 : 12}px system-ui, "Segoe UI", sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(String(rank), cx, cy + 1);
 }
 
 /**
@@ -623,6 +502,104 @@ function formatHighlight(call) {
 
 /**
  * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {number} x
+ * @param {number} y
+ * @param {number} w
+ * @param {number} h
+ * @param {string} label
+ * @param {{ ticker: string, mult: string }|null} hi
+ * @param {{ primary: string, soft: string, grad: string[] }} col
+ * @param {import('canvas').Image|null} [avatar]
+ */
+function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
+  drawHairlineH(ctx, y + h, x, x + w, 'rgba(255,255,255,0.05)');
+
+  const av = avatar ? 44 : 0;
+  const innerRight = x + w - (avatar ? av + 20 : 12);
+  const innerLeft = x + 4;
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = DIM;
+  ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(label, innerLeft, y + 10);
+
+  if (!hi) {
+    ctx.fillStyle = DIM;
+    ctx.font = '600 18px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText('—', innerLeft, y + 36);
+    return;
+  }
+
+  const midY = y + h / 2 + 6;
+  const tickMaxW = innerRight - innerLeft - 120;
+  ctx.fillStyle = TEXT;
+  const tickSize = fitFontSize(ctx, hi.ticker, tickMaxW, 34, 22, '700');
+  ctx.font = `700 ${tickSize}px system-ui, "Segoe UI", sans-serif`;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(hi.ticker, innerLeft, midY);
+
+  const multSize = fitFontSize(ctx, hi.mult, 130, 52, 32, '800');
+  drawGradientNumber(
+    ctx,
+    hi.mult,
+    innerRight,
+    midY + multSize * 0.34,
+    multSize,
+    col.grad,
+    col.primary,
+    { shadowBlur: 14, glow: true, align: 'right' }
+  );
+
+  if (avatar) {
+    const ax = x + w - av - 12;
+    const ay = y + (h - av) / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(ax + av / 2, ay + av / 2, av / 2, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(avatar, ax, ay, av, av);
+    ctx.restore();
+    ctx.strokeStyle = col.primary + '99';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(ax + av / 2, ay + av / 2, av / 2 + 1, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+/**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {number} bandY
+ * @param {number} bandH
+ * @param {import('canvas').Image} chartImage
+ */
+function drawChartBand(ctx, bandY, bandH, chartImage) {
+  const x = PAD;
+  const w = W - PAD * 2;
+  drawHairlineH(ctx, bandY, x, x + w, 'rgba(255,255,255,0.1)');
+
+  ctx.save();
+  ctx.globalAlpha = 0.94;
+  ctx.drawImage(chartImage, x, bandY + 6, w, bandH - 12);
+  ctx.restore();
+
+  const fade = ctx.createLinearGradient(x, bandY, x, bandY + Math.min(72, bandH * 0.35));
+  fade.addColorStop(0, 'rgba(0,0,2,0.92)');
+  fade.addColorStop(1, 'rgba(0,0,2,0)');
+  ctx.fillStyle = fade;
+  ctx.fillRect(x, bandY, w, Math.min(72, bandH * 0.35));
+
+  const fadeB = ctx.createLinearGradient(x, bandY + bandH - 48, x, bandY + bandH);
+  fadeB.addColorStop(0, 'rgba(0,0,2,0)');
+  fadeB.addColorStop(1, 'rgba(0,0,2,0.75)');
+  ctx.fillStyle = fadeB;
+  ctx.fillRect(x, bandY + bandH - 48, w, 48);
+}
+
+/**
+ * Premium editorial digest — open layout, no dashboard panels.
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
  * @param {object} data
  * @param {{
  *   title: string,
@@ -630,7 +607,8 @@ function formatHighlight(call) {
  *   leaderboardSub: string,
  *   quietMessage: string,
  *   fmtPeriodOverPeriod: (prev: number|null, cur: number|null) => string,
- *   maxLeaderboardRows?: number
+ *   maxLeaderboardRows?: number,
+ *   displayLeaderboardRows?: number
  * }} cfg
  * @param {{ primary: string, soft: string, grad: string[] }} accent
  * @param {import('canvas').Image|null} botAvatar
@@ -644,119 +622,143 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
   const spread = fmtMemberBotSpread(mY, bY);
   const botAccent = channelAccent('bot');
   const maxRows = Number(cfg.maxLeaderboardRows) > 0 ? Number(cfg.maxLeaderboardRows) : 4;
+  const displayCap =
+    Number(cfg.displayLeaderboardRows) > 0 ? Number(cfg.displayLeaderboardRows) : maxRows;
 
   const mOk = mY != null && Number.isFinite(mY);
   const memberHero = mOk ? `${Number(mY).toFixed(2)}×` : '—';
   const memberGood = !mOk ? null : Number(mY) >= MEMBER_AVG_GOOD_AT;
   const spreadGood = spread.memberAhead;
 
-  const headerH = 108;
-  drawTitleGradient(ctx, cfg.title, PAD, PAD + 18, 52, accent.grad);
-  ctx.fillStyle = accent.primary;
-  ctx.font = '700 12px system-ui, "Segoe UI", sans-serif';
+  const footerH = 32;
+  const chartBandH = chartImage ? 198 : 0;
+  const contentBottom = H - PAD - footerH - chartBandH;
+
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText('TERMINAL · DESK PERFORMANCE', PAD, PAD);
+  ctx.fillStyle = 'rgba(255,255,255,0.38)';
+  ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('McGBot Terminal', PAD, PAD);
 
-  drawDateChip(ctx, W - PAD, PAD + 4, data.dateLabel, accent.primary);
+  drawTitleGradient(ctx, cfg.title, PAD, PAD + 20, 56, accent.grad);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = MUTED;
+  ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(data.dateLabel, W - PAD, PAD + 26);
   if (data.isSample) {
-    drawPreviewBadge(ctx, W - PAD, PAD + 36, 'LAYOUT PREVIEW', accent.primary);
+    ctx.fillStyle = accent.primary + 'aa';
+    ctx.font = '500 11px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText('Preview layout', W - PAD, PAD + 48);
   }
 
-  const statsY = PAD + headerH;
-  const statsH = 204;
-  const colGap = 22;
-  const panelW = (W - PAD * 2 - colGap) / 2;
+  const heroY = PAD + 92;
+  const heroH = 168;
+  const splitX = PAD + Math.floor((W - PAD * 2) * 0.58);
 
-  drawHeroMetricPanel(
-    ctx,
-    PAD,
-    statsY,
-    panelW,
-    statsH,
-    {
-      label: 'Member desk',
-      sub: cfg.memberSub,
-      hero: memberHero,
-      grad: metricGrad(memberGood),
-      foot: periodFoot
-    },
-    accent
-  );
-  drawHeroMetricPanel(
-    ctx,
-    PAD + panelW + colGap,
-    statsY,
-    panelW,
-    statsH,
-    {
-      label: 'Member vs McGBot',
-      sub: 'Spread on avg ATH ×',
-      hero: spread.line,
-      grad: metricGrad(spreadGood),
-      foot: spread.foot
-    },
-    accent
-  );
-
-  const bodyY = statsY + statsH + 22;
-  const bodyH = H - bodyY - PAD - 44;
-  const lbW = Math.floor((W - PAD * 2 - colGap) * 0.58);
-  const sideW = W - PAD * 2 - colGap - lbW;
-
-  drawGlassPanel(ctx, PAD, bodyY, lbW, bodyH, 22, accent);
-  drawSoftGlow(ctx, PAD + lbW * 0.5, bodyY + bodyH * 0.35, 240, accent.soft);
+  drawSoftGlow(ctx, PAD + 200, heroY + heroH * 0.45, 280, accent.soft);
 
   ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = accent.primary;
-  ctx.font = '800 22px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText('Caller leaderboard', PAD + 24, bodyY + 20);
   ctx.fillStyle = MUTED;
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText(cfg.leaderboardSub, PAD + 24, bodyY + 48);
+  ctx.fillText(cfg.memberSub, PAD, heroY + 4);
+
+  const memberSize = fitFontSize(ctx, memberHero, splitX - PAD - 24, 108, 56, '800');
+  drawGradientNumber(
+    ctx,
+    memberHero,
+    PAD,
+    heroY + 36 + memberSize,
+    memberSize,
+    metricGrad(memberGood),
+    accent.primary,
+    { shadowBlur: 16, glow: true, align: 'left' }
+  );
+
+  ctx.fillStyle = periodFoot === '—' ? DIM : 'rgba(210, 210, 220, 0.88)';
+  ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(periodFoot, PAD, heroY + heroH - 28);
+
+  drawHairlineV(ctx, splitX, heroY + 8, heroY + heroH - 8);
+
+  const spreadX = splitX + 36;
+  const spreadRight = W - PAD;
+  ctx.fillStyle = MUTED;
+  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('Member vs McGBot', spreadX, heroY + 4);
+
+  const spreadSize = fitFontSize(ctx, spread.line, spreadRight - spreadX, 72, 44, '800');
+  drawGradientNumber(
+    ctx,
+    spread.line,
+    spreadRight,
+    heroY + 40 + spreadSize,
+    spreadSize,
+    metricGrad(spreadGood),
+    accent.primary,
+    { shadowBlur: 12, glow: true, align: 'right' }
+  );
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = DIM;
+  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+  const spreadFoot = truncateToWidth(ctx, spread.foot, spreadRight - spreadX, '500 13px system-ui, "Segoe UI", sans-serif');
+  ctx.fillText(spreadFoot, spreadX, heroY + heroH - 28);
+
+  const mainY = heroY + heroH + 28;
+  drawHairlineH(ctx, mainY - 12, PAD, W - PAD);
+
+  const colGap = 40;
+  const lbW = Math.floor((W - PAD * 2 - colGap) * 0.54);
+  const sideX = PAD + lbW + colGap;
+  const sideW = W - PAD - sideX;
+  const mainH = contentBottom - mainY;
+
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '700 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('TOP CALLERS', PAD, mainY);
+  ctx.fillStyle = DIM;
+  ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(cfg.leaderboardSub, PAD, mainY + 18);
 
   const rows = data.leaderboard || [];
-  const rowStart = bodyY + 78;
-  const rowH = Math.min(44, Math.floor((bodyH - 90) / Math.max(maxRows, rows.length || 1)));
-  const multX = PAD + lbW - 24;
-  const callsX = multX - 108;
+  const visibleCount = Math.min(displayCap, rows.length);
+  const overflow = rows.length - visibleCount;
+  const rowStart = mainY + 44;
+  const rowH = Math.min(38, Math.floor((mainH - 52) / Math.max(visibleCount || 1, 1)));
+  const multX = PAD + lbW - 8;
+  const callsX = multX - 96;
 
-  if (rows.length) {
-    for (let i = 0; i < rows.length; i += 1) {
+  if (visibleCount) {
+    for (let i = 0; i < visibleCount; i += 1) {
       const r = rows[i];
       const ry = rowStart + i * rowH;
       const rankCy = ry + rowH / 2;
-      const rowPad = PAD + 16;
 
-      if (i === 0) {
-        roundRectPath(ctx, rowPad, ry + 2, lbW - 32, rowH - 4, 12);
-        ctx.fillStyle = accent.primary + '14';
-        ctx.fill();
-        ctx.strokeStyle = accent.primary + '35';
-        ctx.lineWidth = 1;
-        roundRectPath(ctx, rowPad, ry + 2, lbW - 32, rowH - 4, 12);
-        ctx.stroke();
+      if (i > 0) {
+        drawHairlineH(ctx, ry, PAD, PAD + lbW - 8, 'rgba(255,255,255,0.04)');
       }
-
-      drawRankBadge(ctx, rowPad + 22, rankCy, i + 1);
 
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = i === 0 ? TEXT : 'rgba(235, 235, 240, 0.95)';
-      ctx.font = `700 ${i === 0 ? 18 : 16}px system-ui, "Segoe UI", sans-serif`;
-      const nameMaxW = callsX - (rowPad + 48) - 12;
+      ctx.fillStyle = i === 0 ? accent.primary : DIM;
+      ctx.font = `600 ${i === 0 ? 13 : 12}px system-ui, "Segoe UI", sans-serif`;
+      ctx.fillText(String(i + 1).padStart(2, '0'), PAD, rankCy);
+
+      ctx.fillStyle = i === 0 ? TEXT : 'rgba(235, 235, 240, 0.92)';
+      ctx.font = `600 ${i === 0 ? 17 : 15}px system-ui, "Segoe UI", sans-serif`;
       const name = truncateToWidth(
         ctx,
         r.username,
-        nameMaxW,
-        `700 ${i === 0 ? 18 : 16}px system-ui, "Segoe UI", sans-serif`
+        callsX - PAD - 36,
+        `600 ${i === 0 ? 17 : 15}px system-ui, "Segoe UI", sans-serif`
       );
-      ctx.fillText(name, rowPad + 48, rankCy);
+      ctx.fillText(name, PAD + 32, rankCy);
 
       const multStr = `${Number(r.avgX).toFixed(2)}×`;
-      const multSize = fitFontSize(ctx, multStr, 96, i === 0 ? 24 : 20, 15, '800');
+      ctx.textAlign = 'right';
       if (i === 0) {
+        const multSize = fitFontSize(ctx, multStr, 100, 22, 16, '800');
         drawGradientNumber(
           ctx,
           multStr,
@@ -765,129 +767,72 @@ function renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage 
           multSize,
           accent.grad,
           accent.primary,
-          { shadowBlur: 20 }
+          { shadowBlur: 10, align: 'right' }
         );
       } else {
-        ctx.textAlign = 'right';
-        ctx.fillStyle = accent.primary;
-        ctx.font = `800 ${multSize}px system-ui, "Segoe UI", sans-serif`;
+        ctx.fillStyle = 'rgba(200, 200, 210, 0.9)';
+        ctx.font = '600 15px system-ui, "Segoe UI", sans-serif';
         ctx.fillText(multStr, multX, rankCy);
       }
 
-      ctx.textAlign = 'right';
       ctx.fillStyle = DIM;
-      ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
-      ctx.fillText(
-        `${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`,
-        callsX,
-        rankCy
-      );
+      ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
+      ctx.fillText(`${r.totalCalls} calls`, callsX, rankCy);
+    }
+    if (overflow > 0) {
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = DIM;
+      ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
+      ctx.fillText(`+${overflow} more on dashboard`, PAD, rowStart + visibleCount * rowH + 4);
     }
   } else {
     ctx.fillStyle = DIM;
-    ctx.font = '600 15px system-ui, "Segoe UI", sans-serif';
+    ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(cfg.quietMessage, PAD + 24, rowStart + 12);
+    ctx.fillText(cfg.quietMessage, PAD, rowStart);
   }
 
-  const sideX = PAD + lbW + colGap;
-  const hiGap = 16;
-  const hiH = chartImage ? 76 : Math.floor((bodyH - hiGap) / 2);
-  const chartH = chartImage ? bodyH - hiH * 2 - hiGap * 2 : 0;
+  drawHairlineV(ctx, sideX - 20, mainY, contentBottom - 8);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '700 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('BEST CALLS', sideX, mainY);
+
   const hiHuman = formatHighlight(data.bestHuman);
   const hiBot = formatHighlight(data.bestBot);
+  const stripGap = 8;
+  const stripH = Math.floor((mainH - 24 - stripGap) / 2);
 
-  /**
-   * @param {number} hy
-   * @param {string} label
-   * @param {{ ticker: string, mult: string }|null} hi
-   * @param {{ primary: string, soft: string, grad: string[] }} col
-   * @param {import('canvas').Image|null} [avatar]
-   */
-  function drawHighlightCard(hy, label, hi, col, avatar) {
-    drawGlassPanel(ctx, sideX, hy, sideW, hiH, 18, col);
+  drawBestCallStrip(ctx, sideX, mainY + 28, sideW, stripH, 'Best member call', hiHuman, accent, null);
+  drawBestCallStrip(
+    ctx,
+    sideX,
+    mainY + 28 + stripH + stripGap,
+    sideW,
+    stripH,
+    'Best McGBot call',
+    hiBot,
+    botAccent,
+    botAvatar
+  );
 
-    ctx.save();
-    roundRectPath(ctx, sideX, hy, sideW, hiH, 18);
-    ctx.clip();
-
-    const av = avatar ? 48 : 0;
-    const avPad = 16;
-    const textMaxW = sideW - av - avPad * 2 - (avatar ? 12 : 0);
-
-    if (avatar) {
-      const ax = sideX + sideW - av - avPad;
-      const ay = hy + (hiH - av) / 2;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(ax + av / 2, ay + av / 2, av / 2, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(avatar, ax, ay, av, av);
-      ctx.restore();
-      ctx.strokeStyle = col.primary;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(ax + av / 2, ay + av / 2, av / 2 + 1, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = col.primary;
-    ctx.font = '700 11px system-ui, "Segoe UI", sans-serif';
-    ctx.fillText(label.toUpperCase(), sideX + avPad, hy + 14);
-
-    if (!hi) {
-      ctx.fillStyle = DIM;
-      ctx.font = '600 16px system-ui, "Segoe UI", sans-serif';
-      ctx.fillText('—', sideX + avPad, hy + 40);
-      ctx.restore();
-      return;
-    }
-
-    ctx.fillStyle = TEXT;
-    const tickSize = fitFontSize(ctx, hi.ticker, textMaxW, 30, 20, '800');
-    ctx.font = `800 ${tickSize}px system-ui, "Segoe UI", sans-serif`;
-    ctx.fillText(hi.ticker, sideX + avPad, hy + 36);
-
-    const multSize = fitFontSize(ctx, hi.mult, textMaxW, 48, 28, '800');
-    drawGradientNumber(
-      ctx,
-      hi.mult,
-      sideX + avPad,
-      hy + hiH - 24,
-      multSize,
-      col.grad,
-      col.primary,
-      { shadowBlur: avatar ? 16 : 22, align: 'left' }
-    );
-
-    ctx.restore();
+  if (chartImage && chartBandH > 0) {
+    const bandY = contentBottom + 8;
+    drawChartBand(ctx, bandY, chartBandH - 8, chartImage);
   }
 
-  drawHighlightCard(bodyY, 'Best member call', hiHuman, accent, null);
-  drawHighlightCard(bodyY + hiH + hiGap, 'Best McGBot call', hiBot, botAccent, botAvatar);
-
-  if (chartImage && chartH > 40) {
-    const chartY = bodyY + hiH * 2 + hiGap * 2;
-    drawGlassPanel(ctx, sideX, chartY, sideW, chartH, 16, accent);
-    ctx.save();
-    roundRectPath(ctx, sideX + 8, chartY + 8, sideW - 16, chartH - 16, 12);
-    ctx.clip();
-    ctx.drawImage(chartImage, sideX + 8, chartY + 8, sideW - 16, chartH - 16);
-    ctx.restore();
-  }
-
-  const footerY = H - PAD - 4;
+  const footerY = H - PAD;
+  drawHairlineH(ctx, footerY - 22, PAD, W - PAD, 'rgba(255,255,255,0.06)');
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = MUTED;
-  ctx.font = '600 15px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText('🔹 Dashboard link in bio', PAD, footerY);
+  ctx.fillStyle = DIM;
+  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('🔹 Tracked live · link in bio', PAD, footerY);
   ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(180, 180, 192, 0.98)';
-  ctx.font = '700 17px system-ui, "Segoe UI", sans-serif';
+  ctx.fillStyle = 'rgba(170, 170, 182, 0.95)';
+  ctx.font = '600 14px system-ui, "Segoe UI", sans-serif';
   ctx.fillText('mcgbot.xyz', W - PAD, footerY);
 }
 

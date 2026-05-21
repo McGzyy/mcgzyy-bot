@@ -25,6 +25,8 @@ const {
   getPreviousCompletedUtcWeekBounds,
   getDigestWindowBounds,
   countQualifyingDeskCallsInBounds,
+  getNewestQualifyingDeskCallMs,
+  getCallerLeaderboard,
   startOfUtcCalendarDay
 } = require('./callerStatsService');
 const { getAllTrackedCalls, initTrackedCallsStore } = require('./trackedCallsService');
@@ -168,13 +170,16 @@ function buildWeeklyDigestPostBody(p = {}) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 5;
   const bounds = getDigestWindowBounds('weekly', new Date(), {
-    rolling: p.useRollingWindow === true
+    rolling: p.useRollingWindow === true,
+    allTime: p.useAllTimeWindow === true
   });
   const { startInclusive, endExclusive } = bounds;
   const rangeLabel =
-    bounds.mode === 'rolling'
-      ? 'last 7d (rolling)'
-      : formatUtcRangeLabelForPost(startInclusive, endExclusive);
+    bounds.mode === 'alltime'
+      ? 'all-time desk'
+      : bounds.mode === 'rolling'
+        ? 'last 7d (rolling)'
+        : formatUtcRangeLabelForPost(startInclusive, endExclusive);
   const rows = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, topN);
   const bestHuman = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
@@ -229,13 +234,16 @@ function buildDailyDigestPostBody(p = {}) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 4;
   const bounds = getDigestWindowBounds('daily', new Date(), {
-    rolling: p.useRollingWindow === true
+    rolling: p.useRollingWindow === true,
+    allTime: p.useAllTimeWindow === true
   });
   const { startInclusive, endExclusive } = bounds;
   const rangeLabel =
-    bounds.mode === 'rolling'
-      ? 'last 24h (rolling)'
-      : formatUtcRangeLabelForPost(startInclusive, endExclusive);
+    bounds.mode === 'alltime'
+      ? 'all-time desk'
+      : bounds.mode === 'rolling'
+        ? 'last 24h (rolling)'
+        : formatUtcRangeLabelForPost(startInclusive, endExclusive);
   const rows = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, topN);
   const bestHuman = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
@@ -290,13 +298,16 @@ async function buildMonthlyDigestPostBody(p) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 3;
   const bounds = getDigestWindowBounds('monthly', new Date(), {
-    rolling: p.useRollingWindow === true
+    rolling: p.useRollingWindow === true,
+    allTime: p.useAllTimeWindow === true
   });
   const { startInclusive: monthStart, endExclusive: monthEnd } = bounds;
   const rangeLabel =
-    bounds.mode === 'rolling'
-      ? 'last 30d (rolling)'
-      : formatUtcRangeLabelForPost(monthStart, monthEnd);
+    bounds.mode === 'alltime'
+      ? 'all-time desk'
+      : bounds.mode === 'rolling'
+        ? 'last 30d (rolling)'
+        : formatUtcRangeLabelForPost(monthStart, monthEnd);
   const rows = getCallerLeaderboardInUtcWeekBounds(monthStart, monthEnd, topN);
   const gap = weeklySectionGap();
   const footer = xTerminalFooterLine();
@@ -587,19 +598,23 @@ async function postDigest(p, options = {}) {
   const sampleData = options.sampleData === true;
 
   const useRollingWindow = options.useRollingWindow === true;
+  const useAllTimeWindow = options.useAllTimeWindow === true;
 
   if (!sampleData) {
     await ensureDigestDataStores();
     const n = getAllTrackedCalls().length;
     const kind = useTerminalDailyCard ? 'daily' : useTerminalWeeklyCard ? 'weekly' : 'monthly';
-    const bounds = getDigestWindowBounds(kind, anchor, { rolling: useRollingWindow });
+    const bounds = getDigestWindowBounds(kind, anchor, {
+      rolling: useRollingWindow,
+      allTime: useAllTimeWindow
+    });
     const inWindow = countQualifyingDeskCallsInBounds(bounds.startInclusive, bounds.endExclusive);
     console.log(
       `[XLeaderboardDigest] live post — total=${n} window=${bounds.mode} deskCalls=${inWindow.total} (member ${inWindow.human}, bot ${inWindow.bot})`
     );
   }
 
-  const cardOpts = { sampleData, useRollingWindow };
+  const cardOpts = { sampleData, useRollingWindow, useAllTimeWindow };
 
   try {
     if (useTerminalDailyCard) {
@@ -628,7 +643,7 @@ async function postDigest(p, options = {}) {
     console.error('[XLeaderboardDigest] digest render failed:', err?.message || err);
   }
 
-  const postOpts = { useRollingWindow };
+  const postOpts = { useRollingWindow, useAllTimeWindow };
   let text;
   if (useTerminalDailyCard) {
     text = buildDailyDigestPostBody({
@@ -892,17 +907,31 @@ async function postLeaderboardDigestToX(body, opts = {}) {
 async function getDigestLiveDiagnostics(kind, opts = {}) {
   await ensureDigestDataStores();
   const anchor = new Date();
-  const bounds = getDigestWindowBounds(kind, anchor, { rolling: opts.useRollingWindow === true });
+  const bounds = getDigestWindowBounds(kind, anchor, {
+    rolling: opts.useRollingWindow === true,
+    allTime: opts.useAllTimeWindow === true
+  });
   const inWindow = countQualifyingDeskCallsInBounds(bounds.startInclusive, bounds.endExclusive);
   const rolling7 = getCallerLeaderboardInTimeframe(7, 5);
+  const allTimeLb = getCallerLeaderboard(5);
   const rangeLabel =
-    bounds.mode === 'rolling'
-      ? bounds.days === 1
-        ? 'last 24h rolling'
-        : bounds.days === 7
-          ? 'last 7d rolling'
-          : 'last 30d rolling'
-      : formatUtcRangeLabelForPost(bounds.startInclusive, bounds.endExclusive);
+    bounds.mode === 'alltime'
+      ? 'all-time desk'
+      : bounds.mode === 'rolling'
+        ? bounds.days === 1
+          ? 'last 24h rolling'
+          : bounds.days === 7
+            ? 'last 7d rolling'
+            : 'last 30d rolling'
+        : formatUtcRangeLabelForPost(bounds.startInclusive, bounds.endExclusive);
+
+  const newestMs = getNewestQualifyingDeskCallMs();
+  const daysSinceNewest =
+    newestMs != null
+      ? Math.floor((anchor.getTime() - newestMs) / 86400000)
+      : null;
+  const newestDeskCallLabel =
+    newestMs != null ? new Date(newestMs).toISOString().slice(0, 10) : null;
 
   return {
     totalTracked: getAllTrackedCalls().length,
@@ -911,7 +940,10 @@ async function getDigestLiveDiagnostics(kind, opts = {}) {
     deskCallsInWindow: inWindow.total,
     memberCallsInWindow: inWindow.human,
     botCallsInWindow: inWindow.bot,
-    rolling7dLeaderboardRows: rolling7.length
+    rolling7dLeaderboardRows: rolling7.length,
+    allTimeLeaderboardRows: allTimeLb.length,
+    newestDeskCallLabel,
+    daysSinceNewest
   };
 }
 

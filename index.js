@@ -548,9 +548,7 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
     `• \`!xdigeststatus\` — Scheduled X digest / W·M engagement scheduler status + recent post audit (owner only)\n` +
     `• \`!previewdailydigest\` / \`!previewweeklydigest\` / \`!previewmonthlydigest\` — **Discord preview** with **sample stats** (layout). Add \`live\` for real data.\n` +
-    `• \`!testdailydigest\` — Post daily card to X (**live** uses **rolling 24h**; add \`calendar\` for yesterday UTC like the scheduler). \`sample\` = filler layout.\n` +
-    `• \`!test7ddigest\` — Post weekly card (**live** = **rolling 7d**; add \`calendar\` for last completed Mon–Sun week).\n` +
-    `• \`!testmonthlydigest\` — Post monthly card (**live** = **rolling 30d**; add \`calendar\` for UTC month-to-date window).\n` +
+    `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Live X test (**rolling** window). \`calendar\` = scheduler window. \`alltime\` = fill card from full desk history. \`sample\` = layout filler.\n` +
     `• \`!previewxmilestone user|bot <sol_ca> [mult]\` — **Preview card + caption in Discord** (no X; omit CA for JUP default)\n` +
     `• \`!testxmilestone user|bot <sol_ca> [mult]\` — **Live X post** (real Dex token; user tests credit **@McGzyy**). \`fresh\` skips auto-quote. Quote: \`!testxmilestone quote <post_id> user|bot [mult]\`\n` +
     `• \`!testweeklyrunner\` / \`!testtopcallermonth\` — Force **weekly runner** or **monthly top caller** X posts (owner only; monthly test skips Discord role)\n` +
@@ -3564,43 +3562,53 @@ if (lowerContent === '!scanner off') {
           let label = 'digest';
           const useSample = /\bsample\b/i.test(content);
           const useCalendar = /\bcalendar\b/i.test(content);
-          const useRollingWindow = !useCalendar;
+          const useAllTime = /\balltime\b/i.test(content);
+          const useRollingWindow = !useCalendar && !useAllTime;
+          const useAllTimeWindow = useAllTime;
           const kind = isMonthly ? 'monthly' : is7d ? 'weekly' : 'daily';
           const windowNote = useSample
             ? 'sample layout'
-            : useCalendar
-              ? 'live · calendar window (scheduler)'
-              : 'live · rolling window';
+            : useAllTime
+              ? 'live · all-time desk'
+              : useCalendar
+                ? 'live · calendar window (scheduler)'
+                : 'live · rolling window';
+
+          const postOpts = { sampleData: useSample, useRollingWindow, useAllTimeWindow };
 
           if (isMonthly) {
             label = `monthly (${windowNote})`;
             result = await postLeaderboardDigestToX(
               { windowLabel: 'Monthly snapshot', days: 30, topN: 8 },
-              { attachPast30DaysChart: true, sampleData: useSample, useRollingWindow }
+              { attachPast30DaysChart: true, ...postOpts }
             );
           } else if (is7d) {
             label = `7d (${windowNote})`;
             result = await postLeaderboardDigestToX(
               { windowLabel: '7d snapshot', days: 7, topN: 5 },
-              { attachWeeklyAvgXChart: true, sampleData: useSample, useRollingWindow }
+              { attachWeeklyAvgXChart: true, ...postOpts }
             );
           } else {
             label = `daily (${windowNote})`;
             result = await postLeaderboardDigestToX(
               { windowLabel: 'Daily snapshot', days: 1, topN: 4 },
-              { attachDailyDualPanel: true, sampleData: useSample, useRollingWindow }
+              { attachDailyDualPanel: true, ...postOpts }
             );
           }
 
           /** @type {string} */
           let statsLine = '';
           if (!useSample) {
-            const diag = await getDigestLiveDiagnostics(kind, { useRollingWindow });
+            const diag = await getDigestLiveDiagnostics(kind, { useRollingWindow, useAllTimeWindow });
             statsLine =
               `\nTracked: **${diag.totalTracked}** · window (**${diag.windowLabel}**): **${diag.deskCallsInWindow}** desk calls` +
               (diag.deskCallsInWindow === 0
-                ? ` · rolling 7d leaderboard has **${diag.rolling7dLeaderboardRows}** callers (\`!callerboard\` is all-time)`
+                ? ` · \`!callerboard\` all-time: **${diag.allTimeLeaderboardRows}** callers`
                 : '');
+            if (diag.deskCallsInWindow === 0 && diag.newestDeskCallLabel && !useAllTime) {
+              statsLine +=
+                `\n⚠️ Newest desk call: **${diag.newestDeskCallLabel}** (**${diag.daysSinceNewest}d** ago) — nothing recent in \`trackedCalls.json\`. Use \`alltime\` to preview a filled card, or track new calls.`;
+            }
           }
 
           if (result?.success) {

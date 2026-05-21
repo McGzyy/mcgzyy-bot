@@ -986,7 +986,53 @@ function getUtcDeskSnapshotForRange(startInclusive, endExclusive) {
  * @param {Date} [anchor]
  * @param {{ rolling?: boolean }} [opts] `rolling: true` = last 1d / 7d / 30d ending now (Discord test posts).
  */
+function getNewestQualifyingDeskCallMs() {
+  let newest = null;
+  for (const call of getAllTrackedCalls()) {
+    if (!isHumanUserCall(call) && !isBotCall(call)) continue;
+    if (!isValid(call)) continue;
+    const ms = getCallTimestampMs(call);
+    if (ms == null) continue;
+    if (newest == null || ms > newest) newest = ms;
+  }
+  return newest;
+}
+
+/**
+ * Widest bounds covering every qualifying desk call (owner digest tests only).
+ * @param {Date} [anchor]
+ */
+function getDigestAllTimeBounds(anchor = new Date()) {
+  let oldest = null;
+  let newest = null;
+  for (const call of getAllTrackedCalls()) {
+    if (!isHumanUserCall(call) && !isBotCall(call)) continue;
+    if (!isValid(call)) continue;
+    const ms = getCallTimestampMs(call);
+    if (ms == null) continue;
+    if (oldest == null || ms < oldest) oldest = ms;
+    if (newest == null || ms > newest) newest = ms;
+  }
+  if (oldest == null || newest == null) return null;
+  const endExclusive = new Date(anchor.getTime());
+  const startInclusive = new Date(oldest);
+  const priorEnd = new Date(startInclusive);
+  const priorStart = new Date(startInclusive.getTime() - Math.max(86400000, newest - oldest + 86400000));
+  return {
+    startInclusive,
+    endExclusive,
+    priorStart,
+    priorEnd,
+    mode: 'alltime'
+  };
+}
+
 function getDigestWindowBounds(kind, anchor = new Date(), opts = {}) {
+  if (opts.allTime === true) {
+    const all = getDigestAllTimeBounds(anchor);
+    if (all) return all;
+  }
+
   const rolling = opts.rolling === true;
   if (rolling) {
     const days = kind === 'daily' ? 1 : kind === 'weekly' ? 7 : 30;
@@ -1109,6 +1155,8 @@ module.exports = {
   getUtcYesterdayAndPriorDeskAvgs,
   getUtcDeskSnapshotForRange,
   getDigestWindowBounds,
+  getDigestAllTimeBounds,
+  getNewestQualifyingDeskCallMs,
   countQualifyingDeskCallsInBounds,
   getDailyUtcDeskSnapshot,
   startOfUtcCalendarDay

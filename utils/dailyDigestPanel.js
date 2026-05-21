@@ -212,16 +212,21 @@ function buildSampleDailyDigestData(anchor = new Date()) {
  * @returns {import('./dailyDigestPanel').DailyDigestData}
  */
 function buildLiveDailyDigestData(anchor = new Date(), opts = {}) {
-  const bounds = getDigestWindowBounds('daily', anchor, { rolling: opts.useRollingWindow === true });
+  const bounds = getDigestWindowBounds('daily', anchor, {
+    rolling: opts.useRollingWindow === true,
+    allTime: opts.useAllTimeWindow === true
+  });
   const cur = getDeskAvgAthXPairForUtcRange(bounds.startInclusive, bounds.endExclusive);
   const prior = getDeskAvgAthXPairForUtcRange(bounds.priorStart, bounds.priorEnd);
   const rows = getCallerLeaderboardInUtcWeekBounds(bounds.startInclusive, bounds.endExclusive, 5);
   const bestHuman = getBestCallInUtcWeekBounds(bounds.startInclusive, bounds.endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(bounds.startInclusive, bounds.endExclusive);
   const dateLabel =
-    bounds.mode === 'rolling'
-      ? 'Last 24h (rolling)'
-      : `UTC ${bounds.startInclusive.toISOString().slice(0, 10)}`;
+    bounds.mode === 'alltime'
+      ? 'All-time desk'
+      : bounds.mode === 'rolling'
+        ? 'Last 24h (rolling)'
+        : `UTC ${bounds.startInclusive.toISOString().slice(0, 10)}`;
 
   return {
     dateLabel,
@@ -427,7 +432,10 @@ function buildSampleWeeklyDigestData(anchor = new Date()) {
  * @returns {import('./dailyDigestPanel').WeeklyDigestData}
  */
 function buildLiveWeeklyDigestData(anchor = new Date(), opts = {}) {
-  const bounds = getDigestWindowBounds('weekly', anchor, { rolling: opts.useRollingWindow === true });
+  const bounds = getDigestWindowBounds('weekly', anchor, {
+    rolling: opts.useRollingWindow === true,
+    allTime: opts.useAllTimeWindow === true
+  });
   const { startInclusive, endExclusive, priorStart, priorEnd } = bounds;
   const cur = getDeskAvgAthXPairForUtcRange(startInclusive, endExclusive);
   const prior = getDeskAvgAthXPairForUtcRange(priorStart, priorEnd);
@@ -435,9 +443,11 @@ function buildLiveWeeklyDigestData(anchor = new Date(), opts = {}) {
   const bestHuman = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
   const dateLabel =
-    bounds.mode === 'rolling'
-      ? 'Last 7d (rolling)'
-      : formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive);
+    bounds.mode === 'alltime'
+      ? 'All-time desk'
+      : bounds.mode === 'rolling'
+        ? 'Last 7d (rolling)'
+        : formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive);
 
   return {
     dateLabel,
@@ -508,7 +518,10 @@ function buildSampleMonthlyDigestData(anchor = new Date()) {
  * @returns {import('./dailyDigestPanel').MonthlyDigestData}
  */
 function buildLiveMonthlyDigestData(anchor = new Date(), opts = {}) {
-  const bounds = getDigestWindowBounds('monthly', anchor, { rolling: opts.useRollingWindow === true });
+  const bounds = getDigestWindowBounds('monthly', anchor, {
+    rolling: opts.useRollingWindow === true,
+    allTime: opts.useAllTimeWindow === true
+  });
   const { startInclusive: curStart, endExclusive, priorStart, priorEnd } = bounds;
   const cur = getDeskAvgAthXPairForUtcRange(curStart, endExclusive);
   const prior = getDeskAvgAthXPairForUtcRange(priorStart, priorEnd);
@@ -516,9 +529,11 @@ function buildLiveMonthlyDigestData(anchor = new Date(), opts = {}) {
   const bestHuman = getBestCallInUtcWeekBounds(curStart, endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(curStart, endExclusive);
   const dateLabel =
-    bounds.mode === 'rolling'
-      ? 'Last 30d (rolling)'
-      : formatUtcDateRangeLabel(curStart, endExclusive);
+    bounds.mode === 'alltime'
+      ? 'All-time desk'
+      : bounds.mode === 'rolling'
+        ? 'Last 30d (rolling)'
+        : formatUtcDateRangeLabel(curStart, endExclusive);
 
   return {
     dateLabel,

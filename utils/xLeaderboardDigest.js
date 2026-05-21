@@ -26,10 +26,16 @@ const {
   getDigestWindowBounds,
   countQualifyingDeskCallsInBounds,
   getNewestQualifyingDeskCallMs,
+  getDeskTimestampDiagnostics,
   getCallerLeaderboard,
   startOfUtcCalendarDay
 } = require('./callerStatsService');
-const { getAllTrackedCalls, initTrackedCallsStore } = require('./trackedCallsService');
+const {
+  getAllTrackedCalls,
+  initTrackedCallsStore,
+  trackedCallsFilePath
+} = require('./trackedCallsService');
+const fs = require('fs').promises;
 const { initUserProfilesStore } = require('./userProfileService');
 const {
   xTerminalSectionGap,
@@ -932,9 +938,18 @@ async function getDigestLiveDiagnostics(kind, opts = {}) {
       : null;
   const newestDeskCallLabel =
     newestMs != null ? new Date(newestMs).toISOString().slice(0, 10) : null;
+  const tsDiag = getDeskTimestampDiagnostics(anchor);
+  let dataFileMtime = null;
+  try {
+    const st = await fs.stat(trackedCallsFilePath);
+    dataFileMtime = st.mtime.toISOString();
+  } catch {
+    dataFileMtime = null;
+  }
 
   return {
     totalTracked: getAllTrackedCalls().length,
+    dataFileMtime,
     windowMode: bounds.mode,
     windowLabel: rangeLabel,
     deskCallsInWindow: inWindow.total,
@@ -943,7 +958,8 @@ async function getDigestLiveDiagnostics(kind, opts = {}) {
     rolling7dLeaderboardRows: rolling7.length,
     allTimeLeaderboardRows: allTimeLb.length,
     newestDeskCallLabel,
-    daysSinceNewest
+    daysSinceNewest,
+    ...tsDiag
   };
 }
 

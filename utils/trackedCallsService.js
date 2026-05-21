@@ -159,17 +159,30 @@ function isCallVisibleOnDashboard(call) {
   return call && call.hiddenFromDashboard !== true;
 }
 
+function deskActivityMs(call) {
+  const fields = [
+    call?.lastUpdatedAt,
+    call?.approvalRequestedAt,
+    call?.firstCalledAt,
+    call?.calledAt,
+    call?.createdAt
+  ];
+  let best = 0;
+  for (const raw of fields) {
+    if (raw == null || raw === '') continue;
+    const ms = new Date(raw).getTime();
+    if (Number.isFinite(ms) && ms > best) best = ms;
+  }
+  return best;
+}
+
 function getRecentBotCalls(limit = 10) {
   const tracked = getAllTrackedCalls();
 
   return tracked
     .filter(call => call.callSourceType === 'bot_call')
     .filter(isCallVisibleOnDashboard)
-    .sort((a, b) => {
-      const aTime = new Date(a.calledAt || a.createdAt || 0).getTime();
-      const bTime = new Date(b.calledAt || b.createdAt || 0).getTime();
-      return bTime - aTime;
-    })
+    .sort((a, b) => deskActivityMs(b) - deskActivityMs(a))
     .slice(0, limit);
 }
 
@@ -1123,7 +1136,10 @@ function excludeTrackedBotCallsFromStats(resetMeta = {}) {
  * =========================
  */
 
+const trackedCallsFilePathExport = trackedCallsFilePath;
+
 module.exports = {
+  trackedCallsFilePath: trackedCallsFilePathExport,
   initTrackedCallsStore,
   loadTrackedCalls,
   saveTrackedCalls,

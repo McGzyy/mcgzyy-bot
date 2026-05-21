@@ -3549,6 +3549,36 @@ if (lowerContent === '!scanner off') {
         return;
       }
 
+      if (cmd === '!digestaudit') {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+        try {
+          const { initUserProfilesStore } = require('./utils/userProfileService');
+          const { initTrackedCallsStore, trackedCallsFilePath } = require('./utils/trackedCallsService');
+          const { getDeskTimestampDiagnostics } = require('./utils/callerStatsService');
+          const { getDigestLiveDiagnostics } = require('./utils/xLeaderboardDigest');
+          await initUserProfilesStore();
+          await initTrackedCallsStore();
+          const d = getDeskTimestampDiagnostics();
+          const w = await getDigestLiveDiagnostics('weekly', { useRollingWindow: true });
+          await replyText(
+            message,
+            `**Digest data audit**\n` +
+              `File: \`${trackedCallsFilePath}\`\n` +
+              `Modified: **${w.dataFileMtime || 'unknown'}**\n` +
+              `Rows: **${d.totalRows}** (${d.validDeskRows} valid desk)\n` +
+              `Last 7d — activity: **${d.deskActivityLast7d}** · new prints: **${d.firstPrintLast7d}** · lastUpdated: **${d.lastUpdatedLast7d}**\n` +
+              `Last 30d — activity: **${d.deskActivityLast30d}** · new prints: **${d.firstPrintLast30d}**\n` +
+              `Rolling 7d digest window: **${w.deskCallsInWindow}** desk calls\n` +
+              `\`!callerboard\` is **all-time**; digests only count rows in the time window above.`
+          );
+        } catch (e) {
+          await replyText(message, `❌ digestaudit failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        return;
+      }
+
       if (cmd === '!testdailydigest' || cmd === '!test7ddigest' || cmd === '!testmonthlydigest') {
         if (!isBotOwnerDiscordId(message.author.id)) {
           return message.reply('❌ You do not have permission to use this command.');
@@ -3605,9 +3635,13 @@ if (lowerContent === '!scanner off') {
               (diag.deskCallsInWindow === 0
                 ? ` · \`!callerboard\` all-time: **${diag.allTimeLeaderboardRows}** callers`
                 : '');
+            if (diag.deskCallsInWindow === 0 && !useAllTime) {
+              statsLine +=
+                `\n📊 Desk rows (7d): **${diag.deskActivityLast7d}** by activity time · **${diag.firstPrintLast7d}** new prints · file mtime \`${diag.dataFileMtime || '?'}\``;
+            }
             if (diag.deskCallsInWindow === 0 && diag.newestDeskCallLabel && !useAllTime) {
               statsLine +=
-                `\n⚠️ Newest desk call: **${diag.newestDeskCallLabel}** (**${diag.daysSinceNewest}d** ago) — nothing recent in \`trackedCalls.json\`. Use \`alltime\` to preview a filled card, or track new calls.`;
+                `\n⚠️ Newest desk activity: **${diag.newestDeskCallLabel}** (**${diag.daysSinceNewest}d** ago). If mtime is old, the bot may not be saving \`data/trackedCalls.json\` (check pm2 cwd/logs).`;
             }
           }
 

@@ -38,11 +38,41 @@ function isValid(call) {
   return Number.isFinite(x) && x > 0 && x <= MAX_VALID_X;
 }
 
-function getCallTimestampMs(call) {
+/**
+ * When the row was first attributed (new desk print).
+ */
+function getFirstCallTimestampMs(call) {
   const raw = call?.firstCalledAt ?? call?.calledAt ?? call?.createdAt;
   if (raw == null || raw === '') return null;
   const ms = new Date(raw).getTime();
   return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Latest desk activity on a row (monitor ticks, approvals, new call).
+ * Digest windows use this — not only firstCalledAt (old CAs stay active for weeks).
+ */
+function getDeskActivityTimestampMs(call) {
+  const fields = [
+    call?.lastUpdatedAt,
+    call?.approvalRequestedAt,
+    call?.firstCalledAt,
+    call?.calledAt,
+    call?.createdAt
+  ];
+  let best = null;
+  for (const raw of fields) {
+    if (raw == null || raw === '') continue;
+    const ms = new Date(raw).getTime();
+    if (!Number.isFinite(ms)) continue;
+    if (best == null || ms > best) best = ms;
+  }
+  return best;
+}
+
+/** Default time axis for stats windows (activity, not first print only). */
+function getCallTimestampMs(call) {
+  return getDeskActivityTimestampMs(call);
 }
 
 function isWithinTimeframeDays(call, days) {
@@ -991,11 +1021,51 @@ function getNewestQualifyingDeskCallMs() {
   for (const call of getAllTrackedCalls()) {
     if (!isHumanUserCall(call) && !isBotCall(call)) continue;
     if (!isValid(call)) continue;
-    const ms = getCallTimestampMs(call);
+    const ms = getDeskActivityTimestampMs(call);
     if (ms == null) continue;
     if (newest == null || ms > newest) newest = ms;
   }
   return newest;
+}
+
+/**
+ * Owner diagnostics — compare first-print vs activity timestamps and data file age.
+ */
+function getDeskTimestampDiagnostics(anchor = new Date()) {
+  const all = getAllTrackedCalls();
+  const cut7 = anchor.getTime() - 7 * 86400000;
+  const cut30 = anchor.getTime() - 30 * 86400000;
+  let first7 = 0;
+  let first30 = 0;
+  let activity7 = 0;
+  let activity30 = 0;
+  let updated7 = 0;
+  let validDesk = 0;
+
+  for (const call of all) {
+    const isDesk =
+      (isHumanUserCall(call) || isBotCall(call)) && isValid(call);
+    if (!isDesk) continue;
+    validDesk += 1;
+    const f = getFirstCallTimestampMs(call);
+    const a = getDeskActivityTimestampMs(call);
+    const u = call?.lastUpdatedAt ? new Date(call.lastUpdatedAt).getTime() : null;
+    if (f != null && f >= cut7) first7 += 1;
+    if (f != null && f >= cut30) first30 += 1;
+    if (a != null && a >= cut7) activity7 += 1;
+    if (a != null && a >= cut30) activity30 += 1;
+    if (u != null && Number.isFinite(u) && u >= cut7) updated7 += 1;
+  }
+
+  return {
+    totalRows: all.length,
+    validDeskRows: validDesk,
+    firstPrintLast7d: first7,
+    firstPrintLast30d: first30,
+    deskActivityLast7d: activity7,
+    deskActivityLast30d: activity30,
+    lastUpdatedLast7d: updated7
+  };
 }
 
 /**
@@ -1157,6 +1227,9 @@ module.exports = {
   getDigestWindowBounds,
   getDigestAllTimeBounds,
   getNewestQualifyingDeskCallMs,
+  getFirstCallTimestampMs,
+  getDeskActivityTimestampMs,
+  getDeskTimestampDiagnostics,
   countQualifyingDeskCallsInBounds,
   getDailyUtcDeskSnapshot,
   startOfUtcCalendarDay

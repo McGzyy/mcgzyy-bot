@@ -389,7 +389,7 @@ async function createPost(text, replyToId = null, mediaPngBuffer = null, options
       text: postText,
       raw: response.data
     };
-    finalizeAudit(true, Boolean(mediaId && body.media?.media_ids?.length), ok);
+    finalizeAudit(true, Boolean(mediaIds.length && body.media?.media_ids?.length), ok);
     return ok;
   } catch (error) {
     console.error('[XPoster] Post failed:', error?.response?.data || error.message);

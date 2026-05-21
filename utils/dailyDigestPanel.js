@@ -211,9 +211,12 @@ function buildSampleDailyDigestData(anchor = new Date()) {
  */
 function buildLiveDailyDigestData(anchor = new Date()) {
   const { yesterday, prior, yesterdayLabel } = getUtcYesterdayAndPriorDeskAvgs(anchor);
-  const rows = getCallerLeaderboardInTimeframe(1, 4);
-  const bestHuman = getBestCallInTimeframe(1);
-  const bestBot = getBestBotCallInTimeframe(1);
+  const dayEnd = startOfUtcCalendarDay(anchor);
+  const dayStart = new Date(dayEnd);
+  dayStart.setUTCDate(dayStart.getUTCDate() - 1);
+  const rows = getCallerLeaderboardInUtcWeekBounds(dayStart, dayEnd, 5);
+  const bestHuman = getBestCallInUtcWeekBounds(dayStart, dayEnd);
+  const bestBot = getBestBotCallInUtcWeekBounds(dayStart, dayEnd);
 
   return {
     dateLabel: `UTC ${yesterdayLabel}`,
@@ -505,9 +508,9 @@ function buildLiveMonthlyDigestData(anchor = new Date()) {
   const { curStart, endExclusive, priorStart, priorEnd } = getUtcRolling30AndPrior30Bounds(anchor);
   const cur = getDeskAvgAthXPairForUtcRange(curStart, endExclusive);
   const prior = getDeskAvgAthXPairForUtcRange(priorStart, priorEnd);
-  const rows = getCallerLeaderboardInTimeframe(30, 8);
-  const bestHuman = getBestCallInTimeframe(30);
-  const bestBot = getBestBotCallInTimeframe(30);
+  const rows = getCallerLeaderboardInUtcWeekBounds(curStart, endExclusive, 8);
+  const bestHuman = getBestCallInUtcWeekBounds(curStart, endExclusive);
+  const bestBot = getBestBotCallInUtcWeekBounds(curStart, endExclusive);
 
   return {
     dateLabel: formatUtcDateRangeLabel(curStart, endExclusive),

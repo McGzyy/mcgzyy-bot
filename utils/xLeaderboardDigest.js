@@ -21,15 +21,18 @@ const {
   getBestCallInUtcWeekBounds,
   getBestBotCallInUtcWeekBounds,
   getTopUserCallsInUtcWeekBounds,
-  getTopBotCallsInUtcWeekBounds
+  getTopBotCallsInUtcWeekBounds,
+  getPreviousCompletedUtcWeekBounds,
+  startOfUtcCalendarDay
 } = require('./callerStatsService');
+const { getAllTrackedCalls, initTrackedCallsStore } = require('./trackedCallsService');
+const { initUserProfilesStore } = require('./userProfileService');
 const {
   xTerminalSectionGap,
   xTerminalFooterLine,
   fitTweet,
   fitTweetWholeLines,
   resolveWeeklyStatsTweetMaxChars,
-  buildTerminalDigestCaption,
   resolveVerifiedXHandle
 } = require('./buildXPostText');
 
@@ -138,17 +141,153 @@ function buildLeaderboardDigestBody(p) {
 }
 
 /**
+ * @param {Date} startInclusive
+ * @param {Date} endExclusive
+ */
+function formatUtcRangeLabelForPost(startInclusive, endExclusive) {
+  const lastDay = new Date(endExclusive.getTime() - 86400000);
+  const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const sm = mo[startInclusive.getUTCMonth()];
+  const sd = startInclusive.getUTCDate();
+  const em = mo[lastDay.getUTCMonth()];
+  const ed = lastDay.getUTCDate();
+  const y = startInclusive.getUTCFullYear();
+  if (startInclusive.getUTCMonth() === lastDay.getUTCMonth() && y === lastDay.getUTCFullYear()) {
+    return `${sm} ${sd}–${ed}, ${y}`;
+  }
+  return `${sm} ${sd} – ${em} ${ed}, ${y}`;
+}
+
+/**
+ * Post text aligned with the weekly digest card (previous completed UTC week).
+ * @param {{ windowLabel?: string, topN?: number }} [p]
+ */
+function buildWeeklyDigestPostBody(p = {}) {
+  const maxChars = resolveWeeklyStatsTweetMaxChars();
+  const topN = Number(p.topN) > 0 ? Number(p.topN) : 5;
+  const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(new Date());
+  const rangeLabel = formatUtcRangeLabelForPost(startInclusive, endExclusive);
+  const rows = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, topN);
+  const bestHuman = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
+  const bestBot = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
+  const gap = weeklySectionGap();
+  const footer = xTerminalFooterLine();
+  const head = `🚀 ${String(p.windowLabel || '7d snapshot').trim()} · ${rangeLabel}`;
+
+  const deskLines = [`💎 Caller leaderboard (top ${topN} by avg ATH ×)`, ''];
+  if (rows.length) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i];
+      deskLines.push(
+        `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
+      );
+    }
+  } else {
+    deskLines.push('(quiet week on the member desk)');
+  }
+
+  const hiLines = ['🔥 Highlights', ''];
+  let anyHi = false;
+  if (bestHuman) {
+    const h = formatCallOneLiner(bestHuman);
+    if (h) {
+      hiLines.push(`${BUL}Best member call — ${h}`);
+      anyHi = true;
+    }
+  }
+  if (bestBot) {
+    const b = formatCallOneLiner(bestBot);
+    if (b) {
+      hiLines.push(`${BUL}Best McGBot call — ${b}`);
+      anyHi = true;
+    }
+  }
+  if (!anyHi) {
+    hiLines.push('(none)');
+  }
+
+  const chunks = [head, deskLines.join('\n'), hiLines.join('\n')];
+  if (footer) chunks.push(footer);
+  const raw = chunks.filter(Boolean).join(gap).trim();
+  if (raw.length <= maxChars) return raw;
+  return maxChars >= 2000 ? fitTweet(raw, maxChars) : fitTweetWholeLines(raw, maxChars);
+}
+
+/**
+ * Post text aligned with the daily digest card (yesterday UTC).
+ * @param {{ windowLabel?: string, topN?: number }} [p]
+ */
+function buildDailyDigestPostBody(p = {}) {
+  const maxChars = resolveWeeklyStatsTweetMaxChars();
+  const topN = Number(p.topN) > 0 ? Number(p.topN) : 4;
+  const anchor = new Date();
+  const dayEnd = startOfUtcCalendarDay(anchor);
+  const dayStart = new Date(dayEnd);
+  dayStart.setUTCDate(dayStart.getUTCDate() - 1);
+  const rangeLabel = formatUtcRangeLabelForPost(dayStart, dayEnd);
+  const rows = getCallerLeaderboardInUtcWeekBounds(dayStart, dayEnd, topN);
+  const bestHuman = getBestCallInUtcWeekBounds(dayStart, dayEnd);
+  const bestBot = getBestBotCallInUtcWeekBounds(dayStart, dayEnd);
+  const gap = weeklySectionGap();
+  const footer = xTerminalFooterLine();
+  const head = `🚀 ${String(p.windowLabel || 'Daily snapshot').trim()} · ${rangeLabel}`;
+
+  const deskLines = [`💎 Caller leaderboard (top ${topN} by avg ATH ×)`, ''];
+  if (rows.length) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i];
+      deskLines.push(
+        `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
+      );
+    }
+  } else {
+    deskLines.push('(quiet day on the member desk)');
+  }
+
+  const hiLines = ['🔥 Highlights', ''];
+  let anyHi = false;
+  if (bestHuman) {
+    const h = formatCallOneLiner(bestHuman);
+    if (h) {
+      hiLines.push(`${BUL}Best member call — ${h}`);
+      anyHi = true;
+    }
+  }
+  if (bestBot) {
+    const b = formatCallOneLiner(bestBot);
+    if (b) {
+      hiLines.push(`${BUL}Best McGBot call — ${b}`);
+      anyHi = true;
+    }
+  }
+  if (!anyHi) {
+    hiLines.push('(none)');
+  }
+
+  const chunks = [head, deskLines.join('\n'), hiLines.join('\n')];
+  if (footer) chunks.push(footer);
+  const raw = chunks.filter(Boolean).join(gap).trim();
+  if (raw.length <= maxChars) return raw;
+  return maxChars >= 2000 ? fitTweet(raw, maxChars) : fitTweetWholeLines(raw, maxChars);
+}
+
+/**
  * Monthly digest post text: headline + top 3 podium lines (@X when verified).
  * @param {{ windowLabel: string, days: number, topN?: number }} p
  */
 async function buildMonthlyDigestPostBody(p) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
-  const days = Number(p.days) > 0 ? Number(p.days) : 30;
-  const rows = getCallerLeaderboardInTimeframe(days, 3);
+  const topN = Number(p.topN) > 0 ? Number(p.topN) : 3;
+  const anchor = new Date();
+  const monthEnd = startOfUtcCalendarDay(anchor);
+  const monthStart = new Date(monthEnd);
+  monthStart.setUTCDate(monthStart.getUTCDate() - 30);
+  const rangeLabel = formatUtcRangeLabelForPost(monthStart, monthEnd);
+  const rows = getCallerLeaderboardInUtcWeekBounds(monthStart, monthEnd, topN);
   const gap = weeklySectionGap();
   const footer = xTerminalFooterLine();
   const rawLabel = String(p.windowLabel || '').trim();
-  const head = `🚀 ${rawLabel}`;
+  const head = `🚀 ${rawLabel} · ${rangeLabel}`;
 
   /** @type {string[]} */
   const podiumLines = [];
@@ -171,8 +310,8 @@ async function buildMonthlyDigestPostBody(p) {
     chunks.push('(quiet month on the member desk)');
   }
 
-  const bestHuman = getBestCallInTimeframe(days);
-  const bestBot = getBestBotCallInTimeframe(days);
+  const bestHuman = getBestCallInUtcWeekBounds(monthStart, monthEnd);
+  const bestBot = getBestBotCallInUtcWeekBounds(monthStart, monthEnd);
   const hiLines = ['🔥 Highlights', ''];
   let anyHi = false;
   if (bestHuman) {
@@ -416,6 +555,11 @@ async function markDigestPosted(field, key) {
  * @param {{ windowLabel: string, days: number, topN: number }} p
  * @param {{ attachDailyDualPanel?: boolean, attachDailyDigestCard?: boolean, attachWeeklyDigestCard?: boolean, attachWeeklyAvgXChart?: boolean, attachMonthlyDigestCard?: boolean, attachPast30DaysChart?: boolean, sampleData?: boolean }} [options]
  */
+async function ensureDigestDataStores() {
+  await initUserProfilesStore();
+  await initTrackedCallsStore();
+}
+
 async function postDigest(p, options = {}) {
   const { windowLabel, days, topN } = p;
   /** @type {Buffer[]} */
@@ -427,6 +571,12 @@ async function postDigest(p, options = {}) {
 
   const anchor = new Date();
   const sampleData = options.sampleData === true;
+
+  if (!sampleData) {
+    await ensureDigestDataStores();
+    const n = getAllTrackedCalls().length;
+    console.log(`[XLeaderboardDigest] live post — tracked calls loaded: ${n}`);
+  }
 
   try {
     if (useTerminalDailyCard) {
@@ -457,9 +607,9 @@ async function postDigest(p, options = {}) {
 
   let text;
   if (useTerminalDailyCard) {
-    text = buildTerminalDigestCaption('daily', windowLabel);
+    text = buildDailyDigestPostBody({ windowLabel, topN: Number(topN) > 0 ? Number(topN) : 4 });
   } else if (useTerminalWeeklyCard) {
-    text = buildTerminalDigestCaption('weekly', windowLabel);
+    text = buildWeeklyDigestPostBody({ windowLabel, topN: Number(topN) > 0 ? Number(topN) : 5 });
   } else if (useTerminalMonthlyCard) {
     text = await buildMonthlyDigestPostBody({
       windowLabel,
@@ -705,6 +855,8 @@ async function postLeaderboardDigestToX(body, opts = {}) {
 module.exports = {
   startXLeaderboardDigestScheduler,
   buildLeaderboardDigestBody,
+  buildWeeklyDigestPostBody,
+  buildDailyDigestPostBody,
   buildMonthlyDigestPostBody,
   buildWeeklyStatsSnapshotBody,
   tickWeeklyStatsSnapshot,

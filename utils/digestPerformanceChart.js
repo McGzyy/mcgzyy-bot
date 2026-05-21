@@ -12,6 +12,8 @@ const WIDTH = 920;
 const HEIGHT = 480;
 /** Pure black canvas — matches X / terminal hero look. */
 const BG = '#000000';
+/** Card embed: near-black to blend with digest panel gradient. */
+const CARD_EMBED_BG = '#05050c';
 /** Readable on black (zinc-200-ish). */
 const TICK = 'rgba(228, 228, 231, 0.88)';
 const GRID = 'rgba(255, 255, 255, 0.11)';
@@ -38,6 +40,17 @@ function digestChartCallback(ChartJS) {
   if (ChartJS.registerables) {
     ChartJS.register(...ChartJS.registerables);
   }
+}
+
+/**
+ * @param {{ forCardEmbed?: boolean, chartBackground?: string }} opts
+ */
+function digestChartBackground(opts = {}) {
+  if (opts.forCardEmbed === true) {
+    const custom = opts.chartBackground;
+    return typeof custom === 'string' && custom.trim() ? custom.trim() : CARD_EMBED_BG;
+  }
+  return BG;
 }
 
 const chartCanvas = new ChartJSNodeCanvas({
@@ -186,13 +199,14 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date(), opts = {}) {
   const yScale = embed ? digestYScaleFromSeries(memberPts, botPts) : { min: DIGEST_Y_AXIS_MIN, max: null };
   const lineStyle = digestLineDatasetStyle(embed);
 
+  const embedBg = digestChartBackground(opts);
   const canvas =
-    chartW === WIDTH && chartH === HEIGHT
+    chartW === WIDTH && chartH === HEIGHT && !embed
       ? chartCanvas
       : new ChartJSNodeCanvas({
           width: chartW,
           height: chartH,
-          backgroundColour: BG,
+          backgroundColour: embed ? embedBg : BG,
           chartCallback: digestChartCallback
         });
 
@@ -385,10 +399,11 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30, opts = 
   const chartW = Number(opts.width) > 0 ? Number(opts.width) : WIDTH_30D;
   const chartH = Number(opts.height) > 0 ? Number(opts.height) : HEIGHT;
 
+  const embedBg = digestChartBackground(opts);
   const canvas30 = new ChartJSNodeCanvas({
     width: chartW,
     height: chartH,
-    backgroundColour: BG,
+    backgroundColour: embed ? embedBg : BG,
     chartCallback: digestChartCallback
   });
 

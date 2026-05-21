@@ -55,10 +55,17 @@ const MEMBER_AVG_GOOD_AT = 2;
 /** Subtle section separators (editorial, not dashboard panels). */
 const SECTION_LINE = 'rgba(255,255,255,0.16)';
 const SECTION_LINE_SOFT = 'rgba(255,255,255,0.09)';
-const CHART_BAND_FULL = 272;
+/** Bottom chart band height on full 1200×820 cards (desk sits above this). */
+const CHART_BAND_FULL = 228;
 const CARD_CHART_W = W - PAD * 2;
-const CARD_CHART_H = 248;
-const DIGEST_CHART_OPTS = { forCardEmbed: true, width: CARD_CHART_W, height: CARD_CHART_H };
+const CARD_CHART_H = 200;
+const DIGEST_CHART_OPTS = {
+  forCardEmbed: true,
+  width: CARD_CHART_W,
+  height: CARD_CHART_H,
+  chartBackground: '#05050c'
+};
+const DIGEST_FOOTER_H = 36;
 const CHART_SLIDE_W = W - PAD * 2;
 const CHART_SLIDE_H = 560;
 
@@ -406,7 +413,7 @@ const WEEKLY_CARD_CFG = {
   quietMessage: 'Quiet week — no qualifying desk calls',
   fmtPeriodOverPeriod: fmtWeekOverWeek,
   maxLeaderboardRows: 5,
-  displayLeaderboardRows: 5
+  displayLeaderboardRows: 4
 };
 
 const MONTHLY_CARD_CFG = {
@@ -416,7 +423,7 @@ const MONTHLY_CARD_CFG = {
   quietMessage: 'Quiet month — no qualifying desk calls',
   fmtPeriodOverPeriod: fmt30dOverPrior30d,
   maxLeaderboardRows: 8,
-  displayLeaderboardRows: 5
+  displayLeaderboardRows: 4
 };
 
 function metricGrad(isGood) {
@@ -739,9 +746,15 @@ function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
 function drawChartBand(ctx, bandY, bandH, chartImage, opts = {}) {
   const x = PAD;
   const w = W - PAD * 2;
-  const padY = opts.tight ? 6 : 10;
+  const padY = opts.tight ? 6 : 8;
   const lightFade = opts.lightFade !== false;
   drawHairlineH(ctx, bandY, x, x + w, SECTION_LINE);
+
+  const panelGrad = ctx.createLinearGradient(x, bandY, x, bandY + bandH);
+  panelGrad.addColorStop(0, 'rgba(5, 5, 12, 0.98)');
+  panelGrad.addColorStop(1, 'rgba(2, 2, 8, 0.98)');
+  ctx.fillStyle = panelGrad;
+  ctx.fillRect(x, bandY, w, bandH);
 
   ctx.save();
   ctx.globalAlpha = 0.99;
@@ -860,10 +873,15 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
     spreadRight - spreadX,
     '500 13px system-ui, "Segoe UI", sans-serif'
   );
-  ctx.fillStyle = 'rgba(0,0,2,0.72)';
   const footW = ctx.measureText(spreadFoot).width + 14;
-  roundRectPath(ctx, spreadX - 4, heroY + heroH - footH - 2, footW, footH - 2, 6);
+  const footBoxY = heroY + heroH - footH - 2;
+  const footBoxH = footH - 2;
+  roundRectPath(ctx, spreadX - 4, footBoxY, footW, footBoxH, 6);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
   ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
   ctx.fillStyle = DIM;
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
   ctx.textBaseline = 'alphabetic';
@@ -879,6 +897,20 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
  * @param {number} mainY
  * @param {number} contentBottom
  */
+/**
+ * Vertical bands for full digest cards (header → hero → desk → chart → footer).
+ * @param {boolean} hasChart
+ */
+function computeDigestCardLayout(hasChart) {
+  const chartBandH = hasChart ? CHART_BAND_FULL : 0;
+  const heroY = PAD + 92;
+  const heroH = hasChart ? 148 : 168;
+  const deskTop = heroY + heroH + 18;
+  const deskBottom = H - PAD - DIGEST_FOOTER_H - chartBandH - 16;
+  const chartTop = deskBottom + 10;
+  return { chartBandH, heroY, heroH, deskTop, deskBottom, chartTop };
+}
+
 function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom) {
   const botAccent = channelAccent('bot');
   const maxRows = Number(cfg.maxLeaderboardRows) > 0 ? Number(cfg.maxLeaderboardRows) : 4;
@@ -889,7 +921,7 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
   const lbW = Math.floor((W - PAD * 2 - colGap) * 0.54);
   const sideX = PAD + lbW + colGap;
   const sideW = W - PAD - sideX;
-  const mainH = contentBottom - mainY;
+  const mainH = Math.max(0, contentBottom - mainY);
 
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
@@ -976,20 +1008,17 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
 
   const hiHuman = formatHighlight(data.bestHuman);
   const hiBot = formatHighlight(data.bestBot);
-  const stripGap = 10;
-  const stripH = Math.floor((mainH - 24 - stripGap) / 2);
-  drawBestCallStrip(ctx, sideX, mainY + 28, sideW, stripH, 'Best member call', hiHuman, accent, null);
-  drawBestCallStrip(
-    ctx,
-    sideX,
-    mainY + 28 + stripH + stripGap,
-    sideW,
-    stripH,
-    'Best McGBot call',
-    hiBot,
-    botAccent,
-    botAvatar
-  );
+  const stripGap = 8;
+  const hiTop = mainY + 28;
+  const hiBudget = Math.max(0, contentBottom - hiTop - 6);
+  const stripH = Math.max(32, Math.min(52, Math.floor((hiBudget - stripGap) / 2)));
+  const strip2Y = hiTop + stripH + stripGap;
+  if (strip2Y + stripH <= contentBottom) {
+    drawBestCallStrip(ctx, sideX, hiTop, sideW, stripH, 'Best member call', hiHuman, accent, null);
+    drawBestCallStrip(ctx, sideX, strip2Y, sideW, stripH, 'Best McGBot call', hiBot, botAccent, botAvatar);
+  } else if (hiBudget >= 40) {
+    drawBestCallStrip(ctx, sideX, hiTop, sideW, hiBudget, 'Best member call', hiHuman, accent, null);
+  }
 }
 
 /**
@@ -1220,24 +1249,24 @@ function renderTerminalDigestCard(
     return;
   }
 
-  const footerH = 36;
-  const chartBandH = chartImage ? CHART_BAND_FULL : 0;
-  const contentBottom = H - PAD - footerH - chartBandH;
+  const layout = computeDigestCardLayout(Boolean(chartImage));
 
   drawDigestHeader(ctx, data, cfg, accent);
   drawSectionRule(ctx, PAD + 78);
 
-  const heroY = PAD + 96;
-  const heroH = 172;
-  paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH);
+  paintDigestHeroMetrics(ctx, data, cfg, accent, layout.heroY, layout.heroH);
 
-  const mainY = heroY + heroH + 22;
-  drawSectionRule(ctx, mainY - 10);
-  paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom);
+  drawSectionRule(ctx, layout.deskTop - 10);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(PAD, layout.deskTop, W - PAD * 2, layout.deskBottom - layout.deskTop);
+  ctx.clip();
+  paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, layout.deskTop, layout.deskBottom);
+  ctx.restore();
 
-  if (chartImage && chartBandH > 0) {
-    drawSectionRule(ctx, contentBottom + 6);
-    drawChartBand(ctx, contentBottom + 12, chartBandH - 12, chartImage, { lightFade: true });
+  if (chartImage && layout.chartBandH > 0) {
+    drawSectionRule(ctx, layout.chartTop - 6);
+    drawChartBand(ctx, layout.chartTop, layout.chartBandH, chartImage, { lightFade: true });
   }
 
   drawDigestFooter(ctx);

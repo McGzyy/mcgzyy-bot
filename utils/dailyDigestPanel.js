@@ -55,7 +55,10 @@ const MEMBER_AVG_GOOD_AT = 2;
 /** Subtle section separators (editorial, not dashboard panels). */
 const SECTION_LINE = 'rgba(255,255,255,0.16)';
 const SECTION_LINE_SOFT = 'rgba(255,255,255,0.09)';
-const CHART_BAND_FULL = 268;
+const CHART_BAND_FULL = 272;
+const CARD_CHART_W = W - PAD * 2;
+const CARD_CHART_H = 248;
+const DIGEST_CHART_OPTS = { forCardEmbed: true, width: CARD_CHART_W, height: CARD_CHART_H };
 const CHART_SLIDE_W = W - PAD * 2;
 const CHART_SLIDE_H = 560;
 
@@ -672,9 +675,10 @@ function formatHighlight(call) {
 function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
   drawHairlineH(ctx, y + h, x, x + w, 'rgba(255,255,255,0.05)');
 
-  const av = avatar ? 44 : 0;
-  const innerRight = x + w - (avatar ? av + 20 : 12);
-  const innerLeft = x + 4;
+  const av = avatar ? 40 : 0;
+  const innerLeft = x + 8;
+  const innerRight = x + w - (avatar ? av + 14 : 8);
+  const multReserve = 118;
 
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
@@ -685,24 +689,24 @@ function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
   if (!hi) {
     ctx.fillStyle = DIM;
     ctx.font = '600 18px system-ui, "Segoe UI", sans-serif';
-    ctx.fillText('—', innerLeft, y + 36);
+    ctx.fillText('—', innerLeft, y + 40);
     return;
   }
 
-  const midY = y + h / 2 + 6;
-  const tickMaxW = innerRight - innerLeft - 120;
+  const tickMaxW = innerRight - innerLeft - multReserve;
+  const tickSize = fitFontSize(ctx, hi.ticker, tickMaxW, 30, 20, '700');
+  const tickBaseline = y + 38 + tickSize;
   ctx.fillStyle = TEXT;
-  const tickSize = fitFontSize(ctx, hi.ticker, tickMaxW, 34, 22, '700');
   ctx.font = `700 ${tickSize}px system-ui, "Segoe UI", sans-serif`;
-  ctx.textBaseline = 'middle';
-  ctx.fillText(hi.ticker, innerLeft, midY);
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(hi.ticker, innerLeft, tickBaseline);
 
-  const multSize = fitFontSize(ctx, hi.mult, 130, 52, 32, '800');
+  const multSize = fitFontSize(ctx, hi.mult, multReserve - 8, 48, 28, '800');
   drawGradientNumber(
     ctx,
     hi.mult,
     innerRight,
-    midY + multSize * 0.34,
+    tickBaseline,
     multSize,
     col.grad,
     col.primary,
@@ -710,8 +714,8 @@ function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
   );
 
   if (avatar) {
-    const ax = x + w - av - 12;
-    const ay = y + (h - av) / 2;
+    const ax = x + w - av - 10;
+    const ay = y + Math.max(12, (h - av) / 2);
     ctx.save();
     ctx.beginPath();
     ctx.arc(ax + av / 2, ay + av / 2, av / 2, 0, Math.PI * 2);
@@ -735,28 +739,48 @@ function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
 function drawChartBand(ctx, bandY, bandH, chartImage, opts = {}) {
   const x = PAD;
   const w = W - PAD * 2;
-  const padY = opts.tight ? 4 : 10;
-  const lightFade = opts.lightFade === true;
+  const padY = opts.tight ? 6 : 10;
+  const lightFade = opts.lightFade !== false;
   drawHairlineH(ctx, bandY, x, x + w, SECTION_LINE);
 
   ctx.save();
-  ctx.globalAlpha = 0.98;
-  ctx.drawImage(chartImage, x, bandY + padY, w, Math.max(40, bandH - padY * 2));
+  ctx.globalAlpha = 0.99;
+  ctx.drawImage(chartImage, x, bandY + padY, w, Math.max(48, bandH - padY * 2));
   ctx.restore();
 
   if (!lightFade) {
-    const fade = ctx.createLinearGradient(x, bandY, x, bandY + Math.min(56, bandH * 0.22));
-    fade.addColorStop(0, 'rgba(0,0,2,0.75)');
+    const fade = ctx.createLinearGradient(x, bandY, x, bandY + Math.min(40, bandH * 0.16));
+    fade.addColorStop(0, 'rgba(0,0,2,0.45)');
     fade.addColorStop(1, 'rgba(0,0,2,0)');
     ctx.fillStyle = fade;
-    ctx.fillRect(x, bandY, w, Math.min(56, bandH * 0.22));
+    ctx.fillRect(x, bandY, w, Math.min(40, bandH * 0.16));
   }
 
-  const fadeB = ctx.createLinearGradient(x, bandY + bandH - 36, x, bandY + bandH);
+  const fadeB = ctx.createLinearGradient(x, bandY + bandH - 28, x, bandY + bandH);
   fadeB.addColorStop(0, 'rgba(0,0,2,0)');
-  fadeB.addColorStop(1, 'rgba(0,0,2,0.55)');
+  fadeB.addColorStop(1, 'rgba(0,0,2,0.35)');
   ctx.fillStyle = fadeB;
-  ctx.fillRect(x, bandY + bandH - 36, w, 36);
+  ctx.fillRect(x, bandY + bandH - 28, w, 28);
+}
+
+/**
+ * Softer MG mark for digest cards — stays off hero copy on the right.
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {import('canvas').Image|null} mgImg
+ */
+function paintDigestMgWatermark(ctx, mgImg) {
+  if (!mgImg) return;
+  const markW = Math.min(480, W * 0.5);
+  const scale = markW / mgImg.width;
+  const markH = mgImg.height * scale;
+  const mx = W - markW - 24;
+  const my = PAD + 8;
+
+  ctx.save();
+  ctx.globalAlpha = 0.055;
+  ctx.globalCompositeOperation = 'screen';
+  ctx.drawImage(mgImg, mx, my, markW, markH);
+  ctx.restore();
 }
 
 /**
@@ -777,62 +801,73 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
   const memberHero = mOk ? `${Number(mY).toFixed(2)}×` : '—';
   const memberGood = !mOk ? null : Number(mY) >= MEMBER_AVG_GOOD_AT;
   const spreadGood = spread.memberAhead;
-  const splitX = PAD + Math.floor((W - PAD * 2) * 0.58);
+  const splitX = PAD + Math.floor((W - PAD * 2) * 0.56);
+  const labelH = 22;
+  const footH = 24;
+  const numZoneH = heroH - labelH - footH;
 
-  drawSoftGlow(ctx, PAD + 200, heroY + heroH * 0.45, 280, accent.soft);
+  drawSoftGlow(ctx, PAD + 180, heroY + heroH * 0.42, 240, accent.soft);
 
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = MUTED;
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText(cfg.memberSub, PAD, heroY + 4);
+  ctx.fillText(cfg.memberSub, PAD, heroY + 6);
 
-  const memberSize = fitFontSize(ctx, memberHero, splitX - PAD - 24, 120, 56, '800');
+  const memberSize = fitFontSize(ctx, memberHero, splitX - PAD - 28, numZoneH - 4, 52, '800');
+  const memberBaseline = heroY + labelH + memberSize;
   drawGradientNumber(
     ctx,
     memberHero,
     PAD,
-    heroY + 40 + memberSize,
+    memberBaseline,
     memberSize,
     metricGrad(memberGood),
     accent.primary,
     { shadowBlur: 16, glow: true, align: 'left' }
   );
 
-  ctx.fillStyle = periodFoot === '—' ? DIM : 'rgba(210, 210, 220, 0.88)';
-  ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText(periodFoot, PAD, heroY + heroH - 28);
+  ctx.fillStyle = periodFoot === '—' ? DIM : 'rgba(210, 210, 220, 0.9)';
+  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(periodFoot, PAD, heroY + heroH - 10);
 
-  drawHairlineV(ctx, splitX, heroY + 8, heroY + heroH - 8, SECTION_LINE);
+  drawHairlineV(ctx, splitX, heroY + 10, heroY + heroH - 10, SECTION_LINE);
 
-  const spreadX = splitX + 36;
-  const spreadRight = W - PAD;
+  const spreadX = splitX + 32;
+  const spreadRight = W - PAD - 8;
+  ctx.textBaseline = 'top';
   ctx.fillStyle = MUTED;
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText('Member vs McGBot', spreadX, heroY + 4);
+  ctx.fillText('Member vs McGBot', spreadX, heroY + 6);
 
-  const spreadSize = fitFontSize(ctx, spread.line, spreadRight - spreadX, 80, 44, '800');
+  const spreadSize = fitFontSize(ctx, spread.line, spreadRight - spreadX, numZoneH - 4, 44, '800');
+  const spreadBaseline = heroY + labelH + spreadSize;
   drawGradientNumber(
     ctx,
     spread.line,
     spreadRight,
-    heroY + 44 + spreadSize,
+    spreadBaseline,
     spreadSize,
     metricGrad(spreadGood),
     accent.primary,
     { shadowBlur: 12, glow: true, align: 'right' }
   );
 
-  ctx.textAlign = 'left';
-  ctx.fillStyle = DIM;
-  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
   const spreadFoot = truncateToWidth(
     ctx,
     spread.foot,
     spreadRight - spreadX,
     '500 13px system-ui, "Segoe UI", sans-serif'
   );
-  ctx.fillText(spreadFoot, spreadX, heroY + heroH - 28);
+  ctx.fillStyle = 'rgba(0,0,2,0.72)';
+  const footW = ctx.measureText(spreadFoot).width + 14;
+  roundRectPath(ctx, spreadX - 4, heroY + heroH - footH - 2, footW, footH - 2, 6);
+  ctx.fill();
+  ctx.fillStyle = DIM;
+  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(spreadFoot, spreadX, heroY + heroH - 10);
 }
 
 /**
@@ -869,9 +904,11 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
   const visibleCount = Math.min(displayCap, rows.length);
   const overflow = rows.length - visibleCount;
   const rowStart = mainY + 44;
-  const rowH = Math.min(40, Math.floor((mainH - 52) / Math.max(visibleCount || 1, 1)));
-  const multX = PAD + lbW - 8;
-  const callsX = multX - 96;
+  const rowH = Math.min(44, Math.max(38, Math.floor((mainH - 52) / Math.max(visibleCount || 1, 1))));
+  const lbRight = PAD + lbW;
+  const multX = lbRight - 6;
+  const callsRight = lbRight - 92;
+  const nameMaxW = callsRight - PAD - 44;
 
   if (visibleCount) {
     for (let i = 0; i < visibleCount; i += 1) {
@@ -879,7 +916,7 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
       const ry = rowStart + i * rowH;
       const rankCy = ry + rowH / 2;
       if (i > 0) {
-        drawHairlineH(ctx, ry, PAD, PAD + lbW - 8, SECTION_LINE_SOFT);
+        drawHairlineH(ctx, ry, PAD, lbRight - 8, SECTION_LINE_SOFT);
       }
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
@@ -891,19 +928,22 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
       const name = truncateToWidth(
         ctx,
         r.username,
-        callsX - PAD - 36,
+        nameMaxW,
         `600 ${i === 0 ? 17 : 15}px system-ui, "Segoe UI", sans-serif`
       );
       ctx.fillText(name, PAD + 32, rankCy);
       const multStr = `${Number(r.avgX).toFixed(2)}×`;
       ctx.textAlign = 'right';
+      ctx.fillStyle = DIM;
+      ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
+      ctx.fillText(`${r.totalCalls} calls`, callsRight, rankCy);
       if (i === 0) {
-        const multSize = fitFontSize(ctx, multStr, 100, 22, 16, '800');
+        const multSize = fitFontSize(ctx, multStr, 88, 22, 16, '800');
         drawGradientNumber(
           ctx,
           multStr,
           multX,
-          rankCy + multSize * 0.32,
+          rankCy + multSize * 0.34,
           multSize,
           accent.grad,
           accent.primary,
@@ -914,9 +954,6 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
         ctx.font = '600 15px system-ui, "Segoe UI", sans-serif';
         ctx.fillText(multStr, multX, rankCy);
       }
-      ctx.fillStyle = DIM;
-      ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
-      ctx.fillText(`${r.totalCalls} calls`, callsX, rankCy);
     }
     if (overflow > 0) {
       ctx.textAlign = 'left';
@@ -1191,16 +1228,16 @@ function renderTerminalDigestCard(
   drawSectionRule(ctx, PAD + 78);
 
   const heroY = PAD + 96;
-  const heroH = 168;
+  const heroH = 172;
   paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH);
 
-  const mainY = heroY + heroH + 24;
+  const mainY = heroY + heroH + 22;
   drawSectionRule(ctx, mainY - 10);
   paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom);
 
   if (chartImage && chartBandH > 0) {
     drawSectionRule(ctx, contentBottom + 6);
-    drawChartBand(ctx, contentBottom + 14, chartBandH - 14, chartImage);
+    drawChartBand(ctx, contentBottom + 12, chartBandH - 12, chartImage, { lightFade: true });
   }
 
   drawDigestFooter(ctx);
@@ -1219,7 +1256,7 @@ async function renderDigestSlideBuffer(data, cfg, accent, botAvatar, chartImage,
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   paintCardBackground(ctx, W, H, accent.soft, accent.primary);
-  paintMgWatermark(ctx, mgImg, W, H);
+  paintDigestMgWatermark(ctx, mgImg);
   renderTerminalDigestCard(ctx, data, cfg, accent, botAvatar, chartImage, mode, slideTag);
   return canvas.toBuffer('image/png');
 }
@@ -1348,7 +1385,7 @@ async function buildDailyDigestCardPng(anchor = new Date(), opts = {}) {
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   paintCardBackground(ctx, W, H, glow, accent.primary);
-  paintMgWatermark(ctx, mgImg, W, H);
+  paintDigestMgWatermark(ctx, mgImg);
   renderTerminalDigestCard(ctx, data, DAILY_CARD_CFG, accent, botAvatar);
 
   return canvas.toBuffer('image/png');
@@ -1367,7 +1404,7 @@ async function buildWeeklyDigestCardPng(anchor = new Date(), opts = {}) {
   const [mgImg, botAvatar, chartBuf] = await Promise.all([
     loadMgMarkImage(),
     loadMcGBotAvatarImage(),
-    buildWeeklyAvgXpDigestPng(anchor).catch(err => {
+    buildWeeklyAvgXpDigestPng(anchor, DIGEST_CHART_OPTS).catch(err => {
       console.error('[buildWeeklyDigestCardPng] weekday chart failed:', err?.message || err);
       return null;
     })
@@ -1385,7 +1422,7 @@ async function buildWeeklyDigestCardPng(anchor = new Date(), opts = {}) {
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   paintCardBackground(ctx, W, H, glow, accent.primary);
-  paintMgWatermark(ctx, mgImg, W, H);
+  paintDigestMgWatermark(ctx, mgImg);
   renderTerminalDigestCard(ctx, data, WEEKLY_CARD_CFG, accent, botAvatar, chartImage);
 
   return canvas.toBuffer('image/png');
@@ -1404,7 +1441,7 @@ async function buildMonthlyDigestCardPng(anchor = new Date(), opts = {}) {
   const [mgImg, botAvatar, chartBuf] = await Promise.all([
     loadMgMarkImage(),
     loadMcGBotAvatarImage(),
-    buildPast30DaysDigestPng(anchor, 30).catch(err => {
+    buildPast30DaysDigestPng(anchor, 30, DIGEST_CHART_OPTS).catch(err => {
       console.error('[buildMonthlyDigestCardPng] 30d chart failed:', err?.message || err);
       return null;
     })
@@ -1422,7 +1459,7 @@ async function buildMonthlyDigestCardPng(anchor = new Date(), opts = {}) {
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   paintCardBackground(ctx, W, H, glow, accent.primary);
-  paintMgWatermark(ctx, mgImg, W, H);
+  paintDigestMgWatermark(ctx, mgImg);
   renderTerminalDigestCard(ctx, data, MONTHLY_CARD_CFG, accent, botAvatar, chartImage);
 
   return canvas.toBuffer('image/png');

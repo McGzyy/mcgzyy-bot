@@ -13,8 +13,8 @@ const HEIGHT = 480;
 /** Pure black canvas — matches X / terminal hero look. */
 const BG = '#000000';
 /** Readable on black (zinc-200-ish). */
-const TICK = 'rgba(228, 228, 231, 0.78)';
-const GRID = 'rgba(255, 255, 255, 0.06)';
+const TICK = 'rgba(228, 228, 231, 0.88)';
+const GRID = 'rgba(255, 255, 255, 0.11)';
 /** Member series — cobalt blue (high contrast on black). */
 const LINE_MEMBER = '#1a7cff';
 const FILL_MEMBER = 'rgba(26, 124, 255, 0.14)';
@@ -23,9 +23,9 @@ const LINE_BOT = '#22c55e';
 const FILL_BOT = 'rgba(34, 197, 94, 0.12)';
 const POINT_RING = 'rgba(255, 255, 255, 0.35)';
 
-/** Modest ATH × when a UTC weekday had no qualifying prints — keeps the line chart from hugging Sat–Sun only. */
+/** Modest ATH × when a UTC weekday had no qualifying prints (standalone charts only). */
 const DIGEST_PLACEHOLDER_ATH_X = 1.68;
-/** Keep placeholder + low-multiple days in frame; otherwise Chart.js auto-zoom hides Mon–Fri backfill. */
+/** Standalone digest charts without embed mode. */
 const DIGEST_Y_AXIS_MIN = 1.25;
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -85,20 +85,82 @@ function backfillDailyDigestPoints(pts) {
 }
 
 /** Legend above plot — explicit fonts/colors so labels render in chartjs-node-canvas (no invisible text). */
-function digestLegendPluginOptions() {
+function digestLegendPluginOptions(embed = false) {
   return {
     display: true,
     position: 'top',
     align: 'center',
     labels: {
       color: TICK,
-      padding: 16,
-      boxWidth: 14,
-      boxHeight: 14,
+      padding: embed ? 12 : 16,
+      boxWidth: embed ? 16 : 14,
+      boxHeight: embed ? 16 : 14,
       usePointStyle: true,
       pointStyle: 'rect',
-      font: { size: 14, weight: '600', family: 'Arial, Helvetica, sans-serif' }
+      font: { size: embed ? 15 : 14, weight: '600', family: 'Arial, Helvetica, sans-serif' }
     }
+  };
+}
+
+/**
+ * @param {Array<Array<number|null|undefined>>} seriesLists
+ * @returns {{ min: number, max: number }}
+ */
+function digestYScaleFromSeries(...seriesLists) {
+  const vals = seriesLists
+    .flat()
+    .filter(v => v != null && Number.isFinite(Number(v)))
+    .map(v => Number(v));
+  if (!vals.length) {
+    return { min: 1, max: 3.5 };
+  }
+  let lo = Math.min(...vals);
+  let hi = Math.max(...vals);
+  let span = hi - lo;
+  if (span < 0.25) {
+    lo -= 0.2;
+    hi += 0.2;
+    span = hi - lo;
+  }
+  const pad = Math.max(0.18, span * 0.14);
+  return { min: Math.max(0, lo - pad), max: hi + pad };
+}
+
+/**
+ * @param {{ min: number, max: number }} scale
+ * @param {boolean} embed
+ */
+function digestYAxisOptions(scale, embed = false) {
+  return {
+    min: scale.min,
+    max: scale.max,
+    title: {
+      display: true,
+      text: 'Avg ATH ×',
+      color: TICK,
+      font: { size: embed ? 12 : 11, weight: '600' }
+    },
+    grid: { color: GRID, drawBorder: false },
+    ticks: {
+      color: TICK,
+      font: { size: embed ? 12 : 11, weight: '500' },
+      padding: 8,
+      maxTicksLimit: embed ? 6 : 8
+    },
+    border: { display: false }
+  };
+}
+
+/**
+ * @param {boolean} embed
+ */
+function digestLineDatasetStyle(embed) {
+  return {
+    borderWidth: embed ? 4 : 3,
+    tension: embed ? 0.28 : 0.35,
+    pointRadius: embed ? 5 : 4,
+    pointHoverRadius: embed ? 7 : 6,
+    pointBorderWidth: embed ? 2 : 1.5
   };
 }
 
@@ -107,15 +169,32 @@ function digestLegendPluginOptions() {
  * @param {Date} [fromDate] anchor (default now)
  * @returns {Promise<Buffer>}
  */
-async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
+async function buildWeeklyAvgXpDigestPng(fromDate = new Date(), opts = {}) {
+  const embed = opts.forCardEmbed === true;
+  const chartW = Number(opts.width) > 0 ? Number(opts.width) : WIDTH;
+  const chartH = Number(opts.height) > 0 ? Number(opts.height) : HEIGHT;
   const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(fromDate);
   const { memberAvg, botAvg } = getAvgAthXByUtcWeekdayInBounds(startInclusive, endExclusive);
 
   const toPts = (arr) =>
     arr.map(v => (v == null || !Number.isFinite(Number(v)) ? null : Number(Number(v).toFixed(3))));
 
-  const memberPts = backfillWeekDigestPoints(toPts(memberAvg));
-  const botPts = backfillWeekDigestPoints(toPts(botAvg));
+  const rawMember = toPts(memberAvg);
+  const rawBot = toPts(botAvg);
+  const memberPts = embed ? rawMember : backfillWeekDigestPoints(rawMember);
+  const botPts = embed ? rawBot : backfillWeekDigestPoints(rawBot);
+  const yScale = embed ? digestYScaleFromSeries(memberPts, botPts) : { min: DIGEST_Y_AXIS_MIN, max: null };
+  const lineStyle = digestLineDatasetStyle(embed);
+
+  const canvas =
+    chartW === WIDTH && chartH === HEIGHT
+      ? chartCanvas
+      : new ChartJSNodeCanvas({
+          width: chartW,
+          height: chartH,
+          backgroundColour: BG,
+          chartCallback: digestChartCallback
+        });
 
   const configuration = {
     type: 'line',
@@ -127,28 +206,20 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
           data: memberPts,
           borderColor: LINE_MEMBER,
           backgroundColor: FILL_MEMBER,
-          borderWidth: 3,
-          tension: 0.35,
-          spanGaps: false,
-          pointRadius: 4,
-          pointHoverRadius: 6,
+          ...lineStyle,
+          spanGaps: embed,
           pointBackgroundColor: LINE_MEMBER,
-          pointBorderColor: POINT_RING,
-          pointBorderWidth: 1.5
+          pointBorderColor: POINT_RING
         },
         {
           label: 'McGBot calls',
           data: botPts,
           borderColor: LINE_BOT,
           backgroundColor: FILL_BOT,
-          borderWidth: 3,
-          tension: 0.35,
-          spanGaps: false,
-          pointRadius: 4,
-          pointHoverRadius: 6,
+          ...lineStyle,
+          spanGaps: embed,
           pointBackgroundColor: LINE_BOT,
-          pointBorderColor: POINT_RING,
-          pointBorderWidth: 1.5
+          pointBorderColor: POINT_RING
         }
       ]
     },
@@ -157,32 +228,41 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date()) {
       animation: false,
       plugins: {
         title: { display: false },
-        legend: digestLegendPluginOptions()
+        legend: digestLegendPluginOptions(embed)
       },
       scales: {
         x: {
           grid: { color: GRID, drawBorder: false },
-          ticks: { color: TICK, font: { size: 11, weight: 500 }, padding: 6 },
+          ticks: { color: TICK, font: { size: embed ? 12 : 11, weight: 500 }, padding: 8 },
           border: { display: false }
         },
-        y: {
-          min: DIGEST_Y_AXIS_MIN,
-          title: {
-            display: true,
-            text: 'Avg ATH ×',
-            color: TICK,
-            font: { size: 11, weight: 600 }
-          },
-          grid: { color: GRID, drawBorder: false },
-          ticks: { color: TICK, font: { size: 11, weight: 500 }, padding: 6 },
-          border: { display: false }
-        }
+        y: embed
+          ? digestYAxisOptions(yScale, true)
+          : {
+              min: DIGEST_Y_AXIS_MIN,
+              title: {
+                display: true,
+                text: 'Avg ATH ×',
+                color: TICK,
+                font: { size: 11, weight: 600 }
+              },
+              grid: { color: GRID, drawBorder: false },
+              ticks: { color: TICK, font: { size: 11, weight: 500 }, padding: 6 },
+              border: { display: false }
+            }
       },
-      layout: { padding: { top: 44, right: 16, bottom: 10, left: 12 } }
+      layout: {
+        padding: {
+          top: embed ? 40 : 44,
+          right: embed ? 20 : 16,
+          bottom: embed ? 16 : 10,
+          left: embed ? 14 : 12
+        }
+      }
     }
   };
 
-  const out = await chartCanvas.renderToBuffer(configuration, 'image/png');
+  const out = await canvas.renderToBuffer(configuration, 'image/png');
   return Buffer.isBuffer(out) ? out : Buffer.from(out);
 }
 
@@ -297,9 +377,11 @@ function digestDailyPoints(pts, opts = {}) {
  */
 async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30, opts = {}) {
   const { labels, memberAvg, botAvg } = getAvgAthXLastNUtcDaysBeforeAnchor(anchor, nDays);
-  const memberPts = digestDailyPoints(memberAvg, opts);
-  const botPts = digestDailyPoints(botAvg, opts);
-  const skipPlaceholder = opts.skipPlaceholder === true;
+  const embed = opts.forCardEmbed === true || opts.skipPlaceholder === true;
+  const memberPts = digestDailyPoints(memberAvg, { skipPlaceholder: embed });
+  const botPts = digestDailyPoints(botAvg, { skipPlaceholder: embed });
+  const yScale = embed ? digestYScaleFromSeries(memberPts, botPts) : { min: DIGEST_Y_AXIS_MIN, max: null };
+  const lineStyle = digestLineDatasetStyle(embed);
   const chartW = Number(opts.width) > 0 ? Number(opts.width) : WIDTH_30D;
   const chartH = Number(opts.height) > 0 ? Number(opts.height) : HEIGHT;
 
@@ -320,28 +402,24 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30, opts = 
           data: memberPts,
           borderColor: LINE_MEMBER,
           backgroundColor: FILL_MEMBER,
-          borderWidth: skipPlaceholder ? 2.5 : 3,
-          tension: skipPlaceholder ? 0.15 : 0.25,
-          spanGaps: skipPlaceholder,
-          pointRadius: skipPlaceholder ? 2 : 0,
-          pointHoverRadius: 4,
+          ...lineStyle,
+          spanGaps: embed,
+          pointRadius: embed ? 0 : 2,
+          pointHoverRadius: 5,
           pointBackgroundColor: LINE_MEMBER,
-          pointBorderColor: POINT_RING,
-          pointBorderWidth: 0
+          pointBorderColor: POINT_RING
         },
         {
           label: 'McGBot calls',
           data: botPts,
           borderColor: LINE_BOT,
           backgroundColor: FILL_BOT,
-          borderWidth: skipPlaceholder ? 2.5 : 3,
-          tension: skipPlaceholder ? 0.15 : 0.25,
-          spanGaps: skipPlaceholder,
+          ...lineStyle,
+          spanGaps: embed,
           pointRadius: 0,
-          pointHoverRadius: 4,
+          pointHoverRadius: 5,
           pointBackgroundColor: LINE_BOT,
-          pointBorderColor: POINT_RING,
-          pointBorderWidth: 0
+          pointBorderColor: POINT_RING
         }
       ]
     },
@@ -350,41 +428,43 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30, opts = 
       animation: false,
       plugins: {
         title: { display: false },
-        legend: digestLegendPluginOptions()
+        legend: digestLegendPluginOptions(embed)
       },
       scales: {
         x: {
           grid: { color: GRID, drawBorder: false },
           ticks: {
             color: TICK,
-            font: { size: 9, weight: 500 },
-            padding: 4,
-            maxRotation: 45,
+            font: { size: embed ? 10 : 9, weight: 500 },
+            padding: 6,
+            maxRotation: embed ? 0 : 45,
             minRotation: 0,
             autoSkip: true,
-            maxTicksLimit: 12
+            maxTicksLimit: embed ? 10 : 12
           },
           border: { display: false }
         },
-        y: {
-          min: DIGEST_Y_AXIS_MIN,
-          title: {
-            display: true,
-            text: 'Avg ATH ×',
-            color: TICK,
-            font: { size: 11, weight: 600 }
-          },
-          grid: { color: GRID, drawBorder: false },
-          ticks: { color: TICK, font: { size: 11, weight: 500 }, padding: 6 },
-          border: { display: false }
-        }
+        y: embed
+          ? digestYAxisOptions(yScale, true)
+          : {
+              min: DIGEST_Y_AXIS_MIN,
+              title: {
+                display: true,
+                text: 'Avg ATH ×',
+                color: TICK,
+                font: { size: 11, weight: 600 }
+              },
+              grid: { color: GRID, drawBorder: false },
+              ticks: { color: TICK, font: { size: 11, weight: 500 }, padding: 6 },
+              border: { display: false }
+            }
       },
       layout: {
         padding: {
-          top: skipPlaceholder ? 36 : 44,
-          right: 18,
-          bottom: skipPlaceholder ? 14 : 8,
-          left: 12
+          top: embed ? 40 : 44,
+          right: embed ? 20 : 18,
+          bottom: embed ? 16 : 8,
+          left: embed ? 14 : 12
         }
       }
     }

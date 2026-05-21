@@ -197,10 +197,22 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date(), opts = {}) {
   const chartH = Number(opts.height) > 0 ? Number(opts.height) : HEIGHT;
   let memberAvg;
   let botAvg;
-  if (opts.useRollingWindow === true) {
+  let chartLabels = WEEKDAY_LABELS;
+  if (opts.seriesOverride && Array.isArray(opts.seriesOverride.memberAvg)) {
+    memberAvg = opts.seriesOverride.memberAvg;
+    botAvg = opts.seriesOverride.botAvg;
+    if (Array.isArray(opts.chartLabels) && opts.chartLabels.length) {
+      chartLabels = opts.chartLabels;
+    } else if (Array.isArray(opts.seriesOverride.labels) && opts.seriesOverride.labels.length) {
+      chartLabels = opts.seriesOverride.labels;
+    }
+  } else if (opts.useRollingWindow === true) {
     const series = getAvgAthXLastNUtcDaysBeforeAnchor(fromDate, 7);
     memberAvg = series.memberAvg;
     botAvg = series.botAvg;
+    if (Array.isArray(series.labels) && series.labels.length) {
+      chartLabels = series.labels;
+    }
   } else {
     const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(fromDate);
     const series = getAvgAthXByUtcWeekdayInBounds(startInclusive, endExclusive);
@@ -232,7 +244,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date(), opts = {}) {
   const configuration = {
     type: 'line',
     data: {
-      labels: WEEKDAY_LABELS,
+      labels: chartLabels,
       datasets: [
         {
           label: 'Member calls',

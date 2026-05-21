@@ -35,6 +35,10 @@ const {
   initTrackedCallsStore,
   trackedCallsFilePath
 } = require('./trackedCallsService');
+const {
+  buildDigestSnapshotFromCallPerformance,
+  countCallPerformanceDeskInWindow
+} = require('./digestCallPerformanceSource');
 const fs = require('fs').promises;
 const { initUserProfilesStore } = require('./userProfileService');
 const {
@@ -169,10 +173,81 @@ function formatUtcRangeLabelForPost(startInclusive, endExclusive) {
 }
 
 /**
- * Post text aligned with the weekly digest card (previous completed UTC week).
- * @param {{ windowLabel?: string, topN?: number }} [p]
+ * @param {{ ticker?: string, x?: number }} [best]
  */
-function buildWeeklyDigestPostBody(p = {}) {
+function formatSnapshotHighlight(best) {
+  if (!best || !Number.isFinite(Number(best.x))) return null;
+  const t = String(best.ticker || '—')
+    .trim()
+    .replace(/^\$/, '')
+    .toUpperCase();
+  return `${t} — ${Number(best.x).toFixed(2)}× ATH`;
+}
+
+/**
+ * @param {{ windowLabel?: string, topN?: number }} p
+ * @param {import('./digestCallPerformanceSource').DigestSnapshot} snap
+ * @param {'day'|'week'|'month'} quietKind
+ */
+function composeDigestPostFromSnapshot(p, snap, quietKind) {
+  const maxChars = resolveWeeklyStatsTweetMaxChars();
+  const topN = Number(p.topN) > 0 ? Number(p.topN) : 5;
+  const gap = weeklySectionGap();
+  const footer = xTerminalFooterLine();
+  const rangeLabel = snap.dateLabel || 'desk window';
+  const head = `🚀 ${String(p.windowLabel || 'Digest').trim()} · ${rangeLabel}`;
+  const quiet =
+    quietKind === 'day'
+      ? '(quiet day on the member desk)'
+      : quietKind === 'month'
+        ? '(quiet month on the member desk)'
+        : '(quiet week on the member desk)';
+
+  const deskLines = [`💎 Caller leaderboard (top ${topN} by avg ATH ×)`, ''];
+  const rows = Array.isArray(snap.leaderboard) ? snap.leaderboard.slice(0, topN) : [];
+  if (rows.length) {
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i];
+      deskLines.push(
+        `${i + 1}. ${r.username} — ${Number(r.avgX).toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
+      );
+    }
+  } else {
+    deskLines.push(quiet);
+  }
+
+  const hiLines = ['🔥 Highlights', ''];
+  let anyHi = false;
+  const h = formatSnapshotHighlight(snap.bestHuman);
+  if (h) {
+    hiLines.push(`${BUL}Best member call — ${h}`);
+    anyHi = true;
+  }
+  const b = formatSnapshotHighlight(snap.bestBot);
+  if (b) {
+    hiLines.push(`${BUL}Best McGBot call — ${b}`);
+    anyHi = true;
+  }
+  if (!anyHi) hiLines.push('(none)');
+
+  const chunks = [head, deskLines.join('\n'), hiLines.join('\n')];
+  if (footer) chunks.push(footer);
+  const raw = chunks.filter(Boolean).join(gap).trim();
+  if (raw.length <= maxChars) return raw;
+  return maxChars >= 2000 ? fitTweet(raw, maxChars) : fitTweetWholeLines(raw, maxChars);
+}
+
+/**
+ * Post text aligned with the weekly digest card (previous completed UTC week).
+ * @param {{ windowLabel?: string, topN?: number, useRollingWindow?: boolean, useAllTimeWindow?: boolean }} [p]
+ */
+async function buildWeeklyDigestPostBody(p = {}) {
+  const snap = await buildDigestSnapshotFromCallPerformance('weekly', new Date(), {
+    rolling: p.useRollingWindow === true,
+    allTime: p.useAllTimeWindow === true
+  });
+  if (snap) return composeDigestPostFromSnapshot(p, snap, 'week');
+
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 5;
   const bounds = getDigestWindowBounds('weekly', new Date(), {
@@ -236,7 +311,13 @@ function buildWeeklyDigestPostBody(p = {}) {
  * Post text aligned with the daily digest card (yesterday UTC).
  * @param {{ windowLabel?: string, topN?: number }} [p]
  */
-function buildDailyDigestPostBody(p = {}) {
+async function buildDailyDigestPostBody(p = {}) {
+  const snap = await buildDigestSnapshotFromCallPerformance('daily', new Date(), {
+    rolling: p.useRollingWindow === true,
+    allTime: p.useAllTimeWindow === true
+  });
+  if (snap) return composeDigestPostFromSnapshot(p, snap, 'day');
+
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 4;
   const bounds = getDigestWindowBounds('daily', new Date(), {
@@ -301,8 +382,58 @@ function buildDailyDigestPostBody(p = {}) {
  * @param {{ windowLabel: string, days: number, topN?: number }} p
  */
 async function buildMonthlyDigestPostBody(p) {
+  const snap = await buildDigestSnapshotFromCallPerformance('monthly', new Date(), {
+    rolling: p.useRollingWindow === true,
+    allTime: p.useAllTimeWindow === true
+  });
+
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 3;
+
+  if (snap) {
+    const gap = weeklySectionGap();
+    const footer = xTerminalFooterLine();
+    const head = `🚀 ${String(p.windowLabel || 'Monthly snapshot').trim()} · ${snap.dateLabel || 'desk window'}`;
+
+    /** @type {string[]} */
+    const podiumLines = [];
+    const rows = Array.isArray(snap.leaderboard) ? snap.leaderboard.slice(0, 3) : [];
+    for (let i = 0; i < rows.length; i += 1) {
+      const r = rows[i];
+      const medal = DIGEST_PODIUM_MEDALS[i] || `${i + 1}.`;
+      const stats = `${Number(r.avgX).toFixed(2)}× avg · ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`;
+      let name = r.username || 'Caller';
+      if (r.discordId) {
+        const handle = await resolveVerifiedXHandle(r.discordId);
+        if (handle) name = `@${handle}`;
+      }
+      podiumLines.push(`${medal} ${name} — ${stats}`);
+    }
+
+    const chunks = [head];
+    if (podiumLines.length) chunks.push(podiumLines.join('\n'));
+    else chunks.push('(quiet month on the member desk)');
+
+    const hiLines = ['🔥 Highlights', ''];
+    let anyHi = false;
+    const h = formatSnapshotHighlight(snap.bestHuman);
+    if (h) {
+      hiLines.push(`${BUL}Best member call — ${h}`);
+      anyHi = true;
+    }
+    const b = formatSnapshotHighlight(snap.bestBot);
+    if (b) {
+      hiLines.push(`${BUL}Best McGBot call — ${b}`);
+      anyHi = true;
+    }
+    if (!anyHi) hiLines.push('(none)');
+    chunks.push(hiLines.join('\n'));
+    if (footer) chunks.push(footer);
+    const raw = chunks.filter(Boolean).join(gap).trim();
+    if (raw.length <= maxChars) return raw;
+    return maxChars >= 2000 ? fitTweet(raw, maxChars) : fitTweetWholeLines(raw, maxChars);
+  }
+
   const bounds = getDigestWindowBounds('monthly', new Date(), {
     rolling: p.useRollingWindow === true,
     allTime: p.useAllTimeWindow === true
@@ -615,8 +746,15 @@ async function postDigest(p, options = {}) {
       allTime: useAllTimeWindow
     });
     const inWindow = countQualifyingDeskCallsInBounds(bounds.startInclusive, bounds.endExclusive);
+    const cpWindow = await countCallPerformanceDeskInWindow(
+      bounds.startInclusive.getTime(),
+      bounds.endExclusive.getTime()
+    );
     console.log(
-      `[XLeaderboardDigest] live post — total=${n} window=${bounds.mode} deskCalls=${inWindow.total} (member ${inWindow.human}, bot ${inWindow.bot})`
+      `[XLeaderboardDigest] live post — json=${n} trackedCalls.json window=${inWindow.total} (m${inWindow.human} b${inWindow.bot})` +
+        (cpWindow
+          ? ` | call_performance=${cpWindow.total} (m${cpWindow.human} b${cpWindow.bot})`
+          : ' | call_performance=unconfigured')
     );
   }
 
@@ -652,13 +790,13 @@ async function postDigest(p, options = {}) {
   const postOpts = { useRollingWindow, useAllTimeWindow };
   let text;
   if (useTerminalDailyCard) {
-    text = buildDailyDigestPostBody({
+    text = await buildDailyDigestPostBody({
       windowLabel,
       topN: Number(topN) > 0 ? Number(topN) : 4,
       ...postOpts
     });
   } else if (useTerminalWeeklyCard) {
-    text = buildWeeklyDigestPostBody({
+    text = await buildWeeklyDigestPostBody({
       windowLabel,
       topN: Number(topN) > 0 ? Number(topN) : 5,
       ...postOpts
@@ -939,6 +1077,14 @@ async function getDigestLiveDiagnostics(kind, opts = {}) {
   const newestDeskCallLabel =
     newestMs != null ? new Date(newestMs).toISOString().slice(0, 10) : null;
   const tsDiag = getDeskTimestampDiagnostics(anchor);
+  const cp7 = await countCallPerformanceDeskInWindow(
+    anchor.getTime() - 7 * 86400000,
+    anchor.getTime()
+  );
+  const cp30 = await countCallPerformanceDeskInWindow(
+    anchor.getTime() - 30 * 86400000,
+    anchor.getTime()
+  );
   let dataFileMtime = null;
   try {
     const st = await fs.stat(trackedCallsFilePath);
@@ -950,6 +1096,10 @@ async function getDigestLiveDiagnostics(kind, opts = {}) {
   return {
     totalTracked: getAllTrackedCalls().length,
     dataFileMtime,
+    callPerformanceLast7d: cp7?.total ?? null,
+    callPerformanceLast7dBot: cp7?.bot ?? null,
+    callPerformanceLast30d: cp30?.total ?? null,
+    supabaseConfigured: Boolean(cp7 || cp30),
     windowMode: bounds.mode,
     windowLabel: rangeLabel,
     deskCallsInWindow: inWindow.total,

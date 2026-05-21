@@ -35,6 +35,7 @@ const {
   startOfUtcCalendarDay
 } = require('./callerStatsService');
 const { buildWeeklyAvgXpDigestPng, buildPast30DaysDigestPng } = require('./digestPerformanceChart');
+const { buildDigestSnapshotFromCallPerformance } = require('./digestCallPerformanceSource');
 
 const UTC_MO = [
   'Jan',
@@ -395,10 +396,12 @@ function paintDailyDeskPulseBand(ctx, pulse, memberCol, botCol, bandY, bandH) {
  * @param {Date} [anchor]
  * @param {{ sampleData?: boolean }} [opts]
  */
-function resolveDailyDigestData(anchor = new Date(), opts = {}) {
+async function resolveDailyDigestData(anchor = new Date(), opts = {}) {
   if (opts.sampleData === true) {
     return buildSampleDailyDigestData(anchor);
   }
+  const fromDb = await buildDigestSnapshotFromCallPerformance('daily', anchor, opts);
+  if (fromDb) return fromDb;
   return buildLiveDailyDigestData(anchor, opts);
 }
 
@@ -478,10 +481,12 @@ function buildLiveWeeklyDigestData(anchor = new Date(), opts = {}) {
  * @param {Date} [anchor]
  * @param {{ sampleData?: boolean }} [opts]
  */
-function resolveWeeklyDigestData(anchor = new Date(), opts = {}) {
+async function resolveWeeklyDigestData(anchor = new Date(), opts = {}) {
   if (opts.sampleData === true) {
     return buildSampleWeeklyDigestData(anchor);
   }
+  const fromDb = await buildDigestSnapshotFromCallPerformance('weekly', anchor, opts);
+  if (fromDb) return fromDb;
   return buildLiveWeeklyDigestData(anchor, opts);
 }
 
@@ -564,10 +569,12 @@ function buildLiveMonthlyDigestData(anchor = new Date(), opts = {}) {
  * @param {Date} [anchor]
  * @param {{ sampleData?: boolean }} [opts]
  */
-function resolveMonthlyDigestData(anchor = new Date(), opts = {}) {
+async function resolveMonthlyDigestData(anchor = new Date(), opts = {}) {
   if (opts.sampleData === true) {
     return buildSampleMonthlyDigestData(anchor);
   }
+  const fromDb = await buildDigestSnapshotFromCallPerformance('monthly', anchor, opts);
+  if (fromDb) return fromDb;
   return buildLiveMonthlyDigestData(anchor, opts);
 }
 
@@ -1515,7 +1522,7 @@ async function renderDigestSlideBuffer(data, cfg, accent, botAvatar, chartImage,
  * @returns {Promise<Buffer[]>}
  */
 async function buildMonthlyDigestCarouselPngs(anchor = new Date(), opts = {}) {
-  const data = resolveMonthlyDigestData(anchor, opts);
+  const data = await resolveMonthlyDigestData(anchor, opts);
   const accent = channelAccent('member');
   const [mgImg, botAvatar, chartBuf] = await Promise.all([
     loadMgMarkImage(),
@@ -1561,7 +1568,7 @@ async function buildMonthlyDigestCarouselPngs(anchor = new Date(), opts = {}) {
  * @returns {Promise<Buffer[]>}
  */
 async function buildWeeklyDigestCarouselPngs(anchor = new Date(), opts = {}) {
-  const data = resolveWeeklyDigestData(anchor, opts);
+  const data = await resolveWeeklyDigestData(anchor, opts);
   const accent = channelAccent('member');
   const [mgImg, botAvatar, chartBuf] = await Promise.all([
     loadMgMarkImage(),
@@ -1625,7 +1632,7 @@ async function buildDigestMediaPngs(kind, anchor = new Date(), opts = {}) {
  * @returns {Promise<Buffer>}
  */
 async function buildDailyDigestCardPng(anchor = new Date(), opts = {}) {
-  const data = resolveDailyDigestData(anchor, opts);
+  const data = await resolveDailyDigestData(anchor, opts);
   const accent = channelAccent('member');
   const glow = accent.soft;
   const [mgImg, botAvatar] = await Promise.all([loadMgMarkImage(), loadMcGBotAvatarImage()]);
@@ -1646,16 +1653,21 @@ async function buildDailyDigestCardPng(anchor = new Date(), opts = {}) {
  * @returns {Promise<Buffer>}
  */
 async function buildWeeklyDigestCardPng(anchor = new Date(), opts = {}) {
-  const data = resolveWeeklyDigestData(anchor, opts);
+  const data = await resolveWeeklyDigestData(anchor, opts);
   const accent = channelAccent('member');
   const glow = accent.soft;
+  const chartOpts = {
+    ...DIGEST_CHART_OPTS,
+    useRollingWindow: opts.useRollingWindow === true
+  };
+  if (data.chartSeries && Array.isArray(data.chartSeries.memberAvg)) {
+    chartOpts.seriesOverride = data.chartSeries;
+    chartOpts.chartLabels = data.chartSeries.labels;
+  }
   const [mgImg, botAvatar, chartBuf] = await Promise.all([
     loadMgMarkImage(),
     loadMcGBotAvatarImage(),
-    buildWeeklyAvgXpDigestPng(anchor, {
-      ...DIGEST_CHART_OPTS,
-      useRollingWindow: opts.useRollingWindow === true
-    }).catch(err => {
+    buildWeeklyAvgXpDigestPng(anchor, chartOpts).catch(err => {
       console.error('[buildWeeklyDigestCardPng] weekday chart failed:', err?.message || err);
       return null;
     })
@@ -1686,7 +1698,7 @@ async function buildWeeklyDigestCardPng(anchor = new Date(), opts = {}) {
  * @returns {Promise<Buffer>}
  */
 async function buildMonthlyDigestCardPng(anchor = new Date(), opts = {}) {
-  const data = resolveMonthlyDigestData(anchor, opts);
+  const data = await resolveMonthlyDigestData(anchor, opts);
   const accent = channelAccent('member');
   const glow = accent.soft;
   const [mgImg, botAvatar, chartBuf] = await Promise.all([

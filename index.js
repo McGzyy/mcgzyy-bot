@@ -3415,7 +3415,7 @@ if (lowerContent === '!scanner off') {
             sampleData: useSample,
             useRollingWindow: useLive
           });
-          const caption = buildDailyDigestPostBody({
+          const caption = await buildDailyDigestPostBody({
             windowLabel: 'Daily snapshot',
             topN: 4,
             useRollingWindow: useLive
@@ -3558,20 +3558,27 @@ if (lowerContent === '!scanner off') {
           const { initTrackedCallsStore, trackedCallsFilePath } = require('./utils/trackedCallsService');
           const { getDeskTimestampDiagnostics } = require('./utils/callerStatsService');
           const { getDigestLiveDiagnostics } = require('./utils/xLeaderboardDigest');
+          const { getSupabaseServiceRole } = require('./utils/callPerformanceLeaderboardNode');
           await initUserProfilesStore();
           await initTrackedCallsStore();
           const d = getDeskTimestampDiagnostics();
           const w = await getDigestLiveDiagnostics('weekly', { useRollingWindow: true });
+          const sbOk = Boolean(getSupabaseServiceRole());
           await replyText(
             message,
             `**Digest data audit**\n` +
+              `**Supabase \`call_performance\`:** ${sbOk ? 'connected (digests use this when configured)' : '❌ not configured on bot host'}\n` +
+              (sbOk
+                ? `Last 7d DB rows: **${w.callPerformanceLast7d ?? '—'}** (bot **${w.callPerformanceLast7dBot ?? '—'}**)\n` +
+                  `Last 30d DB rows: **${w.callPerformanceLast30d ?? '—'}**\n`
+                : `Set \`SUPABASE_URL\` + \`SUPABASE_SERVICE_ROLE_KEY\` on the VPS (same project as dashboard).\n`) +
+              `\n**Legacy \`trackedCalls.json\`:**\n` +
               `File: \`${trackedCallsFilePath}\`\n` +
               `Modified: **${w.dataFileMtime || 'unknown'}**\n` +
               `Rows: **${d.totalRows}** (${d.validDeskRows} valid desk)\n` +
-              `Last 7d — activity: **${d.deskActivityLast7d}** · new prints: **${d.firstPrintLast7d}** · lastUpdated: **${d.lastUpdatedLast7d}**\n` +
-              `Last 30d — activity: **${d.deskActivityLast30d}** · new prints: **${d.firstPrintLast30d}**\n` +
-              `Rolling 7d digest window: **${w.deskCallsInWindow}** desk calls\n` +
-              `\`!callerboard\` is **all-time**; digests only count rows in the time window above.`
+              `Last 7d JSON — activity: **${d.deskActivityLast7d}** · new prints: **${d.firstPrintLast7d}**\n` +
+              `Rolling 7d JSON window: **${w.deskCallsInWindow}** (stale; digests now prefer DB)\n` +
+              `\`!callerboard\` = all-time JSON only.`
           );
         } catch (e) {
           await replyText(message, `❌ digestaudit failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -3635,9 +3642,13 @@ if (lowerContent === '!scanner off') {
               (diag.deskCallsInWindow === 0
                 ? ` · \`!callerboard\` all-time: **${diag.allTimeLeaderboardRows}** callers`
                 : '');
+            if (!useAllTime && diag.supabaseConfigured) {
+              statsLine +=
+                `\n📊 **call_performance** (7d): **${diag.callPerformanceLast7d ?? 0}** rows (bot **${diag.callPerformanceLast7dBot ?? 0}**)`;
+            }
             if (diag.deskCallsInWindow === 0 && !useAllTime) {
               statsLine +=
-                `\n📊 Desk rows (7d): **${diag.deskActivityLast7d}** by activity time · **${diag.firstPrintLast7d}** new prints · file mtime \`${diag.dataFileMtime || '?'}\``;
+                `\n📁 JSON file (7d activity): **${diag.deskActivityLast7d}** · mtime \`${diag.dataFileMtime || '?'}\``;
             }
             if (diag.deskCallsInWindow === 0 && diag.newestDeskCallLabel && !useAllTime) {
               statsLine +=

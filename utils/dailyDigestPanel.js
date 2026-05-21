@@ -6,7 +6,8 @@ const {
   MUTED,
   DIM,
   fitFontSize,
-  channelAccent
+  channelAccent,
+  roundRectPath
 } = require('./xCardRenderHelpers');
 const {
   paintCardBackground,
@@ -52,9 +53,11 @@ const H = CARD_HEIGHT;
 const PAD = 52;
 const MEMBER_AVG_GOOD_AT = 2;
 /** Subtle section separators (editorial, not dashboard panels). */
-const SECTION_LINE = 'rgba(255,255,255,0.12)';
-const SECTION_LINE_SOFT = 'rgba(255,255,255,0.065)';
-const CHART_BAND_FULL = 258;
+const SECTION_LINE = 'rgba(255,255,255,0.16)';
+const SECTION_LINE_SOFT = 'rgba(255,255,255,0.09)';
+const CHART_BAND_FULL = 268;
+const CHART_SLIDE_W = W - PAD * 2;
+const CHART_SLIDE_H = 560;
 
 function stripAt(handle) {
   return String(handle || '')
@@ -503,6 +506,80 @@ function drawDigestFooter(ctx) {
 }
 
 /**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {string} slideTag e.g. "2 of 3"
+ * @param {{ primary: string }} accent
+ */
+function drawSlideBadge(ctx, slideTag, accent) {
+  if (!slideTag) return;
+  const label = slideTag.replace(/\s*\/\s*/g, ' of ');
+  ctx.font = '600 12px system-ui, "Segoe UI", sans-serif';
+  const tw = ctx.measureText(label).width;
+  const bw = tw + 20;
+  const bh = 28;
+  const x = W - PAD - bw;
+  const y = PAD + 52;
+  roundRectPath(ctx, x, y, bw, bh, 14);
+  ctx.fillStyle = accent.primary + '14';
+  ctx.fill();
+  ctx.strokeStyle = accent.primary + '55';
+  ctx.lineWidth = 1;
+  roundRectPath(ctx, x, y, bw, bh, 14);
+  ctx.stroke();
+  ctx.fillStyle = accent.primary;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + bw / 2, y + bh / 2 + 1);
+}
+
+/**
+ * Carousel slide chrome — consistent header without repeating a cramped full dashboard title.
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {object} data
+ * @param {{ title: string }} cfg
+ * @param {{ primary: string, grad: string[] }} accent
+ * @param {{ headline: string, subline?: string, slideTag?: string, titleSize?: number }} opts
+ * @returns {number} y where content should start
+ */
+function drawCarouselChrome(ctx, data, cfg, accent, opts) {
+  const titleSize = opts.titleSize || 44;
+  const headline = opts.headline || cfg.title;
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(255,255,255,0.38)';
+  ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('McGBot Terminal', PAD, PAD);
+
+  drawTitleGradient(ctx, headline, PAD, PAD + 16, titleSize, accent.grad);
+
+  let subY = PAD + 16 + titleSize + 6;
+  if (opts.subline) {
+    ctx.fillStyle = MUTED;
+    ctx.font = '500 14px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText(opts.subline, PAD, subY);
+    subY += 22;
+  }
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = MUTED;
+  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(data.dateLabel, W - PAD, PAD + 20);
+  if (data.isSample) {
+    ctx.fillStyle = accent.primary + '99';
+    ctx.font = '500 11px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText('Preview', W - PAD, PAD + 38);
+  }
+  if (opts.slideTag) {
+    drawSlideBadge(ctx, opts.slideTag, accent);
+  }
+
+  const ruleY = Math.max(subY + 10, PAD + 88);
+  drawSectionRule(ctx, ruleY);
+  return ruleY + 16;
+}
+
+/**
  * Digest carousel: monthly = 3 slides; weekly = 2. Daily stays single image.
  * @param {'daily'|'weekly'|'monthly'} kind
  */
@@ -655,28 +732,31 @@ function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
  * @param {number} bandH
  * @param {import('canvas').Image} chartImage
  */
-function drawChartBand(ctx, bandY, bandH, chartImage) {
+function drawChartBand(ctx, bandY, bandH, chartImage, opts = {}) {
   const x = PAD;
   const w = W - PAD * 2;
-  const padY = 10;
+  const padY = opts.tight ? 4 : 10;
+  const lightFade = opts.lightFade === true;
   drawHairlineH(ctx, bandY, x, x + w, SECTION_LINE);
 
   ctx.save();
-  ctx.globalAlpha = 0.96;
+  ctx.globalAlpha = 0.98;
   ctx.drawImage(chartImage, x, bandY + padY, w, Math.max(40, bandH - padY * 2));
   ctx.restore();
 
-  const fade = ctx.createLinearGradient(x, bandY, x, bandY + Math.min(72, bandH * 0.35));
-  fade.addColorStop(0, 'rgba(0,0,2,0.92)');
-  fade.addColorStop(1, 'rgba(0,0,2,0)');
-  ctx.fillStyle = fade;
-  ctx.fillRect(x, bandY, w, Math.min(72, bandH * 0.35));
+  if (!lightFade) {
+    const fade = ctx.createLinearGradient(x, bandY, x, bandY + Math.min(56, bandH * 0.22));
+    fade.addColorStop(0, 'rgba(0,0,2,0.75)');
+    fade.addColorStop(1, 'rgba(0,0,2,0)');
+    ctx.fillStyle = fade;
+    ctx.fillRect(x, bandY, w, Math.min(56, bandH * 0.22));
+  }
 
-  const fadeB = ctx.createLinearGradient(x, bandY + bandH - 48, x, bandY + bandH);
+  const fadeB = ctx.createLinearGradient(x, bandY + bandH - 36, x, bandY + bandH);
   fadeB.addColorStop(0, 'rgba(0,0,2,0)');
-  fadeB.addColorStop(1, 'rgba(0,0,2,0.75)');
+  fadeB.addColorStop(1, 'rgba(0,0,2,0.55)');
   ctx.fillStyle = fadeB;
-  ctx.fillRect(x, bandY + bandH - 48, w, 48);
+  ctx.fillRect(x, bandY + bandH - 36, w, 36);
 }
 
 /**
@@ -876,15 +956,121 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
 }
 
 /**
- * Carousel slide 1 — desk performance hero.
+ * Carousel slide 2 — full-width desk highlights (leaderboard + best calls).
+ */
+function paintDigestDeskSectionCarousel(ctx, data, cfg, accent, botAvatar, areaTop, areaBottom) {
+  const botAccent = channelAccent('bot');
+  const displayCap =
+    Number(cfg.displayLeaderboardRows) > 0 ? Number(cfg.displayLeaderboardRows) : 5;
+  const totalH = areaBottom - areaTop;
+  const lbH = Math.floor(totalH * 0.56);
+  const hiTop = areaTop + lbH + 20;
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font = '700 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('TOP CALLERS', PAD, areaTop);
+  ctx.fillStyle = DIM;
+  ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(cfg.leaderboardSub, PAD, areaTop + 18);
+
+  const rows = data.leaderboard || [];
+  const visibleCount = Math.min(displayCap, rows.length);
+  const overflow = rows.length - visibleCount;
+  const rowStart = areaTop + 42;
+  const rowH = Math.min(42, Math.floor((lbH - 48) / Math.max(visibleCount || 1, 1)));
+  const multX = W - PAD - 8;
+  const callsX = multX - 100;
+
+  for (let i = 0; i < visibleCount; i += 1) {
+    const r = rows[i];
+    const ry = rowStart + i * rowH;
+    const rankCy = ry + rowH / 2;
+    if (i > 0) {
+      drawHairlineH(ctx, ry, PAD, W - PAD, SECTION_LINE_SOFT);
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = i === 0 ? accent.primary : DIM;
+    ctx.font = `600 ${i === 0 ? 13 : 12}px system-ui, "Segoe UI", sans-serif`;
+    ctx.fillText(String(i + 1).padStart(2, '0'), PAD, rankCy);
+    ctx.fillStyle = i === 0 ? TEXT : 'rgba(235, 235, 240, 0.92)';
+    ctx.font = `600 ${i === 0 ? 18 : 16}px system-ui, "Segoe UI", sans-serif`;
+    const name = truncateToWidth(
+      ctx,
+      r.username,
+      callsX - PAD - 40,
+      `600 ${i === 0 ? 18 : 16}px system-ui, "Segoe UI", sans-serif`
+    );
+    ctx.fillText(name, PAD + 36, rankCy);
+    const multStr = `${Number(r.avgX).toFixed(2)}×`;
+    ctx.textAlign = 'right';
+    if (i === 0) {
+      const multSize = fitFontSize(ctx, multStr, 110, 24, 17, '800');
+      drawGradientNumber(
+        ctx,
+        multStr,
+        multX,
+        rankCy + multSize * 0.32,
+        multSize,
+        accent.grad,
+        accent.primary,
+        { shadowBlur: 10, align: 'right' }
+      );
+    } else {
+      ctx.fillStyle = 'rgba(200, 200, 210, 0.9)';
+      ctx.font = '600 16px system-ui, "Segoe UI", sans-serif';
+      ctx.fillText(multStr, multX, rankCy);
+    }
+    ctx.fillStyle = DIM;
+    ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText(`${r.totalCalls} calls`, callsX, rankCy);
+  }
+  if (overflow > 0) {
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = DIM;
+    ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText(`+${overflow} more on dashboard`, PAD, rowStart + visibleCount * rowH + 6);
+  }
+
+  drawSectionRule(ctx, hiTop - 12);
+
+  const hiHuman = formatHighlight(data.bestHuman);
+  const hiBot = formatHighlight(data.bestBot);
+  const tileGap = 20;
+  const tileW = (W - PAD * 2 - tileGap) / 2;
+  const tileH = areaBottom - hiTop - 8;
+  drawBestCallStrip(ctx, PAD, hiTop, tileW, tileH, 'Best member call', hiHuman, accent, null);
+  drawBestCallStrip(
+    ctx,
+    PAD + tileW + tileGap,
+    hiTop,
+    tileW,
+    tileH,
+    'Best McGBot call',
+    hiBot,
+    botAccent,
+    botAvatar
+  );
+}
+
+/**
+ * Carousel slide 1 — desk performance hero (centered poster).
  */
 function renderDigestHeroSlide(ctx, data, cfg, accent, slideTag) {
-  drawDigestHeader(ctx, data, cfg, accent, { slideTag });
-  drawSectionRule(ctx, PAD + 78);
-  const heroY = PAD + 96;
-  const heroH = H - PAD - 120 - heroY;
-  paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH);
-  drawSectionRule(ctx, H - PAD - 44);
+  const contentTop = drawCarouselChrome(ctx, data, cfg, accent, {
+    headline: cfg.title,
+    subline: cfg.memberSub,
+    slideTag,
+    titleSize: 52
+  });
+  const areaBottom = H - PAD - 48;
+  const blockH = 300;
+  const heroY = contentTop + Math.max(0, Math.floor((areaBottom - contentTop - blockH) / 2));
+  paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, blockH);
+  drawSectionRule(ctx, H - PAD - 44, false);
   drawDigestFooter(ctx);
 }
 
@@ -892,12 +1078,13 @@ function renderDigestHeroSlide(ctx, data, cfg, accent, slideTag) {
  * Carousel slide 2 — leaderboard + best calls.
  */
 function renderDigestBodySlide(ctx, data, cfg, accent, botAvatar, slideTag) {
-  drawDigestHeader(ctx, data, cfg, accent, { compact: true, slideTag });
-  drawSectionRule(ctx, PAD + 68);
-  const mainY = PAD + 84;
-  const contentBottom = H - PAD - 40;
-  paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom);
-  drawSectionRule(ctx, H - PAD - 44);
+  const contentTop = drawCarouselChrome(ctx, data, cfg, accent, {
+    headline: 'Desk highlights',
+    subline: cfg.leaderboardSub,
+    slideTag,
+    titleSize: 44
+  });
+  paintDigestDeskSectionCarousel(ctx, data, cfg, accent, botAvatar, contentTop, H - PAD - 44);
   drawDigestFooter(ctx);
 }
 
@@ -905,16 +1092,16 @@ function renderDigestBodySlide(ctx, data, cfg, accent, botAvatar, slideTag) {
  * Carousel slide — full-width trend chart.
  */
 function renderDigestChartSlide(ctx, data, cfg, accent, chartImage, slideTag) {
-  drawDigestHeader(ctx, data, cfg, accent, {
-    compact: true,
+  const contentTop = drawCarouselChrome(ctx, data, cfg, accent, {
+    headline: '30-day trend',
+    subline: 'Avg ATH × · member vs McGBot',
     slideTag,
-    chartKicker: 'Avg ATH × · member vs McGBot'
+    titleSize: 44
   });
-  drawSectionRule(ctx, PAD + 100);
-  const bandY = PAD + 116;
-  const bandH = H - PAD - 52 - bandY;
+  const bandY = contentTop + 8;
+  const bandH = H - PAD - 48 - bandY;
   if (chartImage && bandH > 80) {
-    drawChartBand(ctx, bandY, bandH, chartImage);
+    drawChartBand(ctx, bandY, bandH, chartImage, { tight: true, lightFade: true });
   } else {
     ctx.fillStyle = DIM;
     ctx.font = '500 15px system-ui, "Segoe UI", sans-serif';
@@ -922,7 +1109,6 @@ function renderDigestChartSlide(ctx, data, cfg, accent, chartImage, slideTag) {
     ctx.textBaseline = 'middle';
     ctx.fillText('Trend chart unavailable', W / 2, bandY + bandH / 2);
   }
-  drawSectionRule(ctx, H - PAD - 44, false);
   drawDigestFooter(ctx);
 }
 
@@ -930,16 +1116,24 @@ function renderDigestChartSlide(ctx, data, cfg, accent, chartImage, slideTag) {
  * Weekly carousel slide 1 — hero + desk (no chart).
  */
 function renderDigestSummarySlide(ctx, data, cfg, accent, botAvatar, slideTag) {
-  drawDigestHeader(ctx, data, cfg, accent, { slideTag });
-  drawSectionRule(ctx, PAD + 78);
-  const heroY = PAD + 96;
-  const heroH = 200;
-  paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH);
-  drawSectionRule(ctx, heroY + heroH + 16);
-  const mainY = heroY + heroH + 32;
-  const contentBottom = H - PAD - 40;
-  paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom);
-  drawSectionRule(ctx, H - PAD - 44);
+  const contentTop = drawCarouselChrome(ctx, data, cfg, accent, {
+    headline: cfg.title,
+    subline: cfg.memberSub,
+    slideTag,
+    titleSize: 48
+  });
+  const heroH = 188;
+  paintDigestHeroMetrics(ctx, data, cfg, accent, contentTop, heroH);
+  drawSectionRule(ctx, contentTop + heroH + 14);
+  paintDigestDeskSectionCarousel(
+    ctx,
+    data,
+    cfg,
+    accent,
+    botAvatar,
+    contentTop + heroH + 28,
+    H - PAD - 44
+  );
   drawDigestFooter(ctx);
 }
 
@@ -1041,7 +1235,11 @@ async function buildMonthlyDigestCarouselPngs(anchor = new Date(), opts = {}) {
   const [mgImg, botAvatar, chartBuf] = await Promise.all([
     loadMgMarkImage(),
     loadMcGBotAvatarImage(),
-    buildPast30DaysDigestPng(anchor, 30).catch(() => null)
+    buildPast30DaysDigestPng(anchor, 30, {
+      skipPlaceholder: true,
+      width: CHART_SLIDE_W,
+      height: CHART_SLIDE_H
+    }).catch(() => null)
   ]);
   let chartImage = null;
   if (chartBuf) {

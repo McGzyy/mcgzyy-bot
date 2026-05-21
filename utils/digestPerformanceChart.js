@@ -276,19 +276,36 @@ async function buildMonthlyAvgXpDigestPng(yearUtc) {
 const WIDTH_30D = 1000;
 
 /**
+ * @param {(number|null|undefined)[]} pts
+ * @param {{ skipPlaceholder?: boolean }} [opts]
+ */
+function digestDailyPoints(pts, opts = {}) {
+  if (opts.skipPlaceholder) {
+    return pts.map(v =>
+      v != null && Number.isFinite(Number(v)) ? Number(Number(v).toFixed(3)) : null
+    );
+  }
+  return backfillDailyDigestPoints(pts);
+}
+
+/**
  * Last `nDays` full UTC days (ending yesterday vs `anchor`) — member vs McGBot avg ATH × per day.
  * @param {Date} [anchor]
  * @param {number} [nDays]
+ * @param {{ skipPlaceholder?: boolean, width?: number, height?: number }} [opts]
  * @returns {Promise<Buffer>}
  */
-async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30) {
+async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30, opts = {}) {
   const { labels, memberAvg, botAvg } = getAvgAthXLastNUtcDaysBeforeAnchor(anchor, nDays);
-  const memberPts = backfillDailyDigestPoints(memberAvg);
-  const botPts = backfillDailyDigestPoints(botAvg);
+  const memberPts = digestDailyPoints(memberAvg, opts);
+  const botPts = digestDailyPoints(botAvg, opts);
+  const skipPlaceholder = opts.skipPlaceholder === true;
+  const chartW = Number(opts.width) > 0 ? Number(opts.width) : WIDTH_30D;
+  const chartH = Number(opts.height) > 0 ? Number(opts.height) : HEIGHT;
 
   const canvas30 = new ChartJSNodeCanvas({
-    width: WIDTH_30D,
-    height: HEIGHT,
+    width: chartW,
+    height: chartH,
     backgroundColour: BG,
     chartCallback: digestChartCallback
   });
@@ -303,10 +320,10 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30) {
           data: memberPts,
           borderColor: LINE_MEMBER,
           backgroundColor: FILL_MEMBER,
-          borderWidth: 3,
-          tension: 0.25,
-          spanGaps: false,
-          pointRadius: 0,
+          borderWidth: skipPlaceholder ? 2.5 : 3,
+          tension: skipPlaceholder ? 0.15 : 0.25,
+          spanGaps: skipPlaceholder,
+          pointRadius: skipPlaceholder ? 2 : 0,
           pointHoverRadius: 4,
           pointBackgroundColor: LINE_MEMBER,
           pointBorderColor: POINT_RING,
@@ -317,9 +334,9 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30) {
           data: botPts,
           borderColor: LINE_BOT,
           backgroundColor: FILL_BOT,
-          borderWidth: 3,
-          tension: 0.25,
-          spanGaps: false,
+          borderWidth: skipPlaceholder ? 2.5 : 3,
+          tension: skipPlaceholder ? 0.15 : 0.25,
+          spanGaps: skipPlaceholder,
           pointRadius: 0,
           pointHoverRadius: 4,
           pointBackgroundColor: LINE_BOT,
@@ -362,7 +379,14 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30) {
           border: { display: false }
         }
       },
-      layout: { padding: { top: 44, right: 18, bottom: 8, left: 12 } }
+      layout: {
+        padding: {
+          top: skipPlaceholder ? 36 : 44,
+          right: 18,
+          bottom: skipPlaceholder ? 14 : 8,
+          left: 12
+        }
+      }
     }
   };
 

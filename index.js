@@ -3537,17 +3537,13 @@ if (lowerContent === '!scanner off') {
         return;
       }
 
-      if (
-        lowerContent === '!testdailydigest' ||
-        lowerContent === '!test7ddigest' ||
-        lowerContent === '!testmonthlydigest'
-      ) {
+      if (cmd === '!testdailydigest' || cmd === '!test7ddigest' || cmd === '!testmonthlydigest') {
         if (!isBotOwnerDiscordId(message.author.id)) {
           return message.reply('❌ You do not have permission to use this command.');
         }
 
-        const is7d = lowerContent === '!test7ddigest';
-        const isMonthly = lowerContent === '!testmonthlydigest';
+        const isMonthly = cmd === '!testmonthlydigest';
+        const is7d = cmd === '!test7ddigest';
 
         try {
           let result;

@@ -3443,8 +3443,8 @@ if (lowerContent === '!scanner off') {
             buildDigestMediaPngs,
             digestCarouselEnabled
           } = require('./utils/dailyDigestPanel');
-          const { buildTerminalDigestCaption } = require('./utils/buildXPostText');
-          const forceSingle = /\bsingle\b/i.test(content);
+          const { buildLeaderboardDigestBody } = require('./utils/xLeaderboardDigest');
+          const forceSingle = /\bsingle\b/i.test(content) || !digestCarouselEnabled('weekly');
           const useCarousel = !forceSingle && digestCarouselEnabled('weekly');
           ack = await message.reply({
             content: `⏳ Generating weekly digest (${useSample ? 'sample' : 'live'}${useCarousel ? ' · carousel' : ''})…`,
@@ -3453,7 +3453,11 @@ if (lowerContent === '!scanner off') {
           const pngs = forceSingle
             ? [await buildWeeklyDigestCardPng(new Date(), { sampleData: useSample })]
             : await buildDigestMediaPngs('weekly', new Date(), { sampleData: useSample });
-          const caption = buildTerminalDigestCaption('weekly');
+          const caption = buildLeaderboardDigestBody({
+            windowLabel: '7d snapshot',
+            days: 7,
+            topN: 5
+          });
           const files = pngs.map(
             (png, i) =>
               new AttachmentBuilder(png, {
@@ -3463,7 +3467,7 @@ if (lowerContent === '!scanner off') {
           await ack.edit({
             content:
               `**Weekly digest preview** · ${pngs.length} image${pngs.length === 1 ? '' : 's'} · ${useSample ? '**sample** (`live` for real, `single` for one card)' : '**live data**'}\n` +
-              `Caption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
+              `Post text (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
             files
           });
         } catch (e) {
@@ -3494,8 +3498,8 @@ if (lowerContent === '!scanner off') {
             buildDigestMediaPngs,
             digestCarouselEnabled
           } = require('./utils/dailyDigestPanel');
-          const { buildTerminalDigestCaption } = require('./utils/buildXPostText');
-          const forceSingle = /\bsingle\b/i.test(content);
+          const { buildMonthlyDigestPostBody } = require('./utils/xLeaderboardDigest');
+          const forceSingle = /\bsingle\b/i.test(content) || !digestCarouselEnabled('monthly');
           const useCarousel = !forceSingle && digestCarouselEnabled('monthly');
           ack = await message.reply({
             content: `⏳ Generating monthly digest (${useSample ? 'sample' : 'live'}${useCarousel ? ' · 3-slide carousel' : ''})…`,
@@ -3504,7 +3508,11 @@ if (lowerContent === '!scanner off') {
           const pngs = forceSingle
             ? [await buildMonthlyDigestCardPng(new Date(), { sampleData: useSample })]
             : await buildDigestMediaPngs('monthly', new Date(), { sampleData: useSample });
-          const caption = buildTerminalDigestCaption('monthly');
+          const caption = await buildMonthlyDigestPostBody({
+            windowLabel: 'Monthly snapshot',
+            days: 30,
+            topN: 8
+          });
           const files = pngs.map(
             (png, i) =>
               new AttachmentBuilder(png, {
@@ -3514,7 +3522,7 @@ if (lowerContent === '!scanner off') {
           await ack.edit({
             content:
               `**Monthly digest preview** · ${pngs.length} image${pngs.length === 1 ? '' : 's'} · ${useSample ? '**sample** (`live` for real, `single` for one card)' : '**live data**'}\n` +
-              `Caption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
+              `Post text (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
             files
           });
         } catch (e) {

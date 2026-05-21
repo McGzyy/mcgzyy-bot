@@ -111,6 +111,13 @@ function getSupabaseForUserPrefs() {
   }
 }
 
+async function resolveVerifiedXHandle(discordId) {
+  const prefs = await fetchUserXPostingPrefs(discordId);
+  if (!prefs || prefs.x_verified !== true) return null;
+  const handle = stripAt(prefs.x_handle);
+  return handle || null;
+}
+
 async function fetchUserXPostingPrefs(discordId) {
   if (!discordId || String(discordId).toUpperCase() === 'AUTO_BOT') return null;
   const supabase = getSupabaseForUserPrefs();
@@ -454,6 +461,7 @@ module.exports = {
   buildTerminalDigestCaption,
   buildMinimalTerminalCaption,
   buildAttributionLine,
+  resolveVerifiedXHandle,
   xBrandKicker,
   xTerminalSectionRule,
   xTerminalSectionGap,

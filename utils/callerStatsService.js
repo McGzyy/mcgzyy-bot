@@ -237,6 +237,18 @@ function resolveBestName(calls = []) {
     .sort((a, b) => b[1] - a[1])[0]?.[0] || 'Unknown';
 }
 
+/** Prefer a real Discord snowflake from the caller's calls (for X @tags). */
+function resolveDiscordIdFromCalls(calls = []) {
+  for (const call of calls) {
+    const id = call.firstCallerDiscordId || call.firstCallerId;
+    if (!id) continue;
+    const s = String(id).trim();
+    if (!s || s.toUpperCase() === 'AUTO_BOT') continue;
+    return s;
+  }
+  return null;
+}
+
 function buildTopCalls(calls = [], limit = 5) {
   return calls
     .map(call => {
@@ -416,6 +428,7 @@ function getCallerLeaderboard(limit = 10) {
 
       return {
         username: resolveBestName(entry.calls),
+        discordId: resolveDiscordIdFromCalls(entry.calls),
         totalCalls,
         avgX: totalCalls ? entry.totalX / totalCalls : 0,
         avgAth: totalCalls ? entry.totalAth / totalCalls : 0
@@ -472,6 +485,7 @@ function getCallerLeaderboardInTimeframe(days, limit = 5) {
 
       return {
         username: resolveBestName(entry.calls),
+        discordId: resolveDiscordIdFromCalls(entry.calls),
         totalCalls,
         avgX: totalCalls ? entry.totalX / totalCalls : 0,
         avgAth: totalCalls ? entry.totalAth / totalCalls : 0

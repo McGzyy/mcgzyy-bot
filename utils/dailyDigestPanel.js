@@ -584,7 +584,7 @@ function drawCarouselChrome(ctx, data, cfg, accent, opts) {
  * @param {'daily'|'weekly'|'monthly'} kind
  */
 function digestCarouselEnabled(kind) {
-  const raw = String(process.env.X_DIGEST_CAROUSEL ?? 'monthly').trim().toLowerCase();
+  const raw = String(process.env.X_DIGEST_CAROUSEL ?? '0').trim().toLowerCase();
   if (raw === '0' || raw === 'false' || raw === 'no' || raw === 'off') return false;
   if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'all') return true;
   const kinds = raw.split(/[\s,]+/).filter(Boolean);

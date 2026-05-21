@@ -7,6 +7,8 @@ const { loadXPostAuditEventsSince } = require('./xPostAudit');
 const { buildWeeklySnapshotModulesPng } = require('./weeklySnapshotPanel');
 const {
   buildDailyDigestCardPng,
+  buildWeeklyDigestCardPng,
+  buildMonthlyDigestCardPng,
   buildDigestMediaPngs
 } = require('./dailyDigestPanel');
 const { tickXEngagementPosts } = require('./xEngagementScheduler');
@@ -27,8 +29,11 @@ const {
   fitTweet,
   fitTweetWholeLines,
   resolveWeeklyStatsTweetMaxChars,
-  buildTerminalDigestCaption
+  buildTerminalDigestCaption,
+  resolveVerifiedXHandle
 } = require('./buildXPostText');
+
+const DIGEST_PODIUM_MEDALS = ['🥇', '🥈', '🥉'];
 
 /** Bullet for list rows — works on every X client (avoid emoji squares). */
 const BUL = '\u2022 ';
@@ -129,6 +134,46 @@ function buildLeaderboardDigestBody(p) {
   if (raw.length <= maxChars) {
     return raw;
   }
+  return maxChars >= 2000 ? fitTweet(raw, maxChars) : fitTweetWholeLines(raw, maxChars);
+}
+
+/**
+ * Monthly digest post text: headline + top 3 podium lines (@X when verified).
+ * @param {{ windowLabel: string, days: number, topN?: number }} p
+ */
+async function buildMonthlyDigestPostBody(p) {
+  const maxChars = resolveWeeklyStatsTweetMaxChars();
+  const days = Number(p.days) > 0 ? Number(p.days) : 30;
+  const rows = getCallerLeaderboardInTimeframe(days, 3);
+  const gap = weeklySectionGap();
+  const footer = xTerminalFooterLine();
+  const rawLabel = String(p.windowLabel || '').trim();
+  const head = `🚀 ${rawLabel}`;
+
+  /** @type {string[]} */
+  const podiumLines = [];
+  for (let i = 0; i < rows.length && i < 3; i += 1) {
+    const r = rows[i];
+    const medal = DIGEST_PODIUM_MEDALS[i] || `${i + 1}.`;
+    const stats = `${r.avgX.toFixed(2)}× avg · ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`;
+    let name = r.username || 'Caller';
+    if (r.discordId) {
+      const handle = await resolveVerifiedXHandle(r.discordId);
+      if (handle) name = `@${handle}`;
+    }
+    podiumLines.push(`${medal} ${name} — ${stats}`);
+  }
+
+  const chunks = [head];
+  if (podiumLines.length) {
+    chunks.push(podiumLines.join('\n'));
+  } else {
+    chunks.push('(quiet month on the member desk)');
+  }
+  if (footer) chunks.push(footer);
+
+  const raw = chunks.filter(Boolean).join(gap).trim();
+  if (raw.length <= maxChars) return raw;
   return maxChars >= 2000 ? fitTweet(raw, maxChars) : fitTweetWholeLines(raw, maxChars);
 }
 
@@ -368,16 +413,18 @@ async function postDigest(p, options = {}) {
         console.error('[XLeaderboardDigest] daily digest card: render did not produce a valid PNG buffer');
       }
     } else if (useTerminalWeeklyCard) {
-      const raws = await buildDigestMediaPngs('weekly', anchor, { sampleData });
-      pngBuffers = raws.map(r => normalizePngUploadBuffer(r)).filter(Boolean);
-      if (!pngBuffers.length) {
-        console.error('[XLeaderboardDigest] weekly digest: no valid PNG buffers');
+      const raw = await buildWeeklyDigestCardPng(anchor, { sampleData });
+      const b = normalizePngUploadBuffer(raw);
+      if (b) pngBuffers = [b];
+      else {
+        console.error('[XLeaderboardDigest] weekly digest card: render did not produce a valid PNG buffer');
       }
     } else if (useTerminalMonthlyCard) {
-      const raws = await buildDigestMediaPngs('monthly', anchor, { sampleData });
-      pngBuffers = raws.map(r => normalizePngUploadBuffer(r)).filter(Boolean);
-      if (!pngBuffers.length) {
-        console.error('[XLeaderboardDigest] monthly digest: no valid PNG buffers');
+      const raw = await buildMonthlyDigestCardPng(anchor, { sampleData });
+      const b = normalizePngUploadBuffer(raw);
+      if (b) pngBuffers = [b];
+      else {
+        console.error('[XLeaderboardDigest] monthly digest card: render did not produce a valid PNG buffer');
       }
     }
   } catch (err) {
@@ -630,6 +677,7 @@ async function postLeaderboardDigestToX(body, opts = {}) {
 module.exports = {
   startXLeaderboardDigestScheduler,
   buildLeaderboardDigestBody,
+  buildMonthlyDigestPostBody,
   buildWeeklyStatsSnapshotBody,
   tickWeeklyStatsSnapshot,
   postLeaderboardDigestToX,

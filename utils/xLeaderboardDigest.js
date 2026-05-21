@@ -23,6 +23,8 @@ const {
   getTopUserCallsInUtcWeekBounds,
   getTopBotCallsInUtcWeekBounds,
   getPreviousCompletedUtcWeekBounds,
+  getDigestWindowBounds,
+  countQualifyingDeskCallsInBounds,
   startOfUtcCalendarDay
 } = require('./callerStatsService');
 const { getAllTrackedCalls, initTrackedCallsStore } = require('./trackedCallsService');
@@ -165,8 +167,14 @@ function formatUtcRangeLabelForPost(startInclusive, endExclusive) {
 function buildWeeklyDigestPostBody(p = {}) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 5;
-  const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(new Date());
-  const rangeLabel = formatUtcRangeLabelForPost(startInclusive, endExclusive);
+  const bounds = getDigestWindowBounds('weekly', new Date(), {
+    rolling: p.useRollingWindow === true
+  });
+  const { startInclusive, endExclusive } = bounds;
+  const rangeLabel =
+    bounds.mode === 'rolling'
+      ? 'last 7d (rolling)'
+      : formatUtcRangeLabelForPost(startInclusive, endExclusive);
   const rows = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, topN);
   const bestHuman = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
@@ -220,14 +228,17 @@ function buildWeeklyDigestPostBody(p = {}) {
 function buildDailyDigestPostBody(p = {}) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 4;
-  const anchor = new Date();
-  const dayEnd = startOfUtcCalendarDay(anchor);
-  const dayStart = new Date(dayEnd);
-  dayStart.setUTCDate(dayStart.getUTCDate() - 1);
-  const rangeLabel = formatUtcRangeLabelForPost(dayStart, dayEnd);
-  const rows = getCallerLeaderboardInUtcWeekBounds(dayStart, dayEnd, topN);
-  const bestHuman = getBestCallInUtcWeekBounds(dayStart, dayEnd);
-  const bestBot = getBestBotCallInUtcWeekBounds(dayStart, dayEnd);
+  const bounds = getDigestWindowBounds('daily', new Date(), {
+    rolling: p.useRollingWindow === true
+  });
+  const { startInclusive, endExclusive } = bounds;
+  const rangeLabel =
+    bounds.mode === 'rolling'
+      ? 'last 24h (rolling)'
+      : formatUtcRangeLabelForPost(startInclusive, endExclusive);
+  const rows = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, topN);
+  const bestHuman = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
+  const bestBot = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
   const gap = weeklySectionGap();
   const footer = xTerminalFooterLine();
   const head = `🚀 ${String(p.windowLabel || 'Daily snapshot').trim()} · ${rangeLabel}`;
@@ -278,11 +289,14 @@ function buildDailyDigestPostBody(p = {}) {
 async function buildMonthlyDigestPostBody(p) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 3;
-  const anchor = new Date();
-  const monthEnd = startOfUtcCalendarDay(anchor);
-  const monthStart = new Date(monthEnd);
-  monthStart.setUTCDate(monthStart.getUTCDate() - 30);
-  const rangeLabel = formatUtcRangeLabelForPost(monthStart, monthEnd);
+  const bounds = getDigestWindowBounds('monthly', new Date(), {
+    rolling: p.useRollingWindow === true
+  });
+  const { startInclusive: monthStart, endExclusive: monthEnd } = bounds;
+  const rangeLabel =
+    bounds.mode === 'rolling'
+      ? 'last 30d (rolling)'
+      : formatUtcRangeLabelForPost(monthStart, monthEnd);
   const rows = getCallerLeaderboardInUtcWeekBounds(monthStart, monthEnd, topN);
   const gap = weeklySectionGap();
   const footer = xTerminalFooterLine();
@@ -572,29 +586,38 @@ async function postDigest(p, options = {}) {
   const anchor = new Date();
   const sampleData = options.sampleData === true;
 
+  const useRollingWindow = options.useRollingWindow === true;
+
   if (!sampleData) {
     await ensureDigestDataStores();
     const n = getAllTrackedCalls().length;
-    console.log(`[XLeaderboardDigest] live post — tracked calls loaded: ${n}`);
+    const kind = useTerminalDailyCard ? 'daily' : useTerminalWeeklyCard ? 'weekly' : 'monthly';
+    const bounds = getDigestWindowBounds(kind, anchor, { rolling: useRollingWindow });
+    const inWindow = countQualifyingDeskCallsInBounds(bounds.startInclusive, bounds.endExclusive);
+    console.log(
+      `[XLeaderboardDigest] live post — total=${n} window=${bounds.mode} deskCalls=${inWindow.total} (member ${inWindow.human}, bot ${inWindow.bot})`
+    );
   }
+
+  const cardOpts = { sampleData, useRollingWindow };
 
   try {
     if (useTerminalDailyCard) {
-      const raw = await buildDailyDigestCardPng(anchor, { sampleData });
+      const raw = await buildDailyDigestCardPng(anchor, cardOpts);
       const b = normalizePngUploadBuffer(raw);
       if (b) pngBuffers = [b];
       else {
         console.error('[XLeaderboardDigest] daily digest card: render did not produce a valid PNG buffer');
       }
     } else if (useTerminalWeeklyCard) {
-      const raw = await buildWeeklyDigestCardPng(anchor, { sampleData });
+      const raw = await buildWeeklyDigestCardPng(anchor, cardOpts);
       const b = normalizePngUploadBuffer(raw);
       if (b) pngBuffers = [b];
       else {
         console.error('[XLeaderboardDigest] weekly digest card: render did not produce a valid PNG buffer');
       }
     } else if (useTerminalMonthlyCard) {
-      const raw = await buildMonthlyDigestCardPng(anchor, { sampleData });
+      const raw = await buildMonthlyDigestCardPng(anchor, cardOpts);
       const b = normalizePngUploadBuffer(raw);
       if (b) pngBuffers = [b];
       else {
@@ -605,16 +628,26 @@ async function postDigest(p, options = {}) {
     console.error('[XLeaderboardDigest] digest render failed:', err?.message || err);
   }
 
+  const postOpts = { useRollingWindow };
   let text;
   if (useTerminalDailyCard) {
-    text = buildDailyDigestPostBody({ windowLabel, topN: Number(topN) > 0 ? Number(topN) : 4 });
+    text = buildDailyDigestPostBody({
+      windowLabel,
+      topN: Number(topN) > 0 ? Number(topN) : 4,
+      ...postOpts
+    });
   } else if (useTerminalWeeklyCard) {
-    text = buildWeeklyDigestPostBody({ windowLabel, topN: Number(topN) > 0 ? Number(topN) : 5 });
+    text = buildWeeklyDigestPostBody({
+      windowLabel,
+      topN: Number(topN) > 0 ? Number(topN) : 5,
+      ...postOpts
+    });
   } else if (useTerminalMonthlyCard) {
     text = await buildMonthlyDigestPostBody({
       windowLabel,
       days: Number(days) > 0 ? Number(days) : 30,
-      topN
+      topN,
+      ...postOpts
     });
   } else {
     text = buildLeaderboardDigestBody({ windowLabel, days, topN });
@@ -846,10 +879,40 @@ function startXLeaderboardDigestScheduler() {
 /**
  * Post a leaderboard digest to X (same path as the scheduler). For Discord test commands.
  * @param {{ windowLabel: string, days: number, topN: number }} body
- * @param {{ attachDailyDualPanel?: boolean, attachWeeklyDigestCard?: boolean, attachWeeklyAvgXChart?: boolean, attachMonthlyDigestCard?: boolean, attachPast30DaysChart?: boolean, sampleData?: boolean }} [opts]
+ * @param {{ attachDailyDualPanel?: boolean, attachWeeklyDigestCard?: boolean, attachWeeklyAvgXChart?: boolean, attachMonthlyDigestCard?: boolean, attachPast30DaysChart?: boolean, sampleData?: boolean, useRollingWindow?: boolean }} [opts]
  */
 async function postLeaderboardDigestToX(body, opts = {}) {
   return postDigest(body, opts);
+}
+
+/**
+ * @param {'daily'|'weekly'|'monthly'} kind
+ * @param {{ useRollingWindow?: boolean }} [opts]
+ */
+async function getDigestLiveDiagnostics(kind, opts = {}) {
+  await ensureDigestDataStores();
+  const anchor = new Date();
+  const bounds = getDigestWindowBounds(kind, anchor, { rolling: opts.useRollingWindow === true });
+  const inWindow = countQualifyingDeskCallsInBounds(bounds.startInclusive, bounds.endExclusive);
+  const rolling7 = getCallerLeaderboardInTimeframe(7, 5);
+  const rangeLabel =
+    bounds.mode === 'rolling'
+      ? bounds.days === 1
+        ? 'last 24h rolling'
+        : bounds.days === 7
+          ? 'last 7d rolling'
+          : 'last 30d rolling'
+      : formatUtcRangeLabelForPost(bounds.startInclusive, bounds.endExclusive);
+
+  return {
+    totalTracked: getAllTrackedCalls().length,
+    windowMode: bounds.mode,
+    windowLabel: rangeLabel,
+    deskCallsInWindow: inWindow.total,
+    memberCallsInWindow: inWindow.human,
+    botCallsInWindow: inWindow.bot,
+    rolling7dLeaderboardRows: rolling7.length
+  };
 }
 
 module.exports = {
@@ -861,5 +924,6 @@ module.exports = {
   buildWeeklyStatsSnapshotBody,
   tickWeeklyStatsSnapshot,
   postLeaderboardDigestToX,
+  getDigestLiveDiagnostics,
   getXDigestSchedulerStatus
 };

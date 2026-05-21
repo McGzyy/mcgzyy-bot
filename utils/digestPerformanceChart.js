@@ -195,8 +195,18 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date(), opts = {}) {
   const embed = opts.forCardEmbed === true;
   const chartW = Number(opts.width) > 0 ? Number(opts.width) : WIDTH;
   const chartH = Number(opts.height) > 0 ? Number(opts.height) : HEIGHT;
-  const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(fromDate);
-  const { memberAvg, botAvg } = getAvgAthXByUtcWeekdayInBounds(startInclusive, endExclusive);
+  let memberAvg;
+  let botAvg;
+  if (opts.useRollingWindow === true) {
+    const series = getAvgAthXLastNUtcDaysBeforeAnchor(fromDate, 7);
+    memberAvg = series.memberAvg;
+    botAvg = series.botAvg;
+  } else {
+    const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(fromDate);
+    const series = getAvgAthXByUtcWeekdayInBounds(startInclusive, endExclusive);
+    memberAvg = series.memberAvg;
+    botAvg = series.botAvg;
+  }
 
   const toPts = (arr) =>
     arr.map(v => (v == null || !Number.isFinite(Number(v)) ? null : Number(Number(v).toFixed(3))));

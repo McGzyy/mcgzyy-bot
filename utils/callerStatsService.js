@@ -943,16 +943,13 @@ function getUtcYesterdayAndPriorDeskAvgs(anchor = new Date()) {
 }
 
 /**
- * Yesterday UTC desk cohort stats (24h window aligned with daily snapshot).
- * @param {Date} [anchor]
+ * Desk cohort stats for any UTC half-open range (used by daily pulse + rolling test windows).
+ * @param {Date} startInclusive
+ * @param {Date} endExclusive
  */
-function getDailyUtcDeskSnapshot(anchor = new Date()) {
-  const todayStart = startOfUtcCalendarDay(anchor);
-  const yEnd = new Date(todayStart);
-  const yStart = new Date(todayStart);
-  yStart.setUTCDate(yStart.getUTCDate() - 1);
-  const startMs = yStart.getTime();
-  const endMs = yEnd.getTime();
+function getUtcDeskSnapshotForRange(startInclusive, endExclusive) {
+  const startMs = startInclusive.getTime();
+  const endMs = endExclusive.getTime();
 
   const userCalls = getAllTrackedCalls()
     .filter(isHumanUserCall)
@@ -976,11 +973,90 @@ function getDailyUtcDeskSnapshot(anchor = new Date()) {
   }
 
   return {
-    dayLabel: yStart.toISOString().slice(0, 10),
+    dayLabel: startInclusive.toISOString().slice(0, 10),
     uniqueCallers: seenCaller.size,
     user: cohortAthXStats(userCalls),
     bot: cohortAthXStats(botCalls)
   };
+}
+
+/**
+ * Calendar vs rolling bounds for digest cards and X post text.
+ * @param {'daily'|'weekly'|'monthly'} kind
+ * @param {Date} [anchor]
+ * @param {{ rolling?: boolean }} [opts] `rolling: true` = last 1d / 7d / 30d ending now (Discord test posts).
+ */
+function getDigestWindowBounds(kind, anchor = new Date(), opts = {}) {
+  const rolling = opts.rolling === true;
+  if (rolling) {
+    const days = kind === 'daily' ? 1 : kind === 'weekly' ? 7 : 30;
+    const endExclusive = new Date(anchor.getTime());
+    const startInclusive = new Date(endExclusive.getTime() - days * 86400000);
+    const priorEnd = new Date(startInclusive);
+    const priorStart = new Date(priorEnd.getTime() - days * 86400000);
+    return { startInclusive, endExclusive, priorStart, priorEnd, mode: 'rolling', days };
+  }
+
+  if (kind === 'daily') {
+    const dayEnd = startOfUtcCalendarDay(anchor);
+    const dayStart = new Date(dayEnd);
+    dayStart.setUTCDate(dayStart.getUTCDate() - 1);
+    const priorEnd = new Date(dayStart);
+    const priorStart = new Date(priorEnd);
+    priorStart.setUTCDate(priorStart.getUTCDate() - 1);
+    return {
+      startInclusive: dayStart,
+      endExclusive: dayEnd,
+      priorStart,
+      priorEnd,
+      mode: 'calendar'
+    };
+  }
+
+  if (kind === 'weekly') {
+    const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(anchor);
+    const priorStart = new Date(startInclusive);
+    priorStart.setUTCDate(priorStart.getUTCDate() - 7);
+    return {
+      startInclusive,
+      endExclusive,
+      priorStart,
+      priorEnd: startInclusive,
+      mode: 'calendar'
+    };
+  }
+
+  const endExclusive = startOfUtcCalendarDay(anchor);
+  const curStart = new Date(endExclusive);
+  curStart.setUTCDate(curStart.getUTCDate() - 30);
+  const priorEnd = new Date(curStart);
+  const priorStart = new Date(priorEnd);
+  priorStart.setUTCDate(priorStart.getUTCDate() - 30);
+  return {
+    startInclusive: curStart,
+    endExclusive,
+    priorStart,
+    priorEnd,
+    mode: 'calendar'
+  };
+}
+
+function countQualifyingDeskCallsInBounds(startInclusive, endExclusive) {
+  const human = callsForUtcWeekDesk(isHumanUserCall, startInclusive, endExclusive);
+  const bot = callsForUtcWeekDesk(isBotCall, startInclusive, endExclusive);
+  return { human: human.length, bot: bot.length, total: human.length + bot.length };
+}
+
+/**
+ * Yesterday UTC desk cohort stats (24h window aligned with daily snapshot).
+ * @param {Date} [anchor]
+ */
+function getDailyUtcDeskSnapshot(anchor = new Date()) {
+  const todayStart = startOfUtcCalendarDay(anchor);
+  const yEnd = new Date(todayStart);
+  const yStart = new Date(todayStart);
+  yStart.setUTCDate(yStart.getUTCDate() - 1);
+  return getUtcDeskSnapshotForRange(yStart, yEnd);
 }
 
 function getAvgAthXByUtcMonthInYear(yearUtc) {
@@ -1031,6 +1107,9 @@ module.exports = {
   getAvgAthXLastNUtcDaysBeforeAnchor,
   getDeskAvgAthXPairForUtcRange,
   getUtcYesterdayAndPriorDeskAvgs,
+  getUtcDeskSnapshotForRange,
+  getDigestWindowBounds,
+  countQualifyingDeskCallsInBounds,
   getDailyUtcDeskSnapshot,
   startOfUtcCalendarDay
 };

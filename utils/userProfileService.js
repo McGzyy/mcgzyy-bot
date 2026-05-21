@@ -240,6 +240,10 @@ function findUserProfile({
   username = '',
   displayName = ''
 } = {}) {
+  if (!_userProfilesHydrated) {
+    return null;
+  }
+
   if (discordUserId) {
     const byId = getUserProfileByDiscordId(discordUserId);
     if (byId) return byId;

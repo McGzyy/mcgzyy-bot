@@ -30,6 +30,8 @@ const {
   getCallerLeaderboardInUtcWeekBounds,
   getBestCallInUtcWeekBounds,
   getBestBotCallInUtcWeekBounds,
+  getDigestWindowBounds,
+  getUtcDeskSnapshotForRange,
   startOfUtcCalendarDay
 } = require('./callerStatsService');
 const { buildWeeklyAvgXpDigestPng, buildPast30DaysDigestPng } = require('./digestPerformanceChart');
@@ -209,30 +211,28 @@ function buildSampleDailyDigestData(anchor = new Date()) {
  * @param {Date} anchor
  * @returns {import('./dailyDigestPanel').DailyDigestData}
  */
-function buildLiveDailyDigestData(anchor = new Date()) {
-  const { yesterday, prior, yesterdayLabel } = getUtcYesterdayAndPriorDeskAvgs(anchor);
-  const dayEnd = startOfUtcCalendarDay(anchor);
-  const dayStart = new Date(dayEnd);
-  dayStart.setUTCDate(dayStart.getUTCDate() - 1);
-  const rows = getCallerLeaderboardInUtcWeekBounds(dayStart, dayEnd, 5);
-  const bestHuman = getBestCallInUtcWeekBounds(dayStart, dayEnd);
-  const bestBot = getBestBotCallInUtcWeekBounds(dayStart, dayEnd);
+function buildLiveDailyDigestData(anchor = new Date(), opts = {}) {
+  const bounds = getDigestWindowBounds('daily', anchor, { rolling: opts.useRollingWindow === true });
+  const cur = getDeskAvgAthXPairForUtcRange(bounds.startInclusive, bounds.endExclusive);
+  const prior = getDeskAvgAthXPairForUtcRange(bounds.priorStart, bounds.priorEnd);
+  const rows = getCallerLeaderboardInUtcWeekBounds(bounds.startInclusive, bounds.endExclusive, 5);
+  const bestHuman = getBestCallInUtcWeekBounds(bounds.startInclusive, bounds.endExclusive);
+  const bestBot = getBestBotCallInUtcWeekBounds(bounds.startInclusive, bounds.endExclusive);
+  const dateLabel =
+    bounds.mode === 'rolling'
+      ? 'Last 24h (rolling)'
+      : `UTC ${bounds.startInclusive.toISOString().slice(0, 10)}`;
 
   return {
-    dateLabel: `UTC ${yesterdayLabel}`,
+    dateLabel,
     isSample: false,
     memberAvgX:
-      yesterday.memberAvgX != null && Number.isFinite(Number(yesterday.memberAvgX))
-        ? Number(yesterday.memberAvgX)
-        : null,
+      cur.memberAvgX != null && Number.isFinite(Number(cur.memberAvgX)) ? Number(cur.memberAvgX) : null,
     priorMemberAvgX:
       prior.memberAvgX != null && Number.isFinite(Number(prior.memberAvgX))
         ? Number(prior.memberAvgX)
         : null,
-    botAvgX:
-      yesterday.botAvgX != null && Number.isFinite(Number(yesterday.botAvgX))
-        ? Number(yesterday.botAvgX)
-        : null,
+    botAvgX: cur.botAvgX != null && Number.isFinite(Number(cur.botAvgX)) ? Number(cur.botAvgX) : null,
     leaderboard: rows.map(r => ({
       username: r.username,
       avgX: r.avgX,
@@ -242,7 +242,7 @@ function buildLiveDailyDigestData(anchor = new Date()) {
       ? { ticker: bestHuman.ticker, x: Number(bestHuman.x) || 0 }
       : null,
     bestBot: bestBot ? { ticker: bestBot.ticker, x: Number(bestBot.x) || 0 } : null,
-    deskPulse: getDailyUtcDeskSnapshot(anchor)
+    deskPulse: getUtcDeskSnapshotForRange(bounds.startInclusive, bounds.endExclusive)
   };
 }
 
@@ -394,7 +394,7 @@ function resolveDailyDigestData(anchor = new Date(), opts = {}) {
   if (opts.sampleData === true) {
     return buildSampleDailyDigestData(anchor);
   }
-  return buildLiveDailyDigestData(anchor);
+  return buildLiveDailyDigestData(anchor, opts);
 }
 
 /**
@@ -426,18 +426,21 @@ function buildSampleWeeklyDigestData(anchor = new Date()) {
  * @param {Date} anchor
  * @returns {import('./dailyDigestPanel').WeeklyDigestData}
  */
-function buildLiveWeeklyDigestData(anchor = new Date()) {
-  const { startInclusive, endExclusive } = getPreviousCompletedUtcWeekBounds(anchor);
+function buildLiveWeeklyDigestData(anchor = new Date(), opts = {}) {
+  const bounds = getDigestWindowBounds('weekly', anchor, { rolling: opts.useRollingWindow === true });
+  const { startInclusive, endExclusive, priorStart, priorEnd } = bounds;
   const cur = getDeskAvgAthXPairForUtcRange(startInclusive, endExclusive);
-  const prevStart = new Date(startInclusive);
-  prevStart.setUTCDate(prevStart.getUTCDate() - 7);
-  const prior = getDeskAvgAthXPairForUtcRange(prevStart, startInclusive);
+  const prior = getDeskAvgAthXPairForUtcRange(priorStart, priorEnd);
   const rows = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, 5);
   const bestHuman = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
+  const dateLabel =
+    bounds.mode === 'rolling'
+      ? 'Last 7d (rolling)'
+      : formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive);
 
   return {
-    dateLabel: formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive),
+    dateLabel,
     isSample: false,
     memberAvgX:
       cur.memberAvgX != null && Number.isFinite(Number(cur.memberAvgX))
@@ -469,7 +472,7 @@ function resolveWeeklyDigestData(anchor = new Date(), opts = {}) {
   if (opts.sampleData === true) {
     return buildSampleWeeklyDigestData(anchor);
   }
-  return buildLiveWeeklyDigestData(anchor);
+  return buildLiveWeeklyDigestData(anchor, opts);
 }
 
 /**
@@ -504,16 +507,21 @@ function buildSampleMonthlyDigestData(anchor = new Date()) {
  * @param {Date} anchor
  * @returns {import('./dailyDigestPanel').MonthlyDigestData}
  */
-function buildLiveMonthlyDigestData(anchor = new Date()) {
-  const { curStart, endExclusive, priorStart, priorEnd } = getUtcRolling30AndPrior30Bounds(anchor);
+function buildLiveMonthlyDigestData(anchor = new Date(), opts = {}) {
+  const bounds = getDigestWindowBounds('monthly', anchor, { rolling: opts.useRollingWindow === true });
+  const { startInclusive: curStart, endExclusive, priorStart, priorEnd } = bounds;
   const cur = getDeskAvgAthXPairForUtcRange(curStart, endExclusive);
   const prior = getDeskAvgAthXPairForUtcRange(priorStart, priorEnd);
   const rows = getCallerLeaderboardInUtcWeekBounds(curStart, endExclusive, 8);
   const bestHuman = getBestCallInUtcWeekBounds(curStart, endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(curStart, endExclusive);
+  const dateLabel =
+    bounds.mode === 'rolling'
+      ? 'Last 30d (rolling)'
+      : formatUtcDateRangeLabel(curStart, endExclusive);
 
   return {
-    dateLabel: formatUtcDateRangeLabel(curStart, endExclusive),
+    dateLabel,
     isSample: false,
     memberAvgX:
       cur.memberAvgX != null && Number.isFinite(Number(cur.memberAvgX))
@@ -545,7 +553,7 @@ function resolveMonthlyDigestData(anchor = new Date(), opts = {}) {
   if (opts.sampleData === true) {
     return buildSampleMonthlyDigestData(anchor);
   }
-  return buildLiveMonthlyDigestData(anchor);
+  return buildLiveMonthlyDigestData(anchor, opts);
 }
 
 /** Bottom band on daily cards — 24h desk pulse (no chart). */
@@ -1629,7 +1637,10 @@ async function buildWeeklyDigestCardPng(anchor = new Date(), opts = {}) {
   const [mgImg, botAvatar, chartBuf] = await Promise.all([
     loadMgMarkImage(),
     loadMcGBotAvatarImage(),
-    buildWeeklyAvgXpDigestPng(anchor, DIGEST_CHART_OPTS).catch(err => {
+    buildWeeklyAvgXpDigestPng(anchor, {
+      ...DIGEST_CHART_OPTS,
+      useRollingWindow: opts.useRollingWindow === true
+    }).catch(err => {
       console.error('[buildWeeklyDigestCardPng] weekday chart failed:', err?.message || err);
       return null;
     })

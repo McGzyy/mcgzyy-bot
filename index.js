@@ -52,6 +52,7 @@ const {
   buildLeaderboardDigestBody,
   buildWeeklyStatsSnapshotBody,
   postLeaderboardDigestToX,
+  getDigestLiveDiagnostics,
   getXDigestSchedulerStatus
 } = require('./utils/xLeaderboardDigest');
 const { setXEngagementDiscordClient } = require('./utils/xEngagementScheduler');
@@ -547,9 +548,9 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
     `• \`!xdigeststatus\` — Scheduled X digest / W·M engagement scheduler status + recent post audit (owner only)\n` +
     `• \`!previewdailydigest\` / \`!previewweeklydigest\` / \`!previewmonthlydigest\` — **Discord preview** with **sample stats** (layout). Add \`live\` for real data.\n` +
-    `• \`!testdailydigest\` — Post daily card to X. \`!testdailydigest sample\` uses filler; default is **live** stats.\n` +
-    `• \`!test7ddigest\` — Post weekly card to X. \`!test7ddigest sample\` uses filler; default is **live** stats.\n` +
-    `• \`!testmonthlydigest\` — Post monthly card to X. \`!testmonthlydigest sample\` uses filler; default is **live** stats.\n` +
+    `• \`!testdailydigest\` — Post daily card to X (**live** uses **rolling 24h**; add \`calendar\` for yesterday UTC like the scheduler). \`sample\` = filler layout.\n` +
+    `• \`!test7ddigest\` — Post weekly card (**live** = **rolling 7d**; add \`calendar\` for last completed Mon–Sun week).\n` +
+    `• \`!testmonthlydigest\` — Post monthly card (**live** = **rolling 30d**; add \`calendar\` for UTC month-to-date window).\n` +
     `• \`!previewxmilestone user|bot <sol_ca> [mult]\` — **Preview card + caption in Discord** (no X; omit CA for JUP default)\n` +
     `• \`!testxmilestone user|bot <sol_ca> [mult]\` — **Live X post** (real Dex token; user tests credit **@McGzyy**). \`fresh\` skips auto-quote. Quote: \`!testxmilestone quote <post_id> user|bot [mult]\`\n` +
     `• \`!testweeklyrunner\` / \`!testtopcallermonth\` — Force **weekly runner** or **monthly top caller** X posts (owner only; monthly test skips Discord role)\n` +
@@ -3400,18 +3401,31 @@ if (lowerContent === '!scanner off') {
         /** @type {import('discord.js').Message|null} */
         let ack = null;
         try {
+          if (useLive) {
+            const { initUserProfilesStore } = require('./utils/userProfileService');
+            const { initTrackedCallsStore } = require('./utils/trackedCallsService');
+            await initUserProfilesStore();
+            await initTrackedCallsStore();
+          }
           const { buildDailyDigestCardPng } = require('./utils/dailyDigestPanel');
-          const { buildTerminalDigestCaption } = require('./utils/buildXPostText');
+          const { buildDailyDigestPostBody } = require('./utils/xLeaderboardDigest');
           ack = await message.reply({
             content: `⏳ Generating daily digest card (${useSample ? 'sample layout' : 'live data'})…`,
             allowedMentions: { repliedUser: false }
           });
-          const png = await buildDailyDigestCardPng(new Date(), { sampleData: useSample });
-          const caption = buildTerminalDigestCaption('daily');
+          const png = await buildDailyDigestCardPng(new Date(), {
+            sampleData: useSample,
+            useRollingWindow: useLive
+          });
+          const caption = buildDailyDigestPostBody({
+            windowLabel: 'Daily snapshot',
+            topN: 4,
+            useRollingWindow: useLive
+          });
           const file = new AttachmentBuilder(png, { name: 'daily_digest_preview.png' });
           await ack.edit({
             content:
-              `**Daily digest preview** · ${useSample ? '**sample stats** (add `live` for real data)' : '**live data**'}\n` +
+              `**Daily digest preview** · ${useSample ? '**sample stats** (add `live` for real data)' : '**live · rolling 24h**'}\n` +
               `Caption (${caption.length} chars):\n\`\`\`\n${caption}\n\`\`\``,
             files: [file]
           });
@@ -3548,35 +3562,54 @@ if (lowerContent === '!scanner off') {
         try {
           let result;
           let label = 'digest';
+          const useSample = /\bsample\b/i.test(content);
+          const useCalendar = /\bcalendar\b/i.test(content);
+          const useRollingWindow = !useCalendar;
+          const kind = isMonthly ? 'monthly' : is7d ? 'weekly' : 'daily';
+          const windowNote = useSample
+            ? 'sample layout'
+            : useCalendar
+              ? 'live · calendar window (scheduler)'
+              : 'live · rolling window';
+
           if (isMonthly) {
-            const useSample = /\bsample\b/i.test(content);
-            label = useSample ? 'monthly (sample layout)' : 'monthly (live)';
+            label = `monthly (${windowNote})`;
             result = await postLeaderboardDigestToX(
               { windowLabel: 'Monthly snapshot', days: 30, topN: 8 },
-              { attachPast30DaysChart: true, sampleData: useSample }
+              { attachPast30DaysChart: true, sampleData: useSample, useRollingWindow }
             );
           } else if (is7d) {
-            const useSample = /\bsample\b/i.test(content);
-            label = useSample ? '7d (sample layout)' : '7d (live)';
+            label = `7d (${windowNote})`;
             result = await postLeaderboardDigestToX(
               { windowLabel: '7d snapshot', days: 7, topN: 5 },
-              { attachWeeklyAvgXChart: true, sampleData: useSample }
+              { attachWeeklyAvgXChart: true, sampleData: useSample, useRollingWindow }
             );
           } else {
-            const useSample = /\bsample\b/i.test(content);
-            label = useSample ? 'daily (sample layout)' : 'daily (live)';
+            label = `daily (${windowNote})`;
             result = await postLeaderboardDigestToX(
               { windowLabel: 'Daily snapshot', days: 1, topN: 4 },
-              { attachDailyDualPanel: true, sampleData: useSample }
+              { attachDailyDualPanel: true, sampleData: useSample, useRollingWindow }
             );
           }
+
+          /** @type {string} */
+          let statsLine = '';
+          if (!useSample) {
+            const diag = await getDigestLiveDiagnostics(kind, { useRollingWindow });
+            statsLine =
+              `\nTracked: **${diag.totalTracked}** · window (**${diag.windowLabel}**): **${diag.deskCallsInWindow}** desk calls` +
+              (diag.deskCallsInWindow === 0
+                ? ` · rolling 7d leaderboard has **${diag.rolling7dLeaderboardRows}** callers (\`!callerboard\` is all-time)`
+                : '');
+          }
+
           if (result?.success) {
             await replyText(
               message,
-              `✅ Posted **${label}** to X\nPost ID: ${result.id}\nBody length: ${result.textLength ?? '—'} characters`
+              `✅ Posted **${label}** to X\nPost ID: ${result.id}\nBody length: ${result.textLength ?? '—'} characters${statsLine}`
             );
           } else {
-            await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result?.error, null, 2)}`);
+            await replyText(message, `❌ Failed to post to X\n${JSON.stringify(result?.error, null, 2)}${statsLine}`);
           }
         } catch (e) {
           console.error('[!test*digest]', e);

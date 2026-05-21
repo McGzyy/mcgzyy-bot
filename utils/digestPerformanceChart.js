@@ -105,14 +105,23 @@ function digestLegendPluginOptions(embed = false) {
     align: 'center',
     labels: {
       color: TICK,
-      padding: embed ? 12 : 16,
-      boxWidth: embed ? 16 : 14,
-      boxHeight: embed ? 16 : 14,
+      padding: embed ? 6 : 16,
+      boxWidth: embed ? 12 : 14,
+      boxHeight: embed ? 12 : 14,
       usePointStyle: true,
       pointStyle: 'rect',
-      font: { size: embed ? 15 : 14, weight: '600', family: 'Arial, Helvetica, sans-serif' }
+      font: {
+        size: embed ? 12 : 14,
+        weight: '600',
+        family: 'Arial, Helvetica, sans-serif'
+      }
     }
   };
+}
+
+/** Tight insets so card-embed charts use most of the PNG height. */
+function digestCardEmbedLayoutPadding() {
+  return { top: 18, right: 8, bottom: 6, left: 2 };
 }
 
 /**
@@ -156,8 +165,8 @@ function digestYAxisOptions(scale, embed = false) {
     grid: { color: GRID, drawBorder: false },
     ticks: {
       color: TICK,
-      font: { size: embed ? 12 : 11, weight: '500' },
-      padding: 8,
+      font: { size: embed ? 11 : 11, weight: '500' },
+      padding: embed ? 4 : 8,
       maxTicksLimit: embed ? 6 : 8
     },
     border: { display: false }
@@ -239,6 +248,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date(), opts = {}) {
     },
     options: {
       responsive: false,
+      maintainAspectRatio: false,
       animation: false,
       plugins: {
         title: { display: false },
@@ -247,7 +257,11 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date(), opts = {}) {
       scales: {
         x: {
           grid: { color: GRID, drawBorder: false },
-          ticks: { color: TICK, font: { size: embed ? 12 : 11, weight: 500 }, padding: 8 },
+          ticks: {
+            color: TICK,
+            font: { size: embed ? 11 : 11, weight: 500 },
+            padding: embed ? 4 : 8
+          },
           border: { display: false }
         },
         y: embed
@@ -266,12 +280,7 @@ async function buildWeeklyAvgXpDigestPng(fromDate = new Date(), opts = {}) {
             }
       },
       layout: {
-        padding: {
-          top: embed ? 40 : 44,
-          right: embed ? 20 : 16,
-          bottom: embed ? 16 : 10,
-          left: embed ? 14 : 12
-        }
+        padding: embed ? digestCardEmbedLayoutPadding() : { top: 44, right: 16, bottom: 10, left: 12 }
       }
     }
   };
@@ -440,6 +449,7 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30, opts = 
     },
     options: {
       responsive: false,
+      maintainAspectRatio: false,
       animation: false,
       plugins: {
         title: { display: false },
@@ -451,7 +461,7 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30, opts = 
           ticks: {
             color: TICK,
             font: { size: embed ? 10 : 9, weight: 500 },
-            padding: 6,
+            padding: embed ? 4 : 6,
             maxRotation: embed ? 0 : 45,
             minRotation: 0,
             autoSkip: true,
@@ -475,12 +485,7 @@ async function buildPast30DaysDigestPng(anchor = new Date(), nDays = 30, opts = 
             }
       },
       layout: {
-        padding: {
-          top: embed ? 40 : 44,
-          right: embed ? 20 : 18,
-          bottom: embed ? 16 : 8,
-          left: embed ? 14 : 12
-        }
+        padding: embed ? digestCardEmbedLayoutPadding() : { top: 44, right: 18, bottom: 8, left: 12 }
       }
     }
   };

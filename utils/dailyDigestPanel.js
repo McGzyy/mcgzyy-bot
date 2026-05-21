@@ -21,6 +21,7 @@ const { loadMgMarkImage, loadMcGBotAvatarImage } = require('./xBrandAssets');
 const { loadImage } = require('canvas');
 const {
   getUtcYesterdayAndPriorDeskAvgs,
+  getDailyUtcDeskSnapshot,
   getCallerLeaderboardInTimeframe,
   getBestCallInTimeframe,
   getBestBotCallInTimeframe,
@@ -60,7 +61,7 @@ const CHART_BAND_FULL = 204;
 /** Clear space between desk content and chart panel top. */
 const DESK_CHART_GAP = 24;
 const CARD_CHART_W = W - PAD * 2;
-const CARD_CHART_H = 176;
+const CARD_CHART_H = 198;
 const DIGEST_CHART_OPTS = {
   forCardEmbed: true,
   width: CARD_CHART_W,
@@ -195,7 +196,12 @@ function buildSampleDailyDigestData(anchor = new Date()) {
       { username: 'ChartWizard', avgX: 4.2, totalCalls: 2 }
     ],
     bestHuman: { ticker: 'WOJAK', x: 18.5 },
-    bestBot: { ticker: 'OMNIPHX', x: 32.3 }
+    bestBot: { ticker: 'OMNIPHX', x: 32.3 },
+    deskPulse: {
+      uniqueCallers: 4,
+      user: { count: 11, medianX: 3.42, pctGe2: 45.5, pctGe3: 27.3 },
+      bot: { count: 6, medianX: 2.85, pctGe2: 33.3, pctGe3: 16.7 }
+    }
   };
 }
 
@@ -232,8 +238,149 @@ function buildLiveDailyDigestData(anchor = new Date()) {
     bestHuman: bestHuman
       ? { ticker: bestHuman.ticker, x: Number(bestHuman.x) || 0 }
       : null,
-    bestBot: bestBot ? { ticker: bestBot.ticker, x: Number(bestBot.x) || 0 } : null
+    bestBot: bestBot ? { ticker: bestBot.ticker, x: Number(bestBot.x) || 0 } : null,
+    deskPulse: getDailyUtcDeskSnapshot(anchor)
   };
+}
+
+/**
+ * @param {number|null|undefined} v
+ */
+function fmtPulsePct(v) {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  return `${Number(v).toFixed(0)}%`;
+}
+
+/**
+ * @param {number|null|undefined} v
+ */
+function fmtPulseMult(v) {
+  if (v == null || !Number.isFinite(Number(v))) return '—';
+  return `${Number(v).toFixed(2)}×`;
+}
+
+/**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {number} x
+ * @param {number} y
+ * @param {number} w
+ * @param {string} label
+ * @param {string} value
+ * @param {string} [valueColor]
+ */
+function drawPulseStatCell(ctx, x, y, w, label, value, valueColor = TEXT) {
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = DIM;
+  ctx.font = '500 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(label, x, y);
+  ctx.fillStyle = valueColor;
+  ctx.font = '700 15px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(value, x, y + 16);
+}
+
+/**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {{ count: number, medianX: number|null, pctGe2: number|null, pctGe3: number|null }} cohort
+ * @param {{ primary: string, soft: string, grad: string[] }} col
+ * @param {number} x
+ * @param {number} y
+ * @param {number} w
+ * @param {number} h
+ * @param {string} title
+ * @param {string} [footerLine]
+ */
+function paintDigestPulseColumn(ctx, cohort, col, x, y, w, h, title, footerLine = '') {
+  roundRectPath(ctx, x, y, w, h, 8);
+  const panelGrad = ctx.createLinearGradient(x, y, x, y + h);
+  panelGrad.addColorStop(0, 'rgba(255, 255, 255, 0.045)');
+  panelGrad.addColorStop(1, 'rgba(255, 255, 255, 0.015)');
+  ctx.fillStyle = panelGrad;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+  ctx.font = '700 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(title.toUpperCase(), x + 14, y + 12);
+
+  const count = Number(cohort?.count) || 0;
+  const callLabel = count === 1 ? '1 qualifying call' : `${count} qualifying calls`;
+  const cellW = Math.floor((w - 28 - 16) / 3);
+  const rowY = y + 38;
+  drawPulseStatCell(ctx, x + 14, rowY, cellW, 'Calls', callLabel, TEXT);
+  drawPulseStatCell(ctx, x + 14 + cellW + 8, rowY, cellW, 'Median ATH', fmtPulseMult(cohort?.medianX), col.primary);
+  drawPulseStatCell(
+    ctx,
+    x + 14 + (cellW + 8) * 2,
+    rowY,
+    cellW,
+    'Hit ≥ 2×',
+    fmtPulsePct(cohort?.pctGe2),
+    col.primary
+  );
+
+  if (footerLine) {
+    ctx.fillStyle = DIM;
+    ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
+    ctx.fillText(footerLine, x + 14, y + h - 22);
+  }
+}
+
+/**
+ * @param {import('canvas').CanvasRenderingContext2D} ctx
+ * @param {{ uniqueCallers: number, user: object, bot: object }} pulse
+ * @param {{ primary: string, soft: string, grad: string[] }} memberCol
+ * @param {{ primary: string, soft: string, grad: string[] }} botCol
+ * @param {number} bandY
+ * @param {number} bandH
+ */
+function paintDailyDeskPulseBand(ctx, pulse, memberCol, botCol, bandY, bandH) {
+  const x = PAD;
+  const w = W - PAD * 2;
+  drawHairlineH(ctx, bandY, x, x + w, SECTION_LINE);
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+  ctx.font = '700 11px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText('DESK PULSE · LAST 24H', x, bandY + 10);
+
+  const colGap = 20;
+  const tileY = bandY + 32;
+  const tileH = bandH - 42;
+  const tileW = Math.floor((w - colGap) / 2);
+  const callers = Number(pulse?.uniqueCallers) || 0;
+  const callerFoot =
+    callers > 0
+      ? `${callers} active caller${callers === 1 ? '' : 's'} on the member desk`
+      : 'No active callers on the member desk';
+
+  paintDigestPulseColumn(
+    ctx,
+    pulse?.user || { count: 0 },
+    memberCol,
+    x,
+    tileY,
+    tileW,
+    tileH,
+    'Member desk',
+    callerFoot
+  );
+  paintDigestPulseColumn(
+    ctx,
+    pulse?.bot || { count: 0 },
+    botCol,
+    x + tileW + colGap,
+    tileY,
+    tileW,
+    tileH,
+    'McGBot desk',
+    ''
+  );
 }
 
 /**
@@ -398,14 +545,18 @@ function resolveMonthlyDigestData(anchor = new Date(), opts = {}) {
   return buildLiveMonthlyDigestData(anchor);
 }
 
+/** Bottom band on daily cards — 24h desk pulse (no chart). */
+const DAILY_PULSE_BAND_H = 176;
+
 const DAILY_CARD_CFG = {
   title: 'Daily snapshot',
   memberSub: 'Member desk · avg ATH ×',
   leaderboardSub: 'Top callers · rolling 24h',
   quietMessage: 'Quiet day — no qualifying desk calls',
   fmtPeriodOverPeriod: fmtDayOverDay,
-  maxLeaderboardRows: 4,
-  displayLeaderboardRows: 4
+  maxLeaderboardRows: 5,
+  displayLeaderboardRows: 5,
+  dailyPulse: true
 };
 
 const WEEKLY_CARD_CFG = {
@@ -682,61 +833,73 @@ function formatHighlight(call) {
  * @param {import('canvas').Image|null} [avatar]
  */
 function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
-  drawHairlineH(ctx, y + h, x, x + w, 'rgba(255,255,255,0.05)');
+  const padX = 12;
+  const labelY = y + 7;
+  const rowTop = y + 22;
+  const rowH = Math.max(28, h - 30);
+  const rowCy = rowTop + rowH / 2;
 
-  const av = avatar ? 40 : 0;
-  const innerLeft = x + 8;
-  const innerRight = x + w - (avatar ? av + 14 : 8);
-  const multReserve = 118;
+  roundRectPath(ctx, x, y, w, h, 6);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+  ctx.fill();
+  drawHairlineH(ctx, y + h, x, x + w, 'rgba(255,255,255,0.06)');
 
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillStyle = DIM;
-  ctx.font = '600 11px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText(label, innerLeft, y + 10);
+  ctx.fillStyle = 'rgba(168, 168, 178, 0.95)';
+  ctx.font = '600 10px system-ui, "Segoe UI", sans-serif';
+  ctx.fillText(String(label).toUpperCase(), x + padX, labelY);
 
   if (!hi) {
     ctx.fillStyle = DIM;
-    ctx.font = '600 18px system-ui, "Segoe UI", sans-serif';
-    ctx.fillText('—', innerLeft, y + 40);
+    ctx.font = '600 16px system-ui, "Segoe UI", sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('—', x + padX, rowCy);
     return;
   }
 
-  const tickMaxW = innerRight - innerLeft - multReserve;
-  const tickSize = fitFontSize(ctx, hi.ticker, tickMaxW, 30, 20, '700');
-  const tickBaseline = y + 38 + tickSize;
-  ctx.fillStyle = TEXT;
-  ctx.font = `700 ${tickSize}px system-ui, "Segoe UI", sans-serif`;
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillText(hi.ticker, innerLeft, tickBaseline);
-
-  const multSize = fitFontSize(ctx, hi.mult, multReserve - 8, 48, 28, '800');
-  drawGradientNumber(
-    ctx,
-    hi.mult,
-    innerRight,
-    tickBaseline,
-    multSize,
-    col.grad,
-    col.primary,
-    { shadowBlur: 14, glow: true, align: 'right' }
-  );
+  const avSize = avatar ? 30 : 0;
+  const avGap = avatar ? 10 : 0;
+  let textX = x + padX;
+  const multRight = x + w - padX;
+  const multSlot = 92;
 
   if (avatar) {
-    const ax = x + w - av - 10;
-    const ay = y + Math.max(12, (h - av) / 2);
+    const ax = textX;
+    const ay = rowCy - avSize / 2;
     ctx.save();
     ctx.beginPath();
-    ctx.arc(ax + av / 2, ay + av / 2, av / 2, 0, Math.PI * 2);
+    ctx.arc(ax + avSize / 2, rowCy, avSize / 2, 0, Math.PI * 2);
     ctx.clip();
-    ctx.drawImage(avatar, ax, ay, av, av);
+    ctx.drawImage(avatar, ax, ay, avSize, avSize);
     ctx.restore();
     ctx.strokeStyle = col.primary + '99';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(ax + av / 2, ay + av / 2, av / 2 + 1, 0, Math.PI * 2);
+    ctx.arc(ax + avSize / 2, rowCy, avSize / 2 + 0.5, 0, Math.PI * 2);
     ctx.stroke();
+    textX += avSize + avGap;
   }
+
+  const tickMaxW = Math.max(48, multRight - multSlot - textX);
+  const tickSize = fitFontSize(ctx, hi.ticker, tickMaxW, rowH, 17, '700');
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = TEXT;
+  ctx.font = `700 ${tickSize}px system-ui, "Segoe UI", sans-serif`;
+  ctx.fillText(hi.ticker, textX, rowCy);
+
+  const multSize = fitFontSize(ctx, hi.mult, multSlot - 4, rowH - 2, 22, '800');
+  drawGradientNumber(
+    ctx,
+    hi.mult,
+    multRight,
+    rowCy + multSize * 0.34,
+    multSize,
+    col.grad,
+    col.primary,
+    { shadowBlur: 10, glow: true, align: 'right' }
+  );
 }
 
 /**
@@ -748,7 +911,9 @@ function drawBestCallStrip(ctx, x, y, w, h, label, hi, col, avatar = null) {
 function drawChartBand(ctx, bandY, bandH, chartImage, opts = {}) {
   const x = PAD;
   const w = W - PAD * 2;
-  const padY = opts.tight ? 6 : 8;
+  const extraTop = Number(opts.padTop) > 0 ? Number(opts.padTop) : 0;
+  const padTop = (opts.tight ? 3 : 4) + extraTop;
+  const padBottom = opts.tight ? 3 : 4;
   const lightFade = opts.lightFade !== false;
   drawHairlineH(ctx, bandY, x, x + w, SECTION_LINE);
 
@@ -763,8 +928,9 @@ function drawChartBand(ctx, bandY, bandH, chartImage, opts = {}) {
   ctx.fillStyle = panelGrad;
   ctx.fillRect(x, bandY, w, bandH);
 
+  const chartDrawH = Math.max(56, bandH - padTop - padBottom);
   ctx.globalAlpha = 0.99;
-  ctx.drawImage(chartImage, x, bandY + padY, w, Math.max(48, bandH - padY * 2));
+  ctx.drawImage(chartImage, x, bandY + padTop, w, chartDrawH);
   ctx.restore();
 
   if (!lightFade) {
@@ -899,14 +1065,27 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
  * Vertical bands for full digest cards (header → hero → desk → chart → footer).
  * @param {boolean} hasChart
  */
-function computeDigestCardLayout(hasChart) {
-  const chartBandH = hasChart ? CHART_BAND_FULL : 0;
+/**
+ * @param {{ hasChart?: boolean, dailyPulse?: boolean }} [opts]
+ */
+function computeDigestCardLayout(opts = {}) {
+  const hasChart = opts.hasChart === true;
+  const dailyPulse = opts.dailyPulse === true && !hasChart;
+  const bottomBandH = hasChart ? CHART_BAND_FULL : dailyPulse ? DAILY_PULSE_BAND_H : 0;
   const heroY = PAD + 92;
-  const heroH = hasChart ? 132 : 168;
+  const heroH = hasChart || dailyPulse ? 132 : 168;
   const deskTop = heroY + heroH + 16;
-  const chartTop = H - PAD - DIGEST_FOOTER_H - chartBandH;
-  const deskBottom = chartTop - (hasChart ? DESK_CHART_GAP : 12);
-  return { chartBandH, heroY, heroH, deskTop, deskBottom, chartTop };
+  const bottomBandTop = H - PAD - DIGEST_FOOTER_H - bottomBandH;
+  const deskBottom = bottomBandTop - (bottomBandH > 0 ? DESK_CHART_GAP : 12);
+  return {
+    chartBandH: hasChart ? CHART_BAND_FULL : 0,
+    pulseBandH: dailyPulse ? DAILY_PULSE_BAND_H : 0,
+    heroY,
+    heroH,
+    deskTop,
+    deskBottom,
+    bottomBandTop
+  };
 }
 
 function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, contentBottom) {
@@ -1013,7 +1192,7 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
   const stripGap = 8;
   const hiTop = mainY + 28;
   const hiBudget = Math.max(0, contentBottom - hiTop - 6);
-  const stripH = Math.max(32, Math.min(52, Math.floor((hiBudget - stripGap) / 2)));
+  const stripH = Math.max(44, Math.min(54, Math.floor((hiBudget - stripGap) / 2)));
   const strip2Y = hiTop + stripH + stripGap;
   if (strip2Y + stripH <= contentBottom) {
     drawBestCallStrip(ctx, sideX, hiTop, sideW, stripH, 'Best member call', hiHuman, accent, null);
@@ -1251,7 +1430,9 @@ function renderTerminalDigestCard(
     return;
   }
 
-  const layout = computeDigestCardLayout(Boolean(chartImage));
+  const dailyPulse = cfg.dailyPulse === true && !chartImage;
+  const layout = computeDigestCardLayout({ hasChart: Boolean(chartImage), dailyPulse });
+  const botAccent = channelAccent('bot');
 
   drawDigestHeader(ctx, data, cfg, accent);
   drawSectionRule(ctx, PAD + 78);
@@ -1267,8 +1448,18 @@ function renderTerminalDigestCard(
   ctx.restore();
 
   if (chartImage && layout.chartBandH > 0) {
-    drawSectionRule(ctx, layout.chartTop - 6);
-    drawChartBand(ctx, layout.chartTop, layout.chartBandH, chartImage, { lightFade: true });
+    drawSectionRule(ctx, layout.bottomBandTop - 6);
+    drawChartBand(ctx, layout.bottomBandTop, layout.chartBandH, chartImage, { lightFade: true });
+  } else if (dailyPulse && layout.pulseBandH > 0 && data.deskPulse) {
+    drawSectionRule(ctx, layout.bottomBandTop - 6);
+    paintDailyDeskPulseBand(
+      ctx,
+      data.deskPulse,
+      accent,
+      botAccent,
+      layout.bottomBandTop,
+      layout.pulseBandH
+    );
   }
 
   drawDigestFooter(ctx);

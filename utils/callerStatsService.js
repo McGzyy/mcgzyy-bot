@@ -942,6 +942,47 @@ function getUtcYesterdayAndPriorDeskAvgs(anchor = new Date()) {
   };
 }
 
+/**
+ * Yesterday UTC desk cohort stats (24h window aligned with daily snapshot).
+ * @param {Date} [anchor]
+ */
+function getDailyUtcDeskSnapshot(anchor = new Date()) {
+  const todayStart = startOfUtcCalendarDay(anchor);
+  const yEnd = new Date(todayStart);
+  const yStart = new Date(todayStart);
+  yStart.setUTCDate(yStart.getUTCDate() - 1);
+  const startMs = yStart.getTime();
+  const endMs = yEnd.getTime();
+
+  const userCalls = getAllTrackedCalls()
+    .filter(isHumanUserCall)
+    .filter(isValid)
+    .filter(c => isCallTimestampInUtcMsRange(c, startMs, endMs));
+
+  const botCalls = getAllTrackedCalls()
+    .filter(isBotCall)
+    .filter(isValid)
+    .filter(c => isCallTimestampInUtcMsRange(c, startMs, endMs));
+
+  const seenCaller = new Set();
+  for (const call of userCalls) {
+    const key =
+      call.firstCallerDiscordId ||
+      call.firstCallerId ||
+      normalize(call.firstCallerUsername) ||
+      normalize(call.firstCallerDisplayName) ||
+      normalize(call.firstCallerPublicName);
+    if (key) seenCaller.add(String(key));
+  }
+
+  return {
+    dayLabel: yStart.toISOString().slice(0, 10),
+    uniqueCallers: seenCaller.size,
+    user: cohortAthXStats(userCalls),
+    bot: cohortAthXStats(botCalls)
+  };
+}
+
 function getAvgAthXByUtcMonthInYear(yearUtc) {
   const memberAvg = /** @type {(number|null)[]} */ (Array(12).fill(null));
   const botAvg = /** @type {(number|null)[]} */ (Array(12).fill(null));
@@ -990,5 +1031,6 @@ module.exports = {
   getAvgAthXLastNUtcDaysBeforeAnchor,
   getDeskAvgAthXPairForUtcRange,
   getUtcYesterdayAndPriorDeskAvgs,
+  getDailyUtcDeskSnapshot,
   startOfUtcCalendarDay
 };

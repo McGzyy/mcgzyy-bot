@@ -56,9 +56,11 @@ const MEMBER_AVG_GOOD_AT = 2;
 const SECTION_LINE = 'rgba(255,255,255,0.16)';
 const SECTION_LINE_SOFT = 'rgba(255,255,255,0.09)';
 /** Bottom chart band height on full 1200×820 cards (desk sits above this). */
-const CHART_BAND_FULL = 228;
+const CHART_BAND_FULL = 204;
+/** Clear space between desk content and chart panel top. */
+const DESK_CHART_GAP = 24;
 const CARD_CHART_W = W - PAD * 2;
-const CARD_CHART_H = 200;
+const CARD_CHART_H = 176;
 const DIGEST_CHART_OPTS = {
   forCardEmbed: true,
   width: CARD_CHART_W,
@@ -750,13 +752,17 @@ function drawChartBand(ctx, bandY, bandH, chartImage, opts = {}) {
   const lightFade = opts.lightFade !== false;
   drawHairlineH(ctx, bandY, x, x + w, SECTION_LINE);
 
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, bandY, w, bandH);
+  ctx.clip();
+
   const panelGrad = ctx.createLinearGradient(x, bandY, x, bandY + bandH);
   panelGrad.addColorStop(0, 'rgba(5, 5, 12, 0.98)');
   panelGrad.addColorStop(1, 'rgba(2, 2, 8, 0.98)');
   ctx.fillStyle = panelGrad;
   ctx.fillRect(x, bandY, w, bandH);
 
-  ctx.save();
   ctx.globalAlpha = 0.99;
   ctx.drawImage(chartImage, x, bandY + padY, w, Math.max(48, bandH - padY * 2));
   ctx.restore();
@@ -843,7 +849,7 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
   ctx.fillStyle = periodFoot === '—' ? DIM : 'rgba(210, 210, 220, 0.9)';
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText(periodFoot, PAD, heroY + heroH - 10);
+  ctx.fillText(periodFoot, PAD, heroY + heroH + 2);
 
   drawHairlineV(ctx, splitX, heroY + 10, heroY + heroH - 10, SECTION_LINE);
 
@@ -873,19 +879,11 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
     spreadRight - spreadX,
     '500 13px system-ui, "Segoe UI", sans-serif'
   );
-  const footW = ctx.measureText(spreadFoot).width + 14;
-  const footBoxY = heroY + heroH - footH - 2;
-  const footBoxH = footH - 2;
-  roundRectPath(ctx, spreadX - 4, footBoxY, footW, footBoxH, 6);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.fillStyle = DIM;
+  ctx.fillStyle = 'rgba(210, 210, 220, 0.88)';
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText(spreadFoot, spreadX, heroY + heroH - 10);
+  ctx.textAlign = 'left';
+  ctx.fillText(spreadFoot, spreadX, heroY + heroH - 4);
 }
 
 /**
@@ -904,10 +902,10 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
 function computeDigestCardLayout(hasChart) {
   const chartBandH = hasChart ? CHART_BAND_FULL : 0;
   const heroY = PAD + 92;
-  const heroH = hasChart ? 148 : 168;
-  const deskTop = heroY + heroH + 18;
-  const deskBottom = H - PAD - DIGEST_FOOTER_H - chartBandH - 16;
-  const chartTop = deskBottom + 10;
+  const heroH = hasChart ? 132 : 168;
+  const deskTop = heroY + heroH + 16;
+  const chartTop = H - PAD - DIGEST_FOOTER_H - chartBandH;
+  const deskBottom = chartTop - (hasChart ? DESK_CHART_GAP : 12);
   return { chartBandH, heroY, heroH, deskTop, deskBottom, chartTop };
 }
 
@@ -936,7 +934,11 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
   const visibleCount = Math.min(displayCap, rows.length);
   const overflow = rows.length - visibleCount;
   const rowStart = mainY + 44;
-  const rowH = Math.min(44, Math.max(38, Math.floor((mainH - 52) / Math.max(visibleCount || 1, 1))));
+  const listBudget = Math.max(0, contentBottom - rowStart - (overflow > 0 ? 22 : 8));
+  const rowH =
+    visibleCount > 0
+      ? Math.min(40, Math.max(26, Math.floor(listBudget / visibleCount)))
+      : 0;
   const lbRight = PAD + lbW;
   const multX = lbRight - 6;
   const callsRight = lbRight - 92;

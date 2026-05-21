@@ -170,6 +170,30 @@ async function buildMonthlyDigestPostBody(p) {
   } else {
     chunks.push('(quiet month on the member desk)');
   }
+
+  const bestHuman = getBestCallInTimeframe(days);
+  const bestBot = getBestBotCallInTimeframe(days);
+  const hiLines = ['🔥 Highlights', ''];
+  let anyHi = false;
+  if (bestHuman) {
+    const h = formatCallOneLiner(bestHuman);
+    if (h) {
+      hiLines.push(`${BUL}Best member call — ${h}`);
+      anyHi = true;
+    }
+  }
+  if (bestBot) {
+    const b = formatCallOneLiner(bestBot);
+    if (b) {
+      hiLines.push(`${BUL}Best McGBot call — ${b}`);
+      anyHi = true;
+    }
+  }
+  if (!anyHi) {
+    hiLines.push('(none)');
+  }
+  chunks.push(hiLines.join('\n'));
+
   if (footer) chunks.push(footer);
 
   const raw = chunks.filter(Boolean).join(gap).trim();
@@ -437,7 +461,11 @@ async function postDigest(p, options = {}) {
   } else if (useTerminalWeeklyCard) {
     text = buildTerminalDigestCaption('weekly', windowLabel);
   } else if (useTerminalMonthlyCard) {
-    text = buildTerminalDigestCaption('monthly', windowLabel);
+    text = await buildMonthlyDigestPostBody({
+      windowLabel,
+      days: Number(days) > 0 ? Number(days) : 30,
+      topN
+    });
   } else {
     text = buildLeaderboardDigestBody({ windowLabel, days, topN });
     const maxChars = resolveWeeklyStatsTweetMaxChars();

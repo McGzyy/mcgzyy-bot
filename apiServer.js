@@ -22,7 +22,7 @@ const {
   setTrackedCallDashboardHidden
 } = require('./utils/trackedCallsService');
 const { listDevSubmissionsPostedToModApprovals } = require('./utils/devSubmissionService');
-const { isModOrAdminDiscordUserId } = require('./utils/modStaffGate');
+const { isModOrAdminDiscordUserIdAsync } = require('./utils/modStaffGate');
 const { getModActionStatsSummary } = require('./utils/modActionsService');
 const { applyDashboardCallDecision } = require('./utils/dashboardCallApproval');
 const {
@@ -658,8 +658,11 @@ function startReferralApiServer(discordClient = null, opts = {}) {
         return;
       }
 
-      if (!isModOrAdminDiscordUserId(userId)) {
-        res.status(403).json({ success: false, error: 'Forbidden' });
+      if (!(await isModOrAdminDiscordUserIdAsync(userId))) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden — requires mod/admin Discord role or DISCORD_MOD_IDS / DISCORD_ADMIN_IDS on the bot host.'
+        });
         return;
       }
 
@@ -737,8 +740,11 @@ function startReferralApiServer(discordClient = null, opts = {}) {
         return;
       }
 
-      if (!isModOrAdminDiscordUserId(userId)) {
-        res.status(403).json({ success: false, error: 'Forbidden' });
+      if (!(await isModOrAdminDiscordUserIdAsync(userId))) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden — requires mod/admin Discord role or DISCORD_MOD_IDS / DISCORD_ADMIN_IDS on the bot host.'
+        });
         return;
       }
 
@@ -776,10 +782,10 @@ function startReferralApiServer(discordClient = null, opts = {}) {
         });
         return;
       }
-      if (!isModOrAdminDiscordUserId(userId)) {
+      if (!(await isModOrAdminDiscordUserIdAsync(userId))) {
         res.status(403).json({
           success: false,
-          error: 'Forbidden — requires DISCORD_MOD_IDS or DISCORD_ADMIN_IDS.'
+          error: 'Forbidden — requires mod/admin Discord role or DISCORD_MOD_IDS / DISCORD_ADMIN_IDS on the bot host.'
         });
         return;
       }
@@ -1346,8 +1352,11 @@ function startReferralApiServer(discordClient = null, opts = {}) {
         return;
       }
 
-      if (!isModOrAdminDiscordUserId(userId)) {
-        res.status(403).json({ success: false, error: 'Forbidden' });
+      if (!(await isModOrAdminDiscordUserIdAsync(userId))) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden — requires mod/admin Discord role or DISCORD_MOD_IDS / DISCORD_ADMIN_IDS on the bot host.'
+        });
         return;
       }
 

@@ -1,9 +1,11 @@
 'use strict';
 
 /**
- * Same env lists as mcgbot-dashboard `lib/helpRole.ts` (DISCORD_ADMIN_IDS / DISCORD_MOD_IDS).
- * Used by apiServer internal routes so the secret alone is not enough to read mod queue data.
+ * Staff gate for bot internal APIs — mirrors mcgbot-dashboard `lib/helpRole.ts`:
+ * env id lists (DISCORD_ADMIN_IDS / DISCORD_MOD_IDS) merged with live Discord guild roles when configured.
  */
+
+const { staffTierFromDiscord } = require('./discordStaffTierNode');
 
 function idSet(raw) {
   if (!raw || !String(raw).trim()) return new Set();
@@ -26,9 +28,50 @@ function resolveStaffRole(discordUserId) {
   return 'user';
 }
 
+function tierRank(t) {
+  if (t === 'admin') return 2;
+  if (t === 'mod') return 1;
+  return 0;
+}
+
+function mergeStaffTiers(a, b) {
+  return tierRank(a) >= tierRank(b) ? a : b;
+}
+
+/**
+ * @param {'user'|'mod'|'admin'} tier
+ */
+function meetsModerationMinTier(tier) {
+  const min = String(process.env.MODERATION_MIN_TIER || 'mod')
+    .trim()
+    .toLowerCase();
+  if (min === 'admin') return tier === 'admin';
+  return tier === 'mod' || tier === 'admin';
+}
+
+/**
+ * @param {string} discordUserId
+ * @returns {Promise<'user'|'mod'|'admin'>}
+ */
+async function resolveStaffRoleAsync(discordUserId) {
+  const envTier = resolveStaffRole(discordUserId);
+  const fromDiscord = await staffTierFromDiscord(discordUserId);
+  if (fromDiscord === 'admin' || fromDiscord === 'mod' || fromDiscord === 'user') {
+    return mergeStaffTiers(fromDiscord, envTier);
+  }
+  return envTier;
+}
+
 function isModOrAdminDiscordUserId(discordUserId) {
-  const r = resolveStaffRole(discordUserId);
-  return r === 'mod' || r === 'admin';
+  return meetsModerationMinTier(resolveStaffRole(discordUserId));
+}
+
+/**
+ * @param {string} discordUserId
+ */
+async function isModOrAdminDiscordUserIdAsync(discordUserId) {
+  const tier = await resolveStaffRoleAsync(discordUserId);
+  return meetsModerationMinTier(tier);
 }
 
 function isAdminDiscordUserId(discordUserId) {
@@ -37,6 +80,9 @@ function isAdminDiscordUserId(discordUserId) {
 
 module.exports = {
   resolveStaffRole,
+  resolveStaffRoleAsync,
+  meetsModerationMinTier,
   isModOrAdminDiscordUserId,
+  isModOrAdminDiscordUserIdAsync,
   isAdminDiscordUserId
 };

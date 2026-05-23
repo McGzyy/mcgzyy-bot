@@ -14,6 +14,7 @@ const {
   handleWatchFromDashboard,
   isUserCallsWebhookUrl
 } = require('./commands/basicCommands');
+const { sendDashboardAlertDm } = require('./utils/dashboardAlertDm');
 const {
   initTrackedCallsStore,
   getAllTrackedCalls,
@@ -370,6 +371,61 @@ function startReferralApiServer(discordClient = null, opts = {}) {
     } catch (e) {
       const msg = e && e.message ? String(e.message) : 'Watch failed';
       console.error('[API] POST /internal/watch', msg);
+      res.status(400).json({ success: false, error: msg });
+    }
+  });
+
+  app.post('/internal/dashboard-alert-dm', async (req, res) => {
+    try {
+      const secret = String(process.env.CALL_INTERNAL_SECRET || '').trim();
+      if (!secret) {
+        res.status(503).json({
+          success: false,
+          error:
+            'CALL_INTERNAL_SECRET is not set on the bot host (required for dashboard alert DMs).'
+        });
+        return;
+      }
+
+      const auth = String(req.headers.authorization || '').trim();
+      if (auth !== `Bearer ${secret}`) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      if (!discordClient || !discordClient.isReady()) {
+        res.status(503).json({
+          success: false,
+          error: 'Discord client is not ready yet; retry in a few seconds.'
+        });
+        return;
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const userId = String(body.userId || '').trim();
+      const title = String(body.title || '').trim();
+      const alertBody = String(body.body || '').trim();
+
+      if (!userId || !title) {
+        res.status(400).json({ success: false, error: 'Missing userId or title' });
+        return;
+      }
+
+      const result = await sendDashboardAlertDm(discordClient, {
+        userId,
+        title,
+        body: alertBody
+      });
+
+      if (!result.success) {
+        res.status(400).json({ success: false, error: result.error || 'DM failed' });
+        return;
+      }
+
+      res.json({ success: true });
+    } catch (e) {
+      const msg = e && e.message ? String(e.message) : 'Dashboard alert DM failed';
+      console.error('[API] POST /internal/dashboard-alert-dm', msg);
       res.status(400).json({ success: false, error: msg });
     }
   });

@@ -124,7 +124,21 @@ function shouldRejectAlert(meta = {}) {
   // 2) same coin cooldown (only if contract exists)
   if (contract) {
     const lastCoinActivity = recentContractActivity.get(contract);
-    if (lastCoinActivity && (current - lastCoinActivity) < ALERT_QUEUE_CONFIG.sameCoinCooldownMs) {
+    let coinCooldownMs = ALERT_QUEUE_CONFIG.sameCoinCooldownMs;
+    if (meta.type === 'auto_call') {
+      try {
+        const { autoCallConfig } = require('../config/autoCallConfig');
+        const mins = Number(autoCallConfig?.dedupe?.cooldownMinutes);
+        if (Number.isFinite(mins) && mins > 0) {
+          coinCooldownMs = Math.max(coinCooldownMs, mins * 60 * 1000);
+        } else {
+          coinCooldownMs = Math.max(coinCooldownMs, 3 * 60 * 1000);
+        }
+      } catch {
+        coinCooldownMs = Math.max(coinCooldownMs, 3 * 60 * 1000);
+      }
+    }
+    if (lastCoinActivity && current - lastCoinActivity < coinCooldownMs) {
       return 'same_coin_cooldown';
     }
   }

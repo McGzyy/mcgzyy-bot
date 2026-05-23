@@ -236,6 +236,41 @@ async function upsertUserDiscordIdentityFromTracked(sb, tracked, opts = {}) {
   }
 }
 
+const RECENT_STATS_ROW_MS = 60 * 60 * 1000;
+
+/**
+ * @param {import('@supabase/supabase-js').SupabaseClient} sb
+ * @param {{ callCa: string, source: 'user'|'bot', withinMs?: number }} q
+ */
+async function findRecentCallPerformanceRow(sb, q) {
+  const callCa = String(q.callCa || '').trim();
+  const source = q.source === 'bot' ? 'bot' : 'user';
+  if (!callCa) return null;
+
+  const withinMs =
+    Number(q.withinMs) > 0 ? Number(q.withinMs) : RECENT_STATS_ROW_MS;
+  const sinceMs = Date.now() - withinMs;
+
+  const { data, error } = await sb
+    .from('call_performance')
+    .select('id, call_time, discord_id, source, call_market_cap_usd')
+    .eq('call_ca', callCa)
+    .eq('source', source)
+    .gte('call_time', sinceMs)
+    .order('call_time', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.warn(
+      '[CallPerformanceSync] recent row lookup:',
+      error.message || error
+    );
+    return null;
+  }
+  return data && data.id ? data : null;
+}
+
 /**
  * Insert a dashboard leaderboard row for a fresh user call (same contract as
  * `call_performance` consumed by mcgbot-dashboard). Requires service role on the bot host.
@@ -269,6 +304,37 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
   const contract = String(tracked.contractAddress || '').trim();
   if (!contract) return { ok: false, skipped: true, reason: 'no_contract' };
 
+  const existingId = tracked.callPerformanceId
+    ? String(tracked.callPerformanceId).trim()
+    : '';
+  if (existingId) {
+    return { ok: true, skipped: true, reason: 'already_linked', id: existingId };
+  }
+
+  const source = rowSourceFromTracked(tracked);
+
+  const recentSame = await findRecentCallPerformanceRow(sb, {
+    callCa: contract,
+    source
+  });
+  if (recentSame?.id) {
+    const id = String(recentSame.id);
+    updateTrackedCallData(contract, { callPerformanceId: id });
+    return { ok: true, skipped: true, reason: 'recent_duplicate', id };
+  }
+
+  if (source === 'bot') {
+    const recentMember = await findRecentCallPerformanceRow(sb, {
+      callCa: contract,
+      source: 'user'
+    });
+    if (recentMember?.id) {
+      const id = String(recentMember.id);
+      updateTrackedCallData(contract, { callPerformanceId: id });
+      return { ok: true, skipped: true, reason: 'member_called_first', id };
+    }
+  }
+
   const username = String(
     tracked.firstCallerUsername ||
       tracked.firstCallerPublicName ||
@@ -300,7 +366,7 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
     live_market_cap_usd: Number.isFinite(Number(tracked.latestMarketCap))
       ? Number(tracked.latestMarketCap)
       : null,
-    source: rowSourceFromTracked(tracked),
+    source,
     call_time: callTimeMsFromTracked(tracked),
     call_ca: contract,
     token_name: tokenNameRaw ? tokenNameRaw.slice(0, 160) : null,

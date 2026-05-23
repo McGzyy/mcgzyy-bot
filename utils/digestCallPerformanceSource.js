@@ -9,6 +9,48 @@ const {
 } = require('./callPerformanceLeaderboardNode');
 const { getDigestWindowBounds, startOfUtcCalendarDay } = require('./callerStatsService');
 
+function stripAt(handle) {
+  return String(handle || '')
+    .trim()
+    .replace(/^@+/, '');
+}
+
+/**
+ * Prefer dashboard display names + verified X handles for digest post/card labels.
+ * @param {{ discordId?: string|null, username?: string }[]} rows
+ */
+async function enrichDigestLeaderboardRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) return rows;
+  const sb = getSupabaseServiceRole();
+  if (!sb) return rows;
+
+  const ids = [...new Set(rows.map(r => r.discordId).filter(Boolean))];
+  if (!ids.length) return rows;
+
+  const { data, error } = await sb
+    .from('users')
+    .select('discord_id, discord_display_name, x_handle, x_verified')
+    .in('discord_id', ids);
+  if (error || !Array.isArray(data)) return rows;
+
+  const byId = new Map(data.map(u => [String(u.discord_id), u]));
+  return rows.map(r => {
+    const u = r.discordId ? byId.get(String(r.discordId)) : null;
+    const displayName =
+      (u?.discord_display_name && String(u.discord_display_name).trim()) ||
+      (r.username && String(r.username).trim()) ||
+      'Caller';
+    const xHandle =
+      u?.x_verified && u?.x_handle ? stripAt(u.x_handle) : null;
+    return {
+      ...r,
+      username: displayName,
+      displayName,
+      xHandle
+    };
+  });
+}
+
 /**
  * @param {Record<string, unknown>[]} rows
  */
@@ -206,7 +248,15 @@ async function buildDigestSnapshotFromCallPerformance(kind, anchor = new Date(),
   if (!cur) return null;
 
   const topN = kind === 'monthly' ? 8 : kind === 'daily' ? 5 : 5;
-  const lb = aggregateCallPerformanceRows(cur.user).slice(0, topN);
+  const lbRaw = aggregateCallPerformanceRows(cur.user).slice(0, topN);
+  const lbEnriched = await enrichDigestLeaderboardRows(
+    lbRaw.map(r => ({
+      discordId: r.discordId || null,
+      username: r.username || 'Caller',
+      avgX: r.avgX,
+      totalCalls: r.totalCalls
+    }))
+  );
 
   let dateLabel;
   if (bounds.mode === 'alltime') {
@@ -231,16 +281,23 @@ async function buildDigestSnapshotFromCallPerformance(kind, anchor = new Date(),
     );
   }
 
+  const memberCohort = cohortFromRows(cur.user);
+
   return {
     dateLabel,
     isSample: false,
     dataSource: 'call_performance',
     memberAvgX: avgAthMultiple(cur.user),
+    memberMedianX: memberCohort.medianX,
     priorMemberAvgX: prior ? avgAthMultiple(prior.user) : null,
     botAvgX: avgAthMultiple(cur.bot),
-    leaderboard: lb.map(r => ({
-      username: r.username || 'Caller',
+    memberCallCount: memberCohort.count,
+    uniqueCallers: uniqueCallersFromRows(cur.user),
+    leaderboard: lbEnriched.map(r => ({
+      username: r.username || r.displayName || 'Caller',
+      displayName: r.displayName || r.username || 'Caller',
       discordId: r.discordId || null,
+      xHandle: r.xHandle || null,
       avgX: r.avgX,
       totalCalls: r.totalCalls
     })),
@@ -266,5 +323,6 @@ async function buildDigestSnapshotFromCallPerformance(kind, anchor = new Date(),
 module.exports = {
   buildDigestSnapshotFromCallPerformance,
   countCallPerformanceDeskInWindow,
+  enrichDigestLeaderboardRows,
   fetchDeskRowsInWindow
 };

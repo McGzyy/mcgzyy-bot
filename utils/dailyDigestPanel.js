@@ -178,6 +178,31 @@ function fmtMemberBotSpread(mX, bX) {
 }
 
 /**
+ * Right hero footer: spread vs bot + desk volume.
+ * @param {number|null|undefined} mX
+ * @param {number|null|undefined} bX
+ * @param {number|null|undefined} callCount
+ * @param {number|null|undefined} callers
+ */
+function fmtDigestMedianHeroFooter(mX, bX, callCount, callers) {
+  const spread = fmtMemberBotSpread(mX, bX);
+  const parts = [];
+  if (spread.line !== '—') {
+    parts.push(`${spread.line} vs bot`);
+  }
+  const n = Number(callCount);
+  if (Number.isFinite(n) && n > 0) {
+    let vol = `${n} member call${n === 1 ? '' : 's'}`;
+    const c = Number(callers);
+    if (Number.isFinite(c) && c > 0) {
+      vol += ` · ${c} caller${c === 1 ? '' : 's'}`;
+    }
+    parts.push(vol);
+  }
+  return parts.length ? parts.join(' · ') : '—';
+}
+
+/**
  * @returns {import('./dailyDigestPanel').DailyDigestData}
  */
 function buildSampleDailyDigestData(anchor = new Date()) {
@@ -190,8 +215,11 @@ function buildSampleDailyDigestData(anchor = new Date()) {
     dateLabel: `UTC ${dateLabel}`,
     isSample: true,
     memberAvgX: 4.82,
+    memberMedianX: 3.42,
     priorMemberAvgX: 3.91,
     botAvgX: 3.44,
+    memberCallCount: 11,
+    uniqueCallers: 4,
     leaderboard: [
       { username: caller, avgX: 12.4, totalCalls: 3 },
       { username: 'SolHunter', avgX: 8.15, totalCalls: 2 },
@@ -229,16 +257,24 @@ function buildLiveDailyDigestData(anchor = new Date(), opts = {}) {
         ? 'Last 24h (rolling)'
         : `UTC ${bounds.startInclusive.toISOString().slice(0, 10)}`;
 
+  const desk = getUtcDeskSnapshotForRange(bounds.startInclusive, bounds.endExclusive);
+
   return {
     dateLabel,
     isSample: false,
     memberAvgX:
       cur.memberAvgX != null && Number.isFinite(Number(cur.memberAvgX)) ? Number(cur.memberAvgX) : null,
+    memberMedianX:
+      desk.user?.medianX != null && Number.isFinite(Number(desk.user.medianX))
+        ? Number(desk.user.medianX)
+        : null,
     priorMemberAvgX:
       prior.memberAvgX != null && Number.isFinite(Number(prior.memberAvgX))
         ? Number(prior.memberAvgX)
         : null,
     botAvgX: cur.botAvgX != null && Number.isFinite(Number(cur.botAvgX)) ? Number(cur.botAvgX) : null,
+    memberCallCount: desk.user?.count ?? 0,
+    uniqueCallers: desk.uniqueCallers ?? 0,
     leaderboard: rows.map(r => ({
       username: r.username,
       avgX: r.avgX,
@@ -248,7 +284,7 @@ function buildLiveDailyDigestData(anchor = new Date(), opts = {}) {
       ? { ticker: bestHuman.ticker, x: Number(bestHuman.x) || 0 }
       : null,
     bestBot: bestBot ? { ticker: bestBot.ticker, x: Number(bestBot.x) || 0 } : null,
-    deskPulse: getUtcDeskSnapshotForRange(bounds.startInclusive, bounds.endExclusive)
+    deskPulse: desk
   };
 }
 
@@ -416,8 +452,11 @@ function buildSampleWeeklyDigestData(anchor = new Date()) {
     dateLabel: formatCompletedUtcWeekRangeLabel(startInclusive, endExclusive),
     isSample: true,
     memberAvgX: 5.12,
+    memberMedianX: 4.05,
     priorMemberAvgX: 4.44,
     botAvgX: 4.01,
+    memberCallCount: 20,
+    uniqueCallers: 5,
     leaderboard: [
       { username: caller, avgX: 9.8, totalCalls: 5 },
       { username: 'SolHunter', avgX: 7.2, totalCalls: 4 },
@@ -445,6 +484,7 @@ function buildLiveWeeklyDigestData(anchor = new Date(), opts = {}) {
   const rows = getCallerLeaderboardInUtcWeekBounds(startInclusive, endExclusive, 5);
   const bestHuman = getBestCallInUtcWeekBounds(startInclusive, endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(startInclusive, endExclusive);
+  const desk = getUtcDeskSnapshotForRange(startInclusive, endExclusive);
   const dateLabel =
     bounds.mode === 'alltime'
       ? 'All-time desk'
@@ -459,12 +499,18 @@ function buildLiveWeeklyDigestData(anchor = new Date(), opts = {}) {
       cur.memberAvgX != null && Number.isFinite(Number(cur.memberAvgX))
         ? Number(cur.memberAvgX)
         : null,
+    memberMedianX:
+      desk.user?.medianX != null && Number.isFinite(Number(desk.user.medianX))
+        ? Number(desk.user.medianX)
+        : null,
     priorMemberAvgX:
       prior.memberAvgX != null && Number.isFinite(Number(prior.memberAvgX))
         ? Number(prior.memberAvgX)
         : null,
     botAvgX:
       cur.botAvgX != null && Number.isFinite(Number(cur.botAvgX)) ? Number(cur.botAvgX) : null,
+    memberCallCount: desk.user?.count ?? 0,
+    uniqueCallers: desk.uniqueCallers ?? 0,
     leaderboard: rows.map(r => ({
       username: r.username,
       avgX: r.avgX,
@@ -501,8 +547,11 @@ function buildSampleMonthlyDigestData(anchor = new Date()) {
     dateLabel: formatUtcDateRangeLabel(curStart, endExclusive),
     isSample: true,
     memberAvgX: 4.68,
+    memberMedianX: 3.85,
     priorMemberAvgX: 4.12,
     botAvgX: 3.88,
+    memberCallCount: 92,
+    uniqueCallers: 12,
     leaderboard: [
       { username: caller, avgX: 11.2, totalCalls: 18 },
       { username: 'SolHunter', avgX: 8.4, totalCalls: 14 },
@@ -533,6 +582,7 @@ function buildLiveMonthlyDigestData(anchor = new Date(), opts = {}) {
   const rows = getCallerLeaderboardInUtcWeekBounds(curStart, endExclusive, 8);
   const bestHuman = getBestCallInUtcWeekBounds(curStart, endExclusive);
   const bestBot = getBestBotCallInUtcWeekBounds(curStart, endExclusive);
+  const desk = getUtcDeskSnapshotForRange(curStart, endExclusive);
   const dateLabel =
     bounds.mode === 'alltime'
       ? 'All-time desk'
@@ -547,12 +597,18 @@ function buildLiveMonthlyDigestData(anchor = new Date(), opts = {}) {
       cur.memberAvgX != null && Number.isFinite(Number(cur.memberAvgX))
         ? Number(cur.memberAvgX)
         : null,
+    memberMedianX:
+      desk.user?.medianX != null && Number.isFinite(Number(desk.user.medianX))
+        ? Number(desk.user.medianX)
+        : null,
     priorMemberAvgX:
       prior.memberAvgX != null && Number.isFinite(Number(prior.memberAvgX))
         ? Number(prior.memberAvgX)
         : null,
     botAvgX:
       cur.botAvgX != null && Number.isFinite(Number(cur.botAvgX)) ? Number(cur.botAvgX) : null,
+    memberCallCount: desk.user?.count ?? 0,
+    uniqueCallers: desk.uniqueCallers ?? 0,
     leaderboard: rows.map(r => ({
       username: r.username,
       avgX: r.avgX,
@@ -619,6 +675,14 @@ function metricGrad(isGood) {
   return isGood
     ? ['#86efac', '#22c55e', '#16a34a']
     : ['#fca5a5', '#ef4444', '#b91c1c'];
+}
+
+/** Headline desk metrics — informational cobalt, not red/green judgment. */
+function metricGradDeskHero(accent) {
+  if (accent?.grad?.length >= 3) {
+    return accent.grad;
+  }
+  return ['#bfdbfe', '#60a5fa', '#38bdf8'];
 }
 
 /**
@@ -1013,15 +1077,22 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
   const mY = data.memberAvgX;
   const bY = data.botAvgX;
   const mP = data.priorMemberAvgX;
+  const mMed = data.memberMedianX;
   const periodFoot = cfg.fmtPeriodOverPeriod(mP, mY);
-  const spread = fmtMemberBotSpread(mY, bY);
+  const medianHeroFoot = fmtDigestMedianHeroFooter(
+    mY,
+    bY,
+    data.memberCallCount ?? data.deskCounts?.user,
+    data.uniqueCallers ?? data.deskPulse?.uniqueCallers
+  );
   const mOk = mY != null && Number.isFinite(mY);
   const memberHero = mOk ? `${Number(mY).toFixed(2)}×` : '—';
-  const memberGood = !mOk ? null : Number(mY) >= MEMBER_AVG_GOOD_AT;
-  const spreadGood = spread.memberAhead;
+  const medOk = mMed != null && Number.isFinite(mMed);
+  const medianHero = medOk ? `${Number(mMed).toFixed(2)}×` : '—';
+  const heroGrad = metricGradDeskHero(accent);
   const splitX = PAD + Math.floor((W - PAD * 2) * 0.56);
   const labelH = 22;
-  const footH = 24;
+  const footH = 28;
   const numZoneH = heroH - labelH - footH;
 
   drawSoftGlow(ctx, PAD + 180, heroY + heroH * 0.42, 240, accent.soft);
@@ -1040,7 +1111,7 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
     PAD,
     memberBaseline,
     memberSize,
-    metricGrad(memberGood),
+    heroGrad,
     accent.primary,
     { shadowBlur: 16, glow: true, align: 'left' }
   );
@@ -1052,37 +1123,37 @@ function paintDigestHeroMetrics(ctx, data, cfg, accent, heroY, heroH) {
 
   drawHairlineV(ctx, splitX, heroY + 10, heroY + heroH - 10, SECTION_LINE);
 
-  const spreadX = splitX + 32;
-  const spreadRight = W - PAD - 8;
+  const medianX = splitX + 32;
+  const medianRight = W - PAD - 8;
   ctx.textBaseline = 'top';
   ctx.fillStyle = MUTED;
   ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
-  ctx.fillText('Member vs McGBot', spreadX, heroY + 6);
+  ctx.fillText('Member desk · median ATH ×', medianX, heroY + 6);
 
-  const spreadSize = fitFontSize(ctx, spread.line, spreadRight - spreadX, numZoneH - 4, 44, '800');
-  const spreadBaseline = heroY + labelH + spreadSize;
+  const medianSize = fitFontSize(ctx, medianHero, medianRight - medianX, numZoneH - 4, 44, '800');
+  const medianBaseline = heroY + labelH + medianSize;
   drawGradientNumber(
     ctx,
-    spread.line,
-    spreadRight,
-    spreadBaseline,
-    spreadSize,
-    metricGrad(spreadGood),
+    medianHero,
+    medianRight,
+    medianBaseline,
+    medianSize,
+    heroGrad,
     accent.primary,
     { shadowBlur: 12, glow: true, align: 'right' }
   );
 
-  const spreadFoot = truncateToWidth(
+  const medianFootLine = truncateToWidth(
     ctx,
-    spread.foot,
-    spreadRight - spreadX,
-    '500 13px system-ui, "Segoe UI", sans-serif'
+    medianHeroFoot,
+    medianRight - medianX,
+    '500 12px system-ui, "Segoe UI", sans-serif'
   );
   ctx.fillStyle = 'rgba(210, 210, 220, 0.88)';
-  ctx.font = '500 13px system-ui, "Segoe UI", sans-serif';
+  ctx.font = '500 12px system-ui, "Segoe UI", sans-serif';
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
-  ctx.fillText(spreadFoot, spreadX, heroY + heroH - 4);
+  ctx.fillText(medianFootLine, medianX, heroY + heroH - 2);
 }
 
 /**
@@ -1173,7 +1244,7 @@ function paintDigestDeskSection(ctx, data, cfg, accent, botAvatar, mainY, conten
       ctx.font = `600 ${i === 0 ? 17 : 15}px system-ui, "Segoe UI", sans-serif`;
       const name = truncateToWidth(
         ctx,
-        r.username,
+        r.displayName || r.username,
         nameMaxW,
         `600 ${i === 0 ? 17 : 15}px system-ui, "Segoe UI", sans-serif`
       );

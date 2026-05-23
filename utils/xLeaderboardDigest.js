@@ -55,6 +55,36 @@ const DIGEST_PODIUM_MEDALS = ['🥇', '🥈', '🥉'];
 /** Bullet for list rows — works on every X client (avoid emoji squares). */
 const BUL = '\u2022 ';
 
+function stripAt(handle) {
+  return String(handle || '')
+    .trim()
+    .replace(/^@+/, '');
+}
+
+/**
+ * Tweet label: verified @handle when linked, else Discord display name.
+ * @param {{ discordId?: string|null, username?: string, displayName?: string, xHandle?: string|null }} r
+ */
+async function formatDigestCallerNameForPost(r) {
+  if (r.xHandle) return `@${stripAt(r.xHandle)}`;
+  if (r.discordId) {
+    const handle = await resolveVerifiedXHandle(r.discordId);
+    if (handle) return `@${stripAt(handle)}`;
+  }
+  return String(r.displayName || r.username || 'Caller').trim() || 'Caller';
+}
+
+/**
+ * @param {number} i
+ * @param {{ discordId?: string|null, username?: string, displayName?: string, xHandle?: string|null, avgX: number, totalCalls: number }} r
+ */
+async function formatDigestLeaderboardLine(i, r) {
+  const name = await formatDigestCallerNameForPost(r);
+  const avg = Number(r.avgX).toFixed(2);
+  const calls = r.totalCalls;
+  return `${i + 1}. ${name} • ${avg}× avg • ${calls} call${calls === 1 ? '' : 's'}`;
+}
+
 /**
  * One-line print for X. No leading `$` on the ticker — X allows only **one** cashtag
  * ($SYMBOL) per post; weekly / digest lists would otherwise exceed that and get 403.
@@ -116,7 +146,7 @@ function buildLeaderboardDigestBody(p) {
     for (let i = 0; i < rows.length; i += 1) {
       const r = rows[i];
       deskLines.push(
-        `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
+        `${i + 1}. ${r.username} • ${r.avgX.toFixed(2)}× avg • ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
       );
     }
   } else {
@@ -128,14 +158,14 @@ function buildLeaderboardDigestBody(p) {
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
     if (h) {
-      hiLines.push(`${BUL}Best member call — ${h}`);
+      hiLines.push(`${BUL}Best member call • ${h}`);
       anyHi = true;
     }
   }
   if (bestBot) {
     const b = formatCallOneLiner(bestBot);
     if (b) {
-      hiLines.push(`${BUL}Best McGBot call — ${b}`);
+      hiLines.push(`${BUL}Best McGBot call • ${b}`);
       anyHi = true;
     }
   }
@@ -181,7 +211,7 @@ function formatSnapshotHighlight(best) {
     .trim()
     .replace(/^\$/, '')
     .toUpperCase();
-  return `${t} — ${Number(best.x).toFixed(2)}× ATH`;
+  return `${t} • ${Number(best.x).toFixed(2)}× ATH`;
 }
 
 /**
@@ -189,7 +219,7 @@ function formatSnapshotHighlight(best) {
  * @param {import('./digestCallPerformanceSource').DigestSnapshot} snap
  * @param {'day'|'week'|'month'} quietKind
  */
-function composeDigestPostFromSnapshot(p, snap, quietKind) {
+async function composeDigestPostFromSnapshot(p, snap, quietKind) {
   const maxChars = resolveWeeklyStatsTweetMaxChars();
   const topN = Number(p.topN) > 0 ? Number(p.topN) : 5;
   const gap = weeklySectionGap();
@@ -207,10 +237,7 @@ function composeDigestPostFromSnapshot(p, snap, quietKind) {
   const rows = Array.isArray(snap.leaderboard) ? snap.leaderboard.slice(0, topN) : [];
   if (rows.length) {
     for (let i = 0; i < rows.length; i += 1) {
-      const r = rows[i];
-      deskLines.push(
-        `${i + 1}. ${r.username} — ${Number(r.avgX).toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
-      );
+      deskLines.push(await formatDigestLeaderboardLine(i, rows[i]));
     }
   } else {
     deskLines.push(quiet);
@@ -220,12 +247,12 @@ function composeDigestPostFromSnapshot(p, snap, quietKind) {
   let anyHi = false;
   const h = formatSnapshotHighlight(snap.bestHuman);
   if (h) {
-    hiLines.push(`${BUL}Best member call — ${h}`);
+    hiLines.push(`${BUL}Best member call • ${h}`);
     anyHi = true;
   }
   const b = formatSnapshotHighlight(snap.bestBot);
   if (b) {
-    hiLines.push(`${BUL}Best McGBot call — ${b}`);
+    hiLines.push(`${BUL}Best McGBot call • ${b}`);
     anyHi = true;
   }
   if (!anyHi) hiLines.push('(none)');
@@ -273,7 +300,7 @@ async function buildWeeklyDigestPostBody(p = {}) {
     for (let i = 0; i < rows.length; i += 1) {
       const r = rows[i];
       deskLines.push(
-        `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
+        `${i + 1}. ${r.username} • ${r.avgX.toFixed(2)}× avg • ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
       );
     }
   } else {
@@ -285,14 +312,14 @@ async function buildWeeklyDigestPostBody(p = {}) {
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
     if (h) {
-      hiLines.push(`${BUL}Best member call — ${h}`);
+      hiLines.push(`${BUL}Best member call • ${h}`);
       anyHi = true;
     }
   }
   if (bestBot) {
     const b = formatCallOneLiner(bestBot);
     if (b) {
-      hiLines.push(`${BUL}Best McGBot call — ${b}`);
+      hiLines.push(`${BUL}Best McGBot call • ${b}`);
       anyHi = true;
     }
   }
@@ -343,7 +370,7 @@ async function buildDailyDigestPostBody(p = {}) {
     for (let i = 0; i < rows.length; i += 1) {
       const r = rows[i];
       deskLines.push(
-        `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
+        `${i + 1}. ${r.username} • ${r.avgX.toFixed(2)}× avg • ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
       );
     }
   } else {
@@ -355,14 +382,14 @@ async function buildDailyDigestPostBody(p = {}) {
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
     if (h) {
-      hiLines.push(`${BUL}Best member call — ${h}`);
+      hiLines.push(`${BUL}Best member call • ${h}`);
       anyHi = true;
     }
   }
   if (bestBot) {
     const b = formatCallOneLiner(bestBot);
     if (b) {
-      hiLines.push(`${BUL}Best McGBot call — ${b}`);
+      hiLines.push(`${BUL}Best McGBot call • ${b}`);
       anyHi = true;
     }
   }
@@ -402,12 +429,8 @@ async function buildMonthlyDigestPostBody(p) {
       const r = rows[i];
       const medal = DIGEST_PODIUM_MEDALS[i] || `${i + 1}.`;
       const stats = `${Number(r.avgX).toFixed(2)}× avg · ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`;
-      let name = r.username || 'Caller';
-      if (r.discordId) {
-        const handle = await resolveVerifiedXHandle(r.discordId);
-        if (handle) name = `@${handle}`;
-      }
-      podiumLines.push(`${medal} ${name} — ${stats}`);
+      const name = await formatDigestCallerNameForPost(r);
+      podiumLines.push(`${medal} ${name} • ${stats}`);
     }
 
     const chunks = [head];
@@ -418,12 +441,12 @@ async function buildMonthlyDigestPostBody(p) {
     let anyHi = false;
     const h = formatSnapshotHighlight(snap.bestHuman);
     if (h) {
-      hiLines.push(`${BUL}Best member call — ${h}`);
+      hiLines.push(`${BUL}Best member call • ${h}`);
       anyHi = true;
     }
     const b = formatSnapshotHighlight(snap.bestBot);
     if (b) {
-      hiLines.push(`${BUL}Best McGBot call — ${b}`);
+      hiLines.push(`${BUL}Best McGBot call • ${b}`);
       anyHi = true;
     }
     if (!anyHi) hiLines.push('(none)');
@@ -457,12 +480,8 @@ async function buildMonthlyDigestPostBody(p) {
     const r = rows[i];
     const medal = DIGEST_PODIUM_MEDALS[i] || `${i + 1}.`;
     const stats = `${r.avgX.toFixed(2)}× avg · ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`;
-    let name = r.username || 'Caller';
-    if (r.discordId) {
-      const handle = await resolveVerifiedXHandle(r.discordId);
-      if (handle) name = `@${handle}`;
-    }
-    podiumLines.push(`${medal} ${name} — ${stats}`);
+    const name = await formatDigestCallerNameForPost(r);
+    podiumLines.push(`${medal} ${name} • ${stats}`);
   }
 
   const chunks = [head];
@@ -479,14 +498,14 @@ async function buildMonthlyDigestPostBody(p) {
   if (bestHuman) {
     const h = formatCallOneLiner(bestHuman);
     if (h) {
-      hiLines.push(`${BUL}Best member call — ${h}`);
+      hiLines.push(`${BUL}Best member call • ${h}`);
       anyHi = true;
     }
   }
   if (bestBot) {
     const b = formatCallOneLiner(bestBot);
     if (b) {
-      hiLines.push(`${BUL}Best McGBot call — ${b}`);
+      hiLines.push(`${BUL}Best McGBot call • ${b}`);
       anyHi = true;
     }
   }
@@ -578,7 +597,7 @@ function buildWeeklyStatsSnapshotBody(snap) {
       for (let i = 0; i < desk.length; i += 1) {
         const r = desk[i];
         deskLines.push(
-          `${i + 1}. ${r.username} — ${r.avgX.toFixed(2)}× avg — ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
+          `${i + 1}. ${r.username} • ${r.avgX.toFixed(2)}× avg • ${r.totalCalls} call${r.totalCalls === 1 ? '' : 's'}`
         );
       }
     } else {

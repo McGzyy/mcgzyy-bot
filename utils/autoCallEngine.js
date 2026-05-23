@@ -71,6 +71,36 @@ function isDuplicate(contractAddress) {
   return minutesAgo(lastCall) < autoCallConfig.dedupe.cooldownMinutes;
 }
 
+/** Desk already has an open row for this mint (member call, prior bot call, or watch). */
+function isActiveTrackedContract(contractAddress) {
+  const ca = String(contractAddress || '').trim();
+  if (!ca) return false;
+  const existing = getTrackedCall(ca);
+  return !!(existing && existing.isActive !== false);
+}
+
+/**
+ * @param {string} contractAddress
+ * @param {object} [scan]
+ * @returns {{ skip: boolean, reason?: string }}
+ */
+function shouldSkipBotAutoCall(contractAddress, scan = null) {
+  const ca = String(contractAddress || '').trim();
+  if (!ca) return { skip: true, reason: 'no_contract' };
+  if (isActiveTrackedContract(ca)) {
+    const existing = getTrackedCall(ca);
+    const src = String(existing?.callSourceType || '').trim();
+    if (src === 'user_call') return { skip: true, reason: 'member_already_called' };
+    if (src === 'bot_call') return { skip: true, reason: 'bot_already_called' };
+    return { skip: true, reason: 'already_tracked' };
+  }
+  if (isDuplicate(ca)) return { skip: true, reason: 'bot_cooldown' };
+  if (scan && isRecentTickerDuplicate(scan)) {
+    return { skip: true, reason: 'recent_ticker' };
+  }
+  return { skip: false };
+}
+
 function markCalled(contractAddress) {
   recentlyCalled.set(contractAddress, now());
 }
@@ -118,6 +148,12 @@ function isAlreadyQueued(contractAddress) {
 
 function enqueueBotCallCandidate({ contractAddress, profileName, rankScore, scan = null }) {
   if (!contractAddress) return false;
+
+  const skip = shouldSkipBotAutoCall(contractAddress, scan);
+  if (skip.skip) {
+    logDebug(`Queue skip ${contractAddress}: ${skip.reason}`);
+    return false;
+  }
 
   cleanupStaleBotCallQueue();
 
@@ -217,6 +253,14 @@ async function hydrateAutoCallChartMessage(message, scan, profileName) {
 }
 
 async function postBotCallScan(channel, scan, profileName) {
+  const skip = shouldSkipBotAutoCall(scan?.contractAddress, scan);
+  if (skip.skip) {
+    logDebug(
+      `Skip bot post ${scan?.tokenName || scan?.contractAddress || '?'}: ${skip.reason}`
+    );
+    return;
+  }
+
   enqueueAlert(async () => {
     const isMirror = scan && (scan.__mirrorSource === 'telegram' || scan.__mirrorSource === 'mirror');
     const embed = isMirror
@@ -302,7 +346,11 @@ async function processBotCallQueue(channel) {
       const next = botCallQueue.shift();
       if (!next?.contractAddress) continue;
 
-      if (isDuplicate(next.contractAddress)) continue;
+      const skipQueued = shouldSkipBotAutoCall(next.contractAddress, next.scan || null);
+      if (skipQueued.skip) {
+        logDebug(`Queue drop ${next.contractAddress}: ${skipQueued.reason}`);
+        continue;
+      }
       if (callsThisHour >= (autoCallConfig.profiles[next.profileName]?.maxCallsPerHour ?? 0)) return;
 
       let scan;
@@ -572,11 +620,7 @@ function getMomentumRejectReason(scan) {
 
 function shouldTrackAutoCall(scan) {
   if (!scan?.contractAddress) return false;
-
-  const existing = getTrackedCall(scan.contractAddress);
-  if (existing && existing.isActive !== false) return false;
-
-  return true;
+  return !isActiveTrackedContract(scan.contractAddress);
 }
 
 function trackAutoCall(scan) {
@@ -773,7 +817,12 @@ async function runAutoCallCycle(channel) {
 
   for (const candidate of candidates) {
     if (!candidate?.contractAddress) continue;
-    if (isDuplicate(candidate.contractAddress)) continue;
+    const skipCandidate = shouldSkipBotAutoCall(candidate.contractAddress);
+    if (skipCandidate.skip) {
+      rejectCounts[`skip_${skipCandidate.reason}`] =
+        (rejectCounts[`skip_${skipCandidate.reason}`] || 0) + 1;
+      continue;
+    }
     if (callsThisHour >= profile.maxCallsPerHour) break;
 
     let scan;

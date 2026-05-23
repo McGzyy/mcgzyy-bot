@@ -77,9 +77,18 @@ function snapshotMcUsd(tracked) {
   return Number.isFinite(mcRaw) && mcRaw > 0 ? mcRaw : null;
 }
 
+const { resolveScanThumbnailUrl } = require('./embedTokenThumbnail');
+
 function snapshotImageUrl(tracked) {
-  const u = String(tracked.tokenImageUrl || '').trim();
-  return u ? u.slice(0, 800) : null;
+  const url = resolveScanThumbnailUrl({
+    contractAddress: tracked.contractAddress,
+    tokenImageUrl: tracked.tokenImageUrl,
+    token:
+      tracked.tokenImageUrl && String(tracked.tokenImageUrl).trim()
+        ? { imageUrl: tracked.tokenImageUrl }
+        : undefined
+  });
+  return url ? String(url).trim().slice(0, 800) : null;
 }
 
 function rowSourceFromTracked(tracked) {

@@ -51,8 +51,17 @@ const MINT_RE = /\b([1-9A-HJ-NP-Za-km-z]{32,44})(?:pump)?\b/g;
 // we resolve any pending requests for that mint.
 const pendingEnrichment = new Map(); // mintLower -> [{ resolve, reject, expiresAt }]
 
+/** McGBot CA posts in user ingest chat → skip FaSol mirror when FaSol replies to these ids. */
+const pendingUserIngestByTriggerId = new Map(); // message_id -> { mintKey, expiresAt }
+
 /** Outside ingest: `sendMessage` id in the outside group → wait for FaSol `reply_to_message` + insert `outside_calls`. */
 const pendingOutsideByTriggerId = new Map(); // trigger message_id -> { sourceId, mint, tweetId, xPostUrl, mintResolution, signalTicker, resolve, reject, timer }
+
+function pruneExpiredUserIngestTriggers(now = Date.now()) {
+  for (const [id, row] of pendingUserIngestByTriggerId.entries()) {
+    if (!row || row.expiresAt <= now) pendingUserIngestByTriggerId.delete(id);
+  }
+}
 
 function truthyEnv(v) {
   const s = String(v ?? '')
@@ -595,6 +604,14 @@ async function requestFaSolEnrichment(contractAddress, opts = {}) {
     if (sm?.data?.ok !== true) {
       throw new Error(sm?.data?.description || 'sendMessage ok=false');
     }
+    const triggerId = sm?.data?.result?.message_id;
+    if (triggerId != null) {
+      pruneExpiredUserIngestTriggers();
+      pendingUserIngestByTriggerId.set(Number(triggerId), {
+        mintKey,
+        expiresAt: expiresAt + 5_000
+      });
+    }
   } catch (e) {
     const tg = e?.response?.data;
     const desc =
@@ -1087,6 +1104,23 @@ function startTelegramFaSolMirror(opts) {
       /** FaSol reply to our ingest CA — belongs on user-call feeds only; skip bot-call mirror (Discord + TG). */
       let skipMirrorForUserEnrich = false;
 
+      const replyToId = message.reply_to_message?.message_id;
+      if (replyToId != null) {
+        pruneExpiredUserIngestTriggers();
+        if (pendingUserIngestByTriggerId.has(Number(replyToId))) {
+          skipMirrorForUserEnrich = true;
+        }
+      }
+
+      const existingTracked = getTrackedCall(mint);
+      if (
+        existingTracked &&
+        existingTracked.isActive !== false &&
+        String(existingTracked.callSourceType || '').trim() === 'user_call'
+      ) {
+        skipMirrorForUserEnrich = true;
+      }
+
       // If this message looks like a FaSol stats card, resolve any pending enrichment waits.
       try {
         const parsedMaybe = parseFaSolPost(message);
@@ -1120,7 +1154,7 @@ function startTelegramFaSolMirror(opts) {
 
       if (skipMirrorForUserEnrich) {
         console.log(
-          `[TelegramFaSol] Skip bot-call mirror for ${mint.slice(0, 6)}… — FaSol reply matched !call/dashboard enrich`
+          `[TelegramFaSol] Skip bot-call mirror for ${mint.slice(0, 6)}… — user-call ingest (FaSol enrich / reply / active member call)`
         );
         continue;
       }

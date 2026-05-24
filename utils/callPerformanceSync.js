@@ -343,6 +343,39 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
     .trim()
     .slice(0, 80);
 
+  if (source === 'user') {
+    const recentBot = await findRecentCallPerformanceRow(sb, {
+      callCa: contract,
+      source: 'bot'
+    });
+    if (recentBot?.id) {
+      const id = String(recentBot.id);
+      const messageUrl =
+        typeof opts.messageUrl === 'string' && opts.messageUrl.trim()
+          ? opts.messageUrl.trim().slice(0, 500)
+          : null;
+      const { error: upErr } = await sb
+        .from('call_performance')
+        .update({
+          source: 'user',
+          discord_id: discordId,
+          username: username || 'Unknown',
+          ...(messageUrl ? { message_url: messageUrl } : {}),
+          role: callerRoleForDiscordId(discordId)
+        })
+        .eq('id', id);
+      if (upErr) {
+        console.error(
+          '[CallPerformanceSync] re-attribute bot row to user failed:',
+          upErr.message || upErr
+        );
+      } else {
+        updateTrackedCallData(contract, { callPerformanceId: id });
+        return { ok: true, id, reassigned: true, reason: 'bot_row_reassigned_to_user' };
+      }
+    }
+  }
+
   const tokenNameRaw = String(tracked.tokenName || '').trim();
   const tokenTickerRaw = String(tracked.ticker || '').trim();
   const callMc = snapshotMcUsd(tracked);

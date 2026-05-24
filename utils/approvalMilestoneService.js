@@ -34,20 +34,34 @@ function getApprovalTriggerX() {
 }
 
 /**
- * ATH multiple from first called MC (same field resolution as legacy index.js getCurrentX).
+ * Best-effort ATH market cap for approval / X milestone math.
+ * Monitor updates `athMc` every tick; legacy `ath` from the initial scan can stay frozen
+ * and must not shadow a higher rolling ATH.
+ */
+function resolveAthMarketCapForApproval(trackedCall) {
+  if (!trackedCall) return 0;
+
+  const candidates = [
+    trackedCall.athMc,
+    trackedCall.athMarketCap,
+    trackedCall.ath,
+    trackedCall.latestMarketCap,
+    trackedCall.firstCalledMarketCap,
+  ]
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  if (!candidates.length) return 0;
+  return Math.max(...candidates);
+}
+
+/**
+ * ATH multiple from first called MC (monitor uses the same ATH MC resolution).
  */
 function computeApprovalAthX(trackedCall) {
   if (!trackedCall) return 0;
 
-  const ath = Number(
-    trackedCall.ath ||
-    trackedCall.athMc ||
-    trackedCall.athMarketCap ||
-    trackedCall.latestMarketCap ||
-    trackedCall.firstCalledMarketCap ||
-    0
-  );
-
+  const ath = resolveAthMarketCapForApproval(trackedCall);
   const firstCalledMc = Number(trackedCall.firstCalledMarketCap || 0);
   if (firstCalledMc <= 0) return 0;
 
@@ -129,6 +143,7 @@ module.exports = {
   getApprovalTriggerX,
   getApprovalMilestoneLadder,
   getHighestEligibleApprovalMilestone,
+  resolveAthMarketCapForApproval,
   computeApprovalAthX,
-  shouldCreateApprovalRequest
+  shouldCreateApprovalRequest,
 };

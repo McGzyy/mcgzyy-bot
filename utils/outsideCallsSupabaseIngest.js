@@ -9,9 +9,44 @@ function getSupabaseServiceRole() {
   return createClient(url, key);
 }
 
+async function outsideMintHasPrimary(mint) {
+  const sb = getSupabaseServiceRole();
+  if (!sb) return false;
+  const key = String(mint || '').trim();
+  if (!key) return false;
+  const { data, error } = await sb
+    .from('outside_calls')
+    .select('id')
+    .eq('mint', key)
+    .eq('call_role', 'primary')
+    .maybeSingle();
+  if (error) {
+    console.warn('[OutsideCallsIngest] primary lookup failed:', error.message);
+    return false;
+  }
+  return Boolean(data?.id);
+}
+
+async function outsideTweetAlreadyStored(tweetId) {
+  const sb = getSupabaseServiceRole();
+  if (!sb) return false;
+  const tid = String(tweetId || '').trim();
+  if (!tid) return false;
+  const { data, error } = await sb
+    .from('outside_calls')
+    .select('id')
+    .eq('tweet_id', tid)
+    .maybeSingle();
+  if (error) {
+    console.warn('[OutsideCallsIngest] tweet lookup failed:', error.message);
+    return false;
+  }
+  return Boolean(data?.id);
+}
+
 /**
  * After FaSol replies in the outside ingest Telegram group, persist a row for the dashboard tape.
- * @param {{ sourceId: string; mint: string; tweetId?: string | null; xPostUrl?: string | null; mint_resolution?: string | null; signal_ticker?: string | null }} opts
+ * @param {{ sourceId: string; mint: string; tweetId?: string | null; xPostUrl?: string | null; mint_resolution?: string | null; signal_ticker?: string | null; post_text?: string | null; post_media_urls?: string[] | null }} opts
  */
 async function insertOutsideCallRow(opts) {
   const sb = getSupabaseServiceRole();
@@ -31,6 +66,20 @@ async function insertOutsideCallRow(opts) {
     opts.signal_ticker != null && String(opts.signal_ticker).trim()
       ? String(opts.signal_ticker).trim().toUpperCase()
       : null;
+  const post_text =
+    opts.post_text != null && String(opts.post_text).trim() ? String(opts.post_text).trim().slice(0, 4000) : null;
+  const post_media_urls = (() => {
+    const raw = opts.post_media_urls;
+    if (!Array.isArray(raw)) return [];
+    const urls = [];
+    for (const u of raw) {
+      const s = String(u ?? '').trim();
+      if (!s || !/^https?:\/\//i.test(s)) continue;
+      if (!urls.includes(s)) urls.push(s);
+      if (urls.length >= 4) break;
+    }
+    return urls;
+  })();
 
   if (!sourceId || !mint) {
     return { ok: false, error: 'missing_source_or_mint' };
@@ -67,6 +116,8 @@ async function insertOutsideCallRow(opts) {
     x_post_url: xPostUrl,
     mint_resolution,
     signal_ticker,
+    post_text,
+    post_media_urls,
     posted_at: new Date().toISOString(),
     created_at: new Date().toISOString()
   };
@@ -82,4 +133,8 @@ async function insertOutsideCallRow(opts) {
   return { ok: true, callRole: row.call_role };
 }
 
-module.exports = { insertOutsideCallRow };
+module.exports = {
+  insertOutsideCallRow,
+  outsideMintHasPrimary,
+  outsideTweetAlreadyStored
+};

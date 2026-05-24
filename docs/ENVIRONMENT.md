@@ -292,7 +292,7 @@ Runs in **`index.js`** / `utils/outsideXCallerPoller.js` (not Vercel). Ingests C
 | **`OUTSIDE_TICKER_DEX_SEARCH_DISABLED`** | `1` — only curated `$TICKER` map, no Dexscreener search on ticker-only posts. |
 | **`OUTSIDE_CALLS_FEATURE_DISABLED`** | `1` — emergency kill (same effect as admin **Coming soon**). |
 
-Admin → **Outside X monitors**: **Go live** / **Coming soon** toggles `dashboard_admin_settings.outside_calls_enabled` (bot reads it every ~15s). Poll banner shows lean vs legacy interval. Restart the bot after changing env-only vars.
+Admin → **Outside X monitors**: **Go live** / **Coming soon** toggles `outside_calls_enabled` (Pro tape). **Pause polling** / **Resume polling** toggles `outside_x_polling_enabled` (bot reads both every ~15s). Poll banner shows lean vs legacy interval. Restart the bot after changing env-only vars.
 
 ### 7.5 Optional (unused in default graph)
 

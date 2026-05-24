@@ -55,7 +55,18 @@ const pendingEnrichment = new Map(); // mintLower -> [{ resolve, reject, expires
 const pendingUserIngestByTriggerId = new Map(); // message_id -> { mintKey, expiresAt }
 
 /** Outside ingest: `sendMessage` id in the outside group → wait for FaSol `reply_to_message` + insert `outside_calls`. */
-const pendingOutsideByTriggerId = new Map(); // trigger message_id -> { sourceId, mint, tweetId, xPostUrl, mintResolution, signalTicker, resolve, reject, timer }
+const pendingOutsideByTriggerId = new Map(); // trigger message_id -> { sourceId, mint, tweetId, xPostUrl, mintResolution, signalTicker, postText, postMediaUrls, resolve, reject, timer }
+
+function isOutsideMintInFlight(mint) {
+  const key = normalizeMintCore(mint).toLowerCase();
+  if (!key) return false;
+  for (const row of pendingOutsideByTriggerId.values()) {
+    if (row && String(row.mint || '').toLowerCase() === key) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function pruneExpiredUserIngestTriggers(now = Date.now()) {
   for (const [id, row] of pendingUserIngestByTriggerId.entries()) {
@@ -732,7 +743,7 @@ async function requestCaAnalyzerFaSolEnrichment(contractAddress, opts = {}) {
  * Call this from your X / outside-source worker when an allow-listed handle posts a mint.
  *
  * @param {string} contractAddress
- * @param {{ sourceId: string; tweetId?: string | null; xPostUrl?: string | null; timeoutMs?: number; mintResolution?: 'ca_in_post'|'curated_map'|'dex_search'; signalTicker?: string | null }} opts
+ * @param {{ sourceId: string; tweetId?: string | null; xPostUrl?: string | null; xHandle?: string | null; timeoutMs?: number; mintResolution?: 'ca_in_post'|'curated_map'|'dex_search'; signalTicker?: string | null; postText?: string | null; postMediaUrls?: string[] | null }} opts
  */
 async function requestFaSolEnrichmentOutside(contractAddress, opts = {}) {
   const rawCa = String(contractAddress || '').trim();
@@ -761,9 +772,14 @@ async function requestFaSolEnrichmentOutside(contractAddress, opts = {}) {
   const apiBase = `https://api.telegram.org/bot${encodeURIComponent(token)}`;
   const topicRaw = String(process.env.TELEGRAM_FASOL_OUTSIDE_INGEST_TOPIC_ID ?? '').trim();
   const topicId = topicRaw ? Number(topicRaw) : null;
+  const handleNorm = String(opts.xHandle || '')
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase();
+  const triggerText = handleNorm ? `@${handleNorm}\n${rawCa}` : rawCa;
   const body = {
     chat_id: chatId,
-    text: rawCa,
+    text: triggerText,
     disable_web_page_preview: true
   };
   if (topicId != null && Number.isFinite(topicId) && topicId > 0) {
@@ -810,6 +826,20 @@ async function requestFaSolEnrichmentOutside(contractAddress, opts = {}) {
     opts.signalTicker != null && String(opts.signalTicker).trim()
       ? String(opts.signalTicker).trim().toUpperCase()
       : null;
+  const postText =
+    opts.postText != null && String(opts.postText).trim() ? String(opts.postText).trim().slice(0, 4000) : null;
+  const postMediaUrls = (() => {
+    const raw = opts.postMediaUrls;
+    if (!Array.isArray(raw)) return [];
+    const urls = [];
+    for (const u of raw) {
+      const s = String(u ?? '').trim();
+      if (!s || !/^https?:\/\//i.test(s)) continue;
+      if (!urls.includes(s)) urls.push(s);
+      if (urls.length >= 4) break;
+    }
+    return urls;
+  })();
 
   return new Promise((resolve, reject) => {
     const row = {
@@ -819,6 +849,8 @@ async function requestFaSolEnrichmentOutside(contractAddress, opts = {}) {
       xPostUrl,
       mintResolution,
       signalTicker,
+      postText,
+      postMediaUrls,
       resolve,
       reject,
       timer: null
@@ -895,7 +927,9 @@ async function handleOutsideFaSolReply(message) {
     tweetId: pending.tweetId,
     xPostUrl: pending.xPostUrl,
     mint_resolution: pending.mintResolution,
-    signal_ticker: pending.signalTicker
+    signal_ticker: pending.signalTicker,
+    post_text: pending.postText,
+    post_media_urls: pending.postMediaUrls
   });
 
   if (pending.timer) {
@@ -1259,5 +1293,6 @@ module.exports = {
   startTelegramFaSolMirror,
   requestFaSolEnrichment,
   requestFaSolEnrichmentOutside,
-  requestCaAnalyzerFaSolEnrichment
+  requestCaAnalyzerFaSolEnrichment,
+  isOutsideMintInFlight
 };

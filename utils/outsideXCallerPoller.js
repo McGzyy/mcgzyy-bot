@@ -20,8 +20,19 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { oauth1aGet } = require('./xPoster');
-const { requestFaSolEnrichmentOutside } = require('./telegramFaSolMirror');
+const { requestFaSolEnrichmentOutside, isOutsideMintInFlight } = require('./telegramFaSolMirror');
 const { resolveTickerToMintSolana } = require('./outsideTickerResolve');
+const {
+  insertOutsideCallRow,
+  outsideMintHasPrimary,
+  outsideTweetAlreadyStored
+} = require('./outsideCallsSupabaseIngest');
+const {
+  loadOutsideIngestPolicy,
+  tweetTextBlocked,
+  isSourceOnCooldown,
+  extractMediaUrlsFromTweet
+} = require('./outsideIngestPolicy');
 
 const X_API_BASE = 'https://api.x.com/2';
 
@@ -94,8 +105,17 @@ function shouldStartPoller() {
 /** Set when `startOutsideXCallerPoller()` installed its interval (cleared on stop callback). */
 let outsidePollIntervalActive = false;
 
-/** Cached `dashboard_admin_settings.outside_calls_enabled` (15s TTL). */
-let dashboardProductEnabledCache = { exp: 0, enabled: true, checked: false };
+/** Cached dashboard admin flags (15s TTL). */
+let dashboardSettingsCache = {
+  exp: 0,
+  outsideCallsEnabled: true,
+  outsideXPollingEnabled: true,
+  checked: false
+};
+
+/** Recent outside mint posts (in-process dedupe before Telegram). */
+const recentOutsideMintAt = new Map();
+const OUTSIDE_MINT_DEDUPE_MS = 60 * 60 * 1000;
 
 function envProductForceOff() {
   const s = String(process.env.OUTSIDE_CALLS_FEATURE_DISABLED ?? '')
@@ -104,44 +124,97 @@ function envProductForceOff() {
   return s === '1' || s === 'true' || s === 'yes' || s === 'on';
 }
 
-/**
- * When false, skip X timeline reads (admin "coming soon" or env kill switch).
- * Defaults true if settings row/column missing.
- */
-async function isOutsideCallsProductEnabled() {
-  if (envProductForceOff()) return false;
-
+async function refreshDashboardOutsideSettings() {
   const now = Date.now();
-  if (dashboardProductEnabledCache.exp > now) {
-    return dashboardProductEnabledCache.enabled;
+  if (dashboardSettingsCache.exp > now) {
+    return dashboardSettingsCache;
   }
 
   const sb = getSupabaseServiceRole();
   if (!sb) {
-    dashboardProductEnabledCache = { exp: now + 15_000, enabled: true, checked: true };
-    return true;
+    dashboardSettingsCache = {
+      exp: now + 15_000,
+      outsideCallsEnabled: true,
+      outsideXPollingEnabled: true,
+      checked: true
+    };
+    return dashboardSettingsCache;
   }
 
   const { data, error } = await sb
     .from('dashboard_admin_settings')
-    .select('outside_calls_enabled')
+    .select('outside_calls_enabled,outside_x_polling_enabled')
     .eq('id', 1)
     .maybeSingle();
 
   if (error) {
     const msg = (error.message || '').toLowerCase();
-    if (msg.includes('outside_calls_enabled') || error.code === '42703' || error.code === 'PGRST204') {
-      dashboardProductEnabledCache = { exp: now + 15_000, enabled: true, checked: true };
-      return true;
+    if (
+      msg.includes('outside_calls_enabled') ||
+      msg.includes('outside_x_polling_enabled') ||
+      error.code === '42703' ||
+      error.code === 'PGRST204'
+    ) {
+      dashboardSettingsCache = {
+        exp: now + 15_000,
+        outsideCallsEnabled: true,
+        outsideXPollingEnabled: true,
+        checked: true
+      };
+      return dashboardSettingsCache;
     }
     console.warn('[OutsideXPoll] dashboard_admin_settings read failed:', error.message);
-    dashboardProductEnabledCache = { exp: now + 15_000, enabled: true, checked: true };
-    return true;
+    dashboardSettingsCache = {
+      exp: now + 15_000,
+      outsideCallsEnabled: true,
+      outsideXPollingEnabled: true,
+      checked: true
+    };
+    return dashboardSettingsCache;
   }
 
-  const enabled = data == null ? true : data.outside_calls_enabled !== false;
-  dashboardProductEnabledCache = { exp: now + 15_000, enabled, checked: true };
-  return enabled;
+  const outsideCallsEnabled = data == null ? true : data.outside_calls_enabled !== false;
+  const outsideXPollingEnabled =
+    data == null ? true : data.outside_x_polling_enabled !== false;
+  dashboardSettingsCache = {
+    exp: now + 15_000,
+    outsideCallsEnabled,
+    outsideXPollingEnabled,
+    checked: true
+  };
+  return dashboardSettingsCache;
+}
+
+async function shouldPollXNow() {
+  if (envProductForceOff() || pollDisabled()) return false;
+  const s = await refreshDashboardOutsideSettings();
+  if (!s.outsideCallsEnabled) return false;
+  if (!s.outsideXPollingEnabled) return false;
+  return true;
+}
+
+function markOutsideMintPosted(mint) {
+  const key = String(mint || '').trim();
+  if (!key) return;
+  recentOutsideMintAt.set(key, Date.now());
+}
+
+function isOutsideMintRecentlyPosted(mint) {
+  const key = String(mint || '').trim();
+  if (!key) return false;
+  const at = recentOutsideMintAt.get(key);
+  if (!at) return false;
+  if (Date.now() - at > OUTSIDE_MINT_DEDUPE_MS) {
+    recentOutsideMintAt.delete(key);
+    return false;
+  }
+  return true;
+}
+
+async function isOutsideCallsProductEnabled() {
+  if (envProductForceOff()) return false;
+  const s = await refreshDashboardOutsideSettings();
+  return s.outsideCallsEnabled;
 }
 
 function resolvePollIntervalMs() {
@@ -179,20 +252,30 @@ function getOutsideXPollBlockers() {
  *   pollIntervalMs: number,
  *   leanMode: boolean,
  *   disabledByDashboard: boolean,
+ *   disabledByDashboardPolling: boolean,
  *   blockers: string[],
  *   hint: string
  * }}
  */
 function getOutsideXPollStatus() {
   const disabledByEnv = pollDisabled();
-  const disabledByDashboard =
-    dashboardProductEnabledCache.checked && dashboardProductEnabledCache.enabled === false;
+  const settings = dashboardSettingsCache;
+  const disabledByProduct =
+    settings.checked && settings.outsideCallsEnabled === false;
+  const disabledByDashboardPolling =
+    settings.checked &&
+    settings.outsideCallsEnabled !== false &&
+    settings.outsideXPollingEnabled === false;
+  const disabledByDashboard = disabledByProduct || disabledByDashboardPolling;
   const blockers = getOutsideXPollBlockers();
   const readyToRun = !disabledByEnv && blockers.length === 0;
   const pollIntervalMs = resolvePollIntervalMs();
   const leanMode = isLeanMode();
   const running = Boolean(
-    outsidePollIntervalActive && readyToRun && !disabledByDashboard && !envProductForceOff()
+    outsidePollIntervalActive &&
+      readyToRun &&
+      !disabledByDashboard &&
+      !envProductForceOff()
   );
   const intervalSec = Math.round(pollIntervalMs / 1000);
   const leanNote = leanMode
@@ -208,13 +291,14 @@ function getOutsideXPollStatus() {
       pollIntervalMs,
       leanMode,
       disabledByDashboard: false,
+      disabledByDashboardPolling: false,
       blockers: [],
       hint:
         'OUTSIDE_X_CALLS_POLL_DISABLED is set on the bot host. X timeline reads are off; milestone and D/W/M posts still use X write credits when enabled.'
     };
   }
 
-  if (disabledByDashboard || envProductForceOff()) {
+  if (disabledByProduct || envProductForceOff()) {
     return {
       status: 'disabled',
       disabledByEnv: false,
@@ -223,9 +307,26 @@ function getOutsideXPollStatus() {
       pollIntervalMs,
       leanMode,
       disabledByDashboard: true,
+      disabledByDashboardPolling: false,
       blockers: [],
       hint:
         'Outside Calls is off in dashboard admin (coming soon). Pro tape hidden; X polling paused. Turn on under Admin → Outside X monitors.'
+    };
+  }
+
+  if (disabledByDashboardPolling) {
+    return {
+      status: 'disabled',
+      disabledByEnv: false,
+      readyToRun,
+      running: false,
+      pollIntervalMs,
+      leanMode,
+      disabledByDashboard: true,
+      disabledByDashboardPolling: true,
+      blockers: [],
+      hint:
+        'X polling is paused in dashboard admin (Outside Calls tape can stay live). Resume under Admin → Outside X monitors → X polling.'
     };
   }
 
@@ -238,6 +339,7 @@ function getOutsideXPollStatus() {
       pollIntervalMs,
       leanMode,
       disabledByDashboard: false,
+      disabledByDashboardPolling: false,
       blockers: [],
       hint: `Polling active monitors every ${intervalSec}s (X API read credits). ${leanNote}`
     };
@@ -252,6 +354,7 @@ function getOutsideXPollStatus() {
       pollIntervalMs,
       leanMode,
       disabledByDashboard: false,
+      disabledByDashboardPolling: false,
       blockers: [],
       hint: 'Env is configured but the poller is not running — restart the Discord bot (index.js) on the bot host.'
     };
@@ -265,6 +368,7 @@ function getOutsideXPollStatus() {
     pollIntervalMs,
     leanMode,
     disabledByDashboard: false,
+    disabledByDashboardPolling: false,
     blockers,
     hint:
       blockers.length > 0
@@ -354,7 +458,9 @@ async function fetchUserTweetsSince(userId, sinceTweetId) {
   const baseUrl = `${X_API_BASE}/users/${encodeURIComponent(userId)}/tweets`;
   const query = {
     max_results: '10',
-    'tweet.fields': 'id,text,created_at,referenced_tweets',
+    'tweet.fields': 'id,text,created_at,referenced_tweets,attachments',
+    expansions: 'attachments.media_keys',
+    'media.fields': 'url,preview_image_url,type',
     exclude: 'retweets'
   };
   if (sinceTweetId && String(sinceTweetId).trim()) {
@@ -364,13 +470,19 @@ async function fetchUserTweetsSince(userId, sinceTweetId) {
   try {
     const res = await oauth1aGet(baseUrl, query);
     const rows = Array.isArray(res?.data?.data) ? res.data.data : [];
+    const includes = res?.data?.includes;
     const tweets = [];
     for (const row of rows) {
       const id = row?.id != null ? String(row.id) : '';
       const text = row?.text != null ? String(row.text) : '';
       if (!id) continue;
       if (isRetweetPayload(row)) continue;
-      tweets.push({ id, text, raw: row });
+      tweets.push({
+        id,
+        text,
+        raw: row,
+        mediaUrls: extractMediaUrlsFromTweet(row, includes)
+      });
     }
     return { ok: true, tweets };
   } catch (e) {
@@ -435,8 +547,28 @@ async function pollOneSource(row) {
 
   tweets.sort((a, b) => compareTweetIdAsc(a.id, b.id));
 
+  const sb = getSupabaseServiceRole();
+  const policy = await loadOutsideIngestPolicy(sb);
+
   for (const tw of tweets) {
     const xUrl = `https://x.com/${handle}/status/${tw.id}`;
+    const postText = tw.text;
+    const postMediaUrls = Array.isArray(tw.mediaUrls) ? tw.mediaUrls : [];
+
+    if (tweetTextBlocked(postText, policy.blockPhrases)) {
+      console.log(`[OutsideXPoll] Blocked @${handle} tweet ${tw.id} (filter phrase)`);
+      await updateSourcePollCursor(sourceId, tw.id);
+      continue;
+    }
+
+    if (sb && (await isSourceOnCooldown(sb, sourceId, policy.cooldownMax, policy.cooldownMinutes))) {
+      console.log(
+        `[OutsideXPoll] Cooldown @${handle} tweet ${tw.id} (max ${policy.cooldownMax} per ${policy.cooldownMinutes}m)`
+      );
+      await updateSourcePollCursor(sourceId, tw.id);
+      continue;
+    }
+
     let mint = extractFirstMintFromText(tw.text);
     let mintResolution = 'ca_in_post';
     let signalTicker = null;
@@ -455,23 +587,62 @@ async function pollOneSource(row) {
       continue;
     }
 
+    if (await outsideTweetAlreadyStored(tw.id)) {
+      await updateSourcePollCursor(sourceId, tw.id);
+      continue;
+    }
+
+    const mintHasPrimary = await outsideMintHasPrimary(mint);
+    const mintInFlight = isOutsideMintInFlight(mint) || isOutsideMintRecentlyPosted(mint);
+
+    if (mintHasPrimary || mintInFlight) {
+      if (mintHasPrimary) {
+        const ins = await insertOutsideCallRow({
+          sourceId,
+          mint,
+          tweetId: tw.id,
+          xPostUrl: xUrl,
+          mint_resolution: mintResolution,
+          signal_ticker: signalTicker,
+          post_text: postText,
+          post_media_urls: postMediaUrls
+        });
+        if (ins.ok) {
+          console.log(
+            `[OutsideXPoll] Echo row (no Telegram) @${handle} tweet ${tw.id} mint ${mint.slice(0, 8)}…`
+          );
+        }
+      } else {
+        console.log(
+          `[OutsideXPoll] Skip duplicate Telegram post for mint ${mint.slice(0, 8)}… (@${handle} ${tw.id})`
+        );
+      }
+      await updateSourcePollCursor(sourceId, tw.id);
+      continue;
+    }
+
     try {
       console.log(
         `[OutsideXPoll] @${handle} tweet ${tw.id} → mint ${mint.slice(0, 8)}…` +
           (signalTicker ? ` ($${signalTicker} via ${mintResolution})` : '') +
           ' → FaSol outside ingest'
       );
+      markOutsideMintPosted(mint);
       await requestFaSolEnrichmentOutside(mint, {
         sourceId,
         tweetId: tw.id,
         xPostUrl: xUrl,
+        xHandle: handle,
         timeoutMs: Number(process.env.TELEGRAM_FASOL_ENRICH_TIMEOUT_MS || 28_000),
         mintResolution,
-        signalTicker
+        signalTicker,
+        postText,
+        postMediaUrls
       });
     } catch (e) {
       const msg = e?.message || String(e);
       console.error(`[OutsideXPoll] FaSol/outside pipeline failed @${handle} ${tw.id}:`, msg);
+      await updateSourcePollCursor(sourceId, tw.id);
       return;
     }
 
@@ -480,6 +651,10 @@ async function pollOneSource(row) {
 }
 
 async function pollAllSourcesOnce() {
+  if (!(await shouldPollXNow())) {
+    return;
+  }
+
   const sb = getSupabaseServiceRole();
   if (!sb) return;
 
@@ -534,7 +709,7 @@ function startOutsideXCallerPoller() {
   };
 
   void tick();
-  void isOutsideCallsProductEnabled().catch(() => {});
+  void refreshDashboardOutsideSettings().catch(() => {});
   const id = setInterval(() => {
     void tick();
   }, intervalMs);

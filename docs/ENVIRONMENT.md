@@ -249,6 +249,9 @@ If any are missing, `createPost` throws **“Missing X API credentials”** when
 | **`X_WEEKLY_SNAPSHOT_CALLER_TOP_N`** | Optional; default **`8`** (max `15`). Caller rows on the weekly snapshot (shorter reads better on mobile). |
 | **`X_WEEKLY_SNAPSHOT_PRINT_TOP_N`** | Optional; default **`6`** (max `12`). Top member-call / McGBot-call lines per list. |
 | **`X_BOT_USERNAME`** | `utils/xPoster.js` | X handle **without** `@` (default `McGBot`). Used for API/DM copy (e.g. `getXBotUsernameForCopy`); terminal-style post footers say **“link in bio”** without @-mentioning the bot. |
+| **`X_MENTION_DESK_CALLS_ENABLED`** | `utils/xMentionDeskCallPoller.js` | Default **on** when X read creds exist. Polls `@McGBot` mentions → Pro desk calls (`handleCallFromDashboard`). Set `0` to disable. |
+| **`X_MENTION_DESK_POLL_INTERVAL_MS`** | Same | Poll cadence (default **60s**, clamp 30s–5m). State file: `data/xMentionDeskPollState.json`. |
+| **`X_MENTION_DESK_POST_REPLIES`** | Same | Default **on** — public reply on the user’s tweet (link X, Pro required, logged, errors). Set `0` to ingest silently. |
 | **`DASHBOARD_PUBLIC_URL`** | Dashboard / links elsewhere | Optional; not appended to digest/snapshot tweets (footer points to the bot profile instead). `NEXT_PUBLIC_APP_URL` / `MCBOT_DASHBOARD_URL` are fallbacks where the codebase still reads a public app URL. |
 
 #### 7.3.1 X engagement — weekly runner & monthly Top Caller

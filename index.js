@@ -2098,6 +2098,13 @@ client.once('clientReady', async () => {
     console.error('[OutsideXPoll] Startup failed:', e?.message || e);
   }
 
+  try {
+    const { startXMentionDeskCallPoller } = require('./utils/xMentionDeskCallPoller');
+    startXMentionDeskCallPoller(client);
+  } catch (e) {
+    console.error('[XMentionDesk] Startup failed:', e?.message || e);
+  }
+
   if (!firstGuild) {
     console.log('❌ No guild found for monitoring alerts.');
     return;

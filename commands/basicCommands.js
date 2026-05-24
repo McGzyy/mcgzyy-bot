@@ -1503,6 +1503,9 @@ async function handleCallFromDashboard(client, opts) {
   const userId = String(opts.userId || '').trim();
   const contractAddress = String(opts.contractAddress || '').trim();
   const webhookUrl = (opts.webhookUrl || '').trim();
+  const source = String(opts.source || 'dashboard').trim() || 'dashboard';
+  const messageExtras =
+    opts.messageExtras && typeof opts.messageExtras === 'object' ? opts.messageExtras : null;
 
   if (!userId || !contractAddress) {
     throw new Error('Missing userId or contract address');
@@ -1551,12 +1554,13 @@ async function handleCallFromDashboard(client, opts) {
   }
 
   const messageStub = {
-    id: 'dashboard',
+    id: source === 'x_mention' ? 'x_mention' : 'dashboard',
     author: member.user,
     member,
     channel,
     guild,
     content: `!call ${contractAddress}`,
+    _deskCallExtras: messageExtras,
     async reply(payload) {
       if (useWebhook) {
         try {
@@ -1577,7 +1581,7 @@ async function handleCallFromDashboard(client, opts) {
     }
   };
 
-  return handleCallCommand(messageStub, contractAddress, 'dashboard');
+  return handleCallCommand(messageStub, contractAddress, source === 'x_mention' ? 'x_mention' : 'dashboard');
 }
 
 /**
@@ -1809,7 +1813,9 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
   const dashboardFooter =
     source === 'dashboard'
       ? `${String(getPublicCaller(embedScan)).slice(0, 72)} · Call intel`
-      : undefined;
+      : source === 'x_mention'
+        ? `${String(getPublicCaller(embedScan)).slice(0, 72)} · X @mention`
+        : undefined;
 
   const callerDisplay = getPublicCaller(embedScan);
   const mentionId = String(
@@ -1887,9 +1893,26 @@ async function handleCallCommand(message, contractAddress, source = 'command') {
       } catch (_) {
         callerAvatarUrl = undefined;
       }
+      const deskExtras =
+        message && typeof message === 'object' && message._deskCallExtras
+          ? message._deskCallExtras
+          : {};
+      const xUrl =
+        typeof deskExtras.xPostUrl === 'string' && deskExtras.xPostUrl.trim()
+          ? deskExtras.xPostUrl.trim()
+          : null;
       statsMirrorResult = await insertUserCallPerformanceRow(freshTracked, {
-        messageUrl,
-        ...(callerAvatarUrl ? { callerAvatarUrl } : {})
+        messageUrl: xUrl || messageUrl,
+        ...(callerAvatarUrl ? { callerAvatarUrl } : {}),
+        callNarrative:
+          typeof deskExtras.callNarrative === 'string' && deskExtras.callNarrative.trim()
+            ? deskExtras.callNarrative.trim()
+            : null,
+        callMediaUrls: Array.isArray(deskExtras.callMediaUrls) ? deskExtras.callMediaUrls : [],
+        sourceXTweetId:
+          typeof deskExtras.sourceXTweetId === 'string' && deskExtras.sourceXTweetId.trim()
+            ? deskExtras.sourceXTweetId.trim()
+            : null
       });
       if (!statsMirrorResult.ok) {
         console.error('[CallPerformanceSync] mirror failed:', statsMirrorResult);

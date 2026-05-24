@@ -391,6 +391,27 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
       : tracked;
   await upsertUserDiscordIdentityFromTracked(sb, trackedForIdentity, opts);
 
+  const callNarrative =
+    opts.callNarrative != null && String(opts.callNarrative).trim()
+      ? String(opts.callNarrative).trim().slice(0, 4000)
+      : null;
+  const callMediaUrls = (() => {
+    const raw = opts.callMediaUrls;
+    if (!Array.isArray(raw)) return [];
+    const urls = [];
+    for (const u of raw) {
+      const s = String(u ?? '').trim();
+      if (!s || !/^https?:\/\//i.test(s)) continue;
+      if (!urls.includes(s)) urls.push(s);
+      if (urls.length >= 4) break;
+    }
+    return urls;
+  })();
+  const sourceXTweetId =
+    opts.sourceXTweetId != null && String(opts.sourceXTweetId).trim()
+      ? String(opts.sourceXTweetId).trim().slice(0, 64)
+      : null;
+
   const row = {
     discord_id: discordId,
     username: username || 'Unknown',
@@ -410,6 +431,9 @@ async function insertUserCallPerformanceRow(tracked, opts = {}) {
       typeof opts.messageUrl === 'string' && opts.messageUrl.trim()
         ? opts.messageUrl.trim().slice(0, 500)
         : null,
+    call_narrative: callNarrative,
+    call_media_urls: callMediaUrls,
+    source_x_tweet_id: sourceXTweetId,
     role: callerRoleForDiscordId(discordId),
     excluded_from_stats: tracked.excludedFromStats === true,
     hidden_from_dashboard: tracked.hiddenFromDashboard === true

@@ -279,6 +279,21 @@ Used only when referral rows are mirrored to Postgres (`utils/referralService.js
 
 **Dashboard note:** `mcgbot-dashboard/` uses the same variable **names** but reads from **its own** env (e.g. `.env.local` / Vercel). Keep projects aligned deliberately.
 
+#### 7.4.1 Outside Calls — X timeline poller (Discord bot host only)
+
+Runs in **`index.js`** / `utils/outsideXCallerPoller.js` (not Vercel). Ingests CAs from active `outside_x_sources` → FaSol outside Telegram → `outside_calls`.
+
+| Variable | Purpose |
+|----------|---------|
+| **`OUTSIDE_X_CALLS_POLL_DISABLED`** | `1` — stop all X timeline reads (dashboard tape stays empty until re-enabled). |
+| **`OUTSIDE_X_CALLS_LEAN_MODE`** | Default **on** (~**90s** between full passes, fewer X credits). Set **`0`** for legacy **45s** cadence. |
+| **`OUTSIDE_X_CALLS_POLL_INTERVAL_MS`** | Override interval (lean: **30s–5m**; legacy: **15s–2m**). |
+| **`TELEGRAM_FASOL_OUTSIDE_CHAT_ID`** | Required for ingest pipeline. |
+| **`OUTSIDE_TICKER_DEX_SEARCH_DISABLED`** | `1` — only curated `$TICKER` map, no Dexscreener search on ticker-only posts. |
+| **`OUTSIDE_CALLS_FEATURE_DISABLED`** | `1` — emergency kill (same effect as admin **Coming soon**). |
+
+Admin → **Outside X monitors**: **Go live** / **Coming soon** toggles `dashboard_admin_settings.outside_calls_enabled` (bot reads it every ~15s). Poll banner shows lean vs legacy interval. Restart the bot after changing env-only vars.
+
 ### 7.5 Optional (unused in default graph)
 
 | Variable | Used in | Notes |

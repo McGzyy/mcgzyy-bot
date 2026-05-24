@@ -10,7 +10,8 @@
  *
  * Env:
  *   OUTSIDE_X_CALLS_POLL_DISABLED — set to 1 to turn off (default: poll when deps exist)
- *   OUTSIDE_X_CALLS_POLL_INTERVAL_MS — default 45000
+ *   OUTSIDE_X_CALLS_LEAN_MODE — set to 0 to use legacy 45s cadence (default: lean on → 90s)
+ *   OUTSIDE_X_CALLS_POLL_INTERVAL_MS — override interval (lean clamp 30s–5m; legacy 15s–2m)
  *   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
  *   X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET (same as xPoster)
  *   OUTSIDE_TICKER_DEX_SEARCH_DISABLED — set to 1 to only use curated $TICKER map (no Dexscreener search)
@@ -44,8 +45,28 @@ function getFaSolOutsideIngestChatIdRaw() {
   return String(process.env.TELEGRAM_FASOL_OUTSIDE_CHAT_ID ?? '').trim();
 }
 
+/** Default on: ~90s between full passes — fewer X timeline reads until Pro revenue covers credits. */
+const LEAN_POLL_INTERVAL_MS = 90_000;
+const LEGACY_POLL_INTERVAL_MS = 45_000;
+const LEAN_POLL_MIN_MS = 30_000;
+const LEAN_POLL_MAX_MS = 300_000;
+const LEGACY_POLL_MIN_MS = 15_000;
+const LEGACY_POLL_MAX_MS = 120_000;
+
 function pollDisabled() {
   return truthyEnv(process.env.OUTSIDE_X_CALLS_POLL_DISABLED);
+}
+
+function falsyEnv(v) {
+  const s = String(v ?? '')
+    .trim()
+    .toLowerCase();
+  return s === '0' || s === 'false' || s === 'no' || s === 'off';
+}
+
+/** Lean mode is the product default; set OUTSIDE_X_CALLS_LEAN_MODE=0 for legacy 45s polling. */
+function isLeanMode() {
+  return !falsyEnv(process.env.OUTSIDE_X_CALLS_LEAN_MODE);
 }
 
 function hasXReadCreds() {
@@ -73,11 +94,65 @@ function shouldStartPoller() {
 /** Set when `startOutsideXCallerPoller()` installed its interval (cleared on stop callback). */
 let outsidePollIntervalActive = false;
 
+/** Cached `dashboard_admin_settings.outside_calls_enabled` (15s TTL). */
+let dashboardProductEnabledCache = { exp: 0, enabled: true, checked: false };
+
+function envProductForceOff() {
+  const s = String(process.env.OUTSIDE_CALLS_FEATURE_DISABLED ?? '')
+    .trim()
+    .toLowerCase();
+  return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+}
+
+/**
+ * When false, skip X timeline reads (admin "coming soon" or env kill switch).
+ * Defaults true if settings row/column missing.
+ */
+async function isOutsideCallsProductEnabled() {
+  if (envProductForceOff()) return false;
+
+  const now = Date.now();
+  if (dashboardProductEnabledCache.exp > now) {
+    return dashboardProductEnabledCache.enabled;
+  }
+
+  const sb = getSupabaseServiceRole();
+  if (!sb) {
+    dashboardProductEnabledCache = { exp: now + 15_000, enabled: true, checked: true };
+    return true;
+  }
+
+  const { data, error } = await sb
+    .from('dashboard_admin_settings')
+    .select('outside_calls_enabled')
+    .eq('id', 1)
+    .maybeSingle();
+
+  if (error) {
+    const msg = (error.message || '').toLowerCase();
+    if (msg.includes('outside_calls_enabled') || error.code === '42703' || error.code === 'PGRST204') {
+      dashboardProductEnabledCache = { exp: now + 15_000, enabled: true, checked: true };
+      return true;
+    }
+    console.warn('[OutsideXPoll] dashboard_admin_settings read failed:', error.message);
+    dashboardProductEnabledCache = { exp: now + 15_000, enabled: true, checked: true };
+    return true;
+  }
+
+  const enabled = data == null ? true : data.outside_calls_enabled !== false;
+  dashboardProductEnabledCache = { exp: now + 15_000, enabled, checked: true };
+  return enabled;
+}
+
 function resolvePollIntervalMs() {
-  return Math.max(
-    15_000,
-    Math.min(120_000, Number(process.env.OUTSIDE_X_CALLS_POLL_INTERVAL_MS || 45_000))
-  );
+  const lean = isLeanMode();
+  const minMs = lean ? LEAN_POLL_MIN_MS : LEGACY_POLL_MIN_MS;
+  const maxMs = lean ? LEAN_POLL_MAX_MS : LEGACY_POLL_MAX_MS;
+  const envRaw = String(process.env.OUTSIDE_X_CALLS_POLL_INTERVAL_MS ?? '').trim();
+  const defaultMs = lean ? LEAN_POLL_INTERVAL_MS : LEGACY_POLL_INTERVAL_MS;
+  const parsed = envRaw ? Number(envRaw) : defaultMs;
+  const n = Number.isFinite(parsed) && parsed > 0 ? parsed : defaultMs;
+  return Math.max(minMs, Math.min(maxMs, Math.floor(n)));
 }
 
 /**
@@ -102,16 +177,27 @@ function getOutsideXPollBlockers() {
  *   readyToRun: boolean,
  *   running: boolean,
  *   pollIntervalMs: number,
+ *   leanMode: boolean,
+ *   disabledByDashboard: boolean,
  *   blockers: string[],
  *   hint: string
  * }}
  */
 function getOutsideXPollStatus() {
   const disabledByEnv = pollDisabled();
+  const disabledByDashboard =
+    dashboardProductEnabledCache.checked && dashboardProductEnabledCache.enabled === false;
   const blockers = getOutsideXPollBlockers();
   const readyToRun = !disabledByEnv && blockers.length === 0;
   const pollIntervalMs = resolvePollIntervalMs();
-  const running = Boolean(outsidePollIntervalActive && readyToRun);
+  const leanMode = isLeanMode();
+  const running = Boolean(
+    outsidePollIntervalActive && readyToRun && !disabledByDashboard && !envProductForceOff()
+  );
+  const intervalSec = Math.round(pollIntervalMs / 1000);
+  const leanNote = leanMode
+    ? `Lean mode (~${intervalSec}s) — fewer X reads; CAs may appear ~30s–2m after post.`
+    : `Legacy cadence (~${intervalSec}s).`;
 
   if (disabledByEnv) {
     return {
@@ -120,9 +206,26 @@ function getOutsideXPollStatus() {
       readyToRun: false,
       running: false,
       pollIntervalMs,
+      leanMode,
+      disabledByDashboard: false,
       blockers: [],
       hint:
         'OUTSIDE_X_CALLS_POLL_DISABLED is set on the bot host. X timeline reads are off; milestone and D/W/M posts still use X write credits when enabled.'
+    };
+  }
+
+  if (disabledByDashboard || envProductForceOff()) {
+    return {
+      status: 'disabled',
+      disabledByEnv: false,
+      readyToRun,
+      running: false,
+      pollIntervalMs,
+      leanMode,
+      disabledByDashboard: true,
+      blockers: [],
+      hint:
+        'Outside Calls is off in dashboard admin (coming soon). Pro tape hidden; X polling paused. Turn on under Admin → Outside X monitors.'
     };
   }
 
@@ -133,8 +236,10 @@ function getOutsideXPollStatus() {
       readyToRun: true,
       running: true,
       pollIntervalMs,
+      leanMode,
+      disabledByDashboard: false,
       blockers: [],
-      hint: `Polling active monitors every ${Math.round(pollIntervalMs / 1000)}s (X API read credits).`
+      hint: `Polling active monitors every ${intervalSec}s (X API read credits). ${leanNote}`
     };
   }
 
@@ -145,6 +250,8 @@ function getOutsideXPollStatus() {
       readyToRun: true,
       running: false,
       pollIntervalMs,
+      leanMode,
+      disabledByDashboard: false,
       blockers: [],
       hint: 'Env is configured but the poller is not running — restart the Discord bot (index.js) on the bot host.'
     };
@@ -156,6 +263,8 @@ function getOutsideXPollStatus() {
     readyToRun: false,
     running: false,
     pollIntervalMs,
+    leanMode,
+    disabledByDashboard: false,
     blockers,
     hint:
       blockers.length > 0
@@ -425,13 +534,15 @@ function startOutsideXCallerPoller() {
   };
 
   void tick();
+  void isOutsideCallsProductEnabled().catch(() => {});
   const id = setInterval(() => {
     void tick();
   }, intervalMs);
 
   outsidePollIntervalActive = true;
+  const modeLabel = isLeanMode() ? 'lean' : 'legacy';
   console.log(
-    `[OutsideXPoll] Started — every ${intervalMs}ms, active outside_x_sources → X (mint or $ticker) → FaSol → outside_calls`
+    `[OutsideXPoll] Started (${modeLabel}, every ${intervalMs}ms) — active outside_x_sources → X (mint or $ticker) → FaSol → outside_calls`
   );
 
   return () => {

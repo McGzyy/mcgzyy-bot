@@ -268,7 +268,7 @@ function getOutsideXPollStatus() {
     blockers,
     hint:
       blockers.length > 0
-        ? `Missing on bot host: ${blockers.join('; ')}.`
+        ? `Missing on the Discord bot VPS (mcgzyy-bot/.env + pm2 restart) — not Vercel: ${blockers.join('; ')}. Copy TELEGRAM_FASOL_OUTSIDE_CHAT_ID from Vercel if needed.`
         : 'Outside X poll is idle.'
   };
 }

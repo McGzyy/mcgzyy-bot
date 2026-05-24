@@ -42,7 +42,8 @@ function resolveNextBroadcastMilestone(currentX, postedMilestones = []) {
   );
   const eligible = ladder.filter(r => x >= r && !posted.has(r));
   if (!eligible.length) return 0;
-  return Math.max(...eligible);
+  // Lowest unposted rung first so 10× → 25× → 50× each get their own quote (not skip to max).
+  return Math.min(...eligible);
 }
 
 function roundAthX(x) {

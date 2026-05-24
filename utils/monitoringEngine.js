@@ -69,7 +69,8 @@ const DISCORD_MILESTONE_LEVELS = [
   { key: '100x', x: 100, threshold: 9900 }
 ];
 
-const APPROVAL_EXPIRY_MINUTES = 20;
+/** Pending bot-call reviews in #mod-approvals expire after this many minutes. */
+const APPROVAL_EXPIRY_MINUTES = 60;
 
 // Top approval pool size
 const MAX_ACTIVE_APPROVALS = 3;

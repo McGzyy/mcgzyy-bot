@@ -75,6 +75,7 @@ async function staffTierFromDiscord(discordUserId) {
   try {
     const roleIds = await fetchDiscordGuildMemberRoleIds(uid);
     if (roleIds === null) return null;
+    if (roleIds.length === 0) return null;
 
     const adminIds = idSet(process.env.DISCORD_ADMIN_ROLE_IDS);
     const modIds = idSet(process.env.DISCORD_MOD_ROLE_IDS);
@@ -82,7 +83,6 @@ async function staffTierFromDiscord(discordUserId) {
     if (adminIds.size > 0 || modIds.size > 0) {
       if (roleIds.some(id => adminIds.has(id))) return 'admin';
       if (roleIds.some(id => modIds.has(id))) return 'mod';
-      return 'user';
     }
 
     const rolesRes = await fetch(

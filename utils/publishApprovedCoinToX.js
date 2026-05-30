@@ -30,7 +30,14 @@ async function publishApprovedCoinToX(contractAddress) {
     if (last.reason === 'no_broadcast_milestone') break;
   }
 
-  return last || { success: false, reason: 'no_broadcast_milestone' };
+  const result = last || { success: false, reason: 'no_broadcast_milestone' };
+  if (!result.success) {
+    console.warn(
+      `[publishApprovedCoinToX] X post failed for ${addr}: ${result.reason || 'unknown'}` +
+        (result.error ? ` (${result.error})` : '')
+    );
+  }
+  return result;
 }
 
 module.exports = {

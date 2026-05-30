@@ -2543,7 +2543,13 @@ let updated = null;
           });
         }
 
-        await publishApprovedCoinToX(contractAddress);
+        const xPublish = await publishApprovedCoinToX(contractAddress);
+        if (xPublish && !xPublish.success) {
+          console.warn(
+            `[approve_call] X publish failed for ${contractAddress}: ${xPublish.reason || 'unknown'}` +
+              (xPublish.error ? ` (${xPublish.error})` : '')
+          );
+        }
 
         const approvedCall = getTrackedCall(contractAddress);
         const approveEmbed = buildCompactCoinApprovalEmbed(approvedCall);

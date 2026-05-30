@@ -2,7 +2,11 @@
 
 const { createPost, deleteTweet } = require('./xPoster');
 const { buildXMilestonePostAssets } = require('./xMilestonePostAssets');
-const { computeApprovalAthX, getApprovalTriggerX } = require('./approvalMilestoneService');
+const {
+  computeApprovalAthX,
+  getApprovalTriggerX,
+  getApprovalMilestoneLadder
+} = require('./approvalMilestoneService');
 const { setXPostState } = require('./trackedCallsService');
 const { shouldKeepActiveQuote } = require('./xMilestoneQuotePolicy');
 
@@ -28,6 +32,21 @@ function getBroadcastMilestoneLadder() {
   }
 
   return normalizeRungList(rungs.filter(r => r >= trigger));
+}
+
+function resolveApprovalAnchorMilestone(currentX, postedMilestones = []) {
+  const x = Number(currentX);
+  if (!Number.isFinite(x) || x < 1) return 0;
+
+  const ladder = getApprovalMilestoneLadder();
+  if (!ladder.length) return 0;
+
+  const posted = new Set(
+    (Array.isArray(postedMilestones) ? postedMilestones : []).map(n => Number(n))
+  );
+  const eligible = ladder.filter(r => x >= r && !posted.has(r));
+  if (!eligible.length) return 0;
+  return Math.max(...eligible);
 }
 
 function resolveNextBroadcastMilestone(currentX, postedMilestones = []) {
@@ -111,7 +130,19 @@ function resolveMilestonePublishPlan(currentX, trackedCall) {
       headlineX: Math.max(broadcast, athX),
       quotePreviousAthX: lastPostedAthX > 0 ? lastPostedAthX : 0
     };
-  } else if (athCatchUpEnabled() && posted.length) {
+  } else if (!hasAnchor && athX >= getApprovalTriggerX()) {
+    const approvalRung = resolveApprovalAnchorMilestone(athX, posted);
+    if (approvalRung) {
+      inner = {
+        kind: 'broadcast',
+        broadcastRung: approvalRung,
+        headlineX: Math.max(approvalRung, athX),
+        quotePreviousAthX: lastPostedAthX > 0 ? lastPostedAthX : 0
+      };
+    }
+  }
+
+  if (!inner && athCatchUpEnabled() && posted.length) {
     const lastBroadcast = Math.max(...posted);
     const ladder = getBroadcastMilestoneLadder();
     const nextRung = ladder.find(r => r > lastBroadcast);
@@ -311,6 +342,7 @@ async function publishMilestoneToX(trackedCall, opts = {}) {
 module.exports = {
   DEFAULT_BROADCAST_RUNGS,
   getBroadcastMilestoneLadder,
+  resolveApprovalAnchorMilestone,
   resolveNextBroadcastMilestone,
   resolveMilestonePublishPlan,
   publishMilestoneToX

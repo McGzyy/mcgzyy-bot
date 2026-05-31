@@ -36,6 +36,11 @@ function weeklyRunnerHour() {
 }
 
 async function tickXEngagementPosts() {
+  const { isXAutomationPaused } = require('./dashboardAutomationFlags');
+  if (await isXAutomationPaused()) {
+    return;
+  }
+
   const now = new Date();
   const hour = now.getUTCHours();
   const minute = now.getUTCMinutes();

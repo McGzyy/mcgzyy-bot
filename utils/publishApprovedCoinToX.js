@@ -7,7 +7,7 @@ const { publishMilestoneToX } = require('./xMilestonePublish');
  * Post a standalone broadcast milestone to X for an approved coin.
  * @param {string} contractAddress
  */
-async function publishApprovedCoinToX(contractAddress) {
+async function publishApprovedCoinToX(contractAddress, opts = {}) {
   const addr = String(contractAddress || '').trim();
   if (!addr) return { success: false, reason: 'missing_call' };
 
@@ -24,7 +24,8 @@ async function publishApprovedCoinToX(contractAddress) {
 
     last = await publishMilestoneToX(trackedCall, {
       latestScan: null,
-      auditCategory: 'approval_publish'
+      auditCategory: 'approval_publish',
+      bypassAutomationGate: opts.bypassAutomationGate === true
     });
     if (!last?.success) break;
     if (last.reason === 'no_broadcast_milestone') break;

@@ -187,6 +187,13 @@ async function publishMilestoneToX(trackedCall, opts = {}) {
     return { success: false, reason: 'not_approved' };
   }
 
+  if (!opts.bypassAutomationGate) {
+    const { isXAutomationPaused } = require('./dashboardAutomationFlags');
+    if (await isXAutomationPaused()) {
+      return { success: false, reason: 'x_automation_paused' };
+    }
+  }
+
   const currentX = computeApprovalAthX(trackedCall);
   const plan = resolveMilestonePublishPlan(currentX, trackedCall);
   if (!plan) {

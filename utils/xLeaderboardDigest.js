@@ -850,7 +850,11 @@ async function postDigest(p, options = {}) {
 async function tickXLeaderboardDigest() {
   await hydrateDigestStateFromDisk();
 
-  if (!envTruthy('X_LEADERBOARD_DIGEST_ENABLED')) {
+  const { isXAutomationPaused, isScheduledDigestsEnabled } = require('./dashboardAutomationFlags');
+  if (await isXAutomationPaused()) {
+    return;
+  }
+  if (!(await isScheduledDigestsEnabled())) {
     return;
   }
 
@@ -911,6 +915,11 @@ async function tickXLeaderboardDigest() {
 
 async function tickWeeklyStatsSnapshot() {
   await hydrateDigestStateFromDisk();
+
+  const { isXAutomationPaused } = require('./dashboardAutomationFlags');
+  if (await isXAutomationPaused()) {
+    return;
+  }
 
   if (!envTruthy('X_WEEKLY_STATS_SNAPSHOT_ENABLED')) {
     return;
@@ -1011,17 +1020,25 @@ async function getXDigestSchedulerStatus() {
       process.env.X_ACCESS_TOKEN_SECRET
   );
 
+  const { getDashboardAutomationFlagsSync, isScheduledDigestsEnabled, isXAutomationPaused } =
+    require('./dashboardAutomationFlags');
+  const dashFlags = getDashboardAutomationFlagsSync();
+  const automationPaused = await isXAutomationPaused();
+  const scheduledDigestsEnabled = await isScheduledDigestsEnabled();
+
   return {
     nowUtc: now.toISOString(),
     inDigestWindow: isWithinDigestPostWindow(now, targetHour, graceHours),
     targetHour,
     graceHours,
-    digestEnabled: envTruthy('X_LEADERBOARD_DIGEST_ENABLED'),
-    dailyDigestEnabled: envTruthy('X_LEADERBOARD_DIGEST_ENABLED') && !envFalsy('X_LEADERBOARD_DAILY_DIGEST_ENABLED'),
+    xAutomationPaused: automationPaused,
+    xScheduledDigestsEnabled: dashFlags.xScheduledDigestsEnabled === true,
+    digestEnabled: scheduledDigestsEnabled,
+    dailyDigestEnabled: scheduledDigestsEnabled && !envFalsy('X_LEADERBOARD_DAILY_DIGEST_ENABLED'),
     weeklyDigestEnabled:
-      envTruthy('X_LEADERBOARD_DIGEST_ENABLED') && !envFalsy('X_LEADERBOARD_WEEKLY_DIGEST_ENABLED'),
+      scheduledDigestsEnabled && !envFalsy('X_LEADERBOARD_WEEKLY_DIGEST_ENABLED'),
     monthlyDigestEnabled:
-      envTruthy('X_LEADERBOARD_DIGEST_ENABLED') && !envFalsy('X_LEADERBOARD_MONTHLY_DIGEST_ENABLED'),
+      scheduledDigestsEnabled && !envFalsy('X_LEADERBOARD_MONTHLY_DIGEST_ENABLED'),
     weeklyStatsEnabled: envTruthy('X_WEEKLY_STATS_SNAPSHOT_ENABLED'),
     weeklyRunnerEnabled: envTruthy('X_WEEKLY_RUNNER_ENABLED'),
     monthlyTopCallerEnabled: envTruthy('X_MONTHLY_TOP_CALLER_ENABLED'),

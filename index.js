@@ -546,6 +546,7 @@ function buildMcgbotCommandListText(message, { memberCanManageGuild, isBotOwner 
     `• \`!autoscantest\` [conservative|balanced|aggressive] — Simulated auto alerts\n` +
     `• \`!testx\` — Post a test tweet *(no extra bot permission check — rely on channel access)*\n` +
     `• \`!testweeklysnapshot\` — Post the **weekly stats snapshot** (scheduled body; owner only)\n` +
+    `• \`!republishx <sol_ca>\` — Re-post approved coin milestone to X (owner; bypasses automation pause)\n` +
     `• \`!xdigeststatus\` — Scheduled X digest / W·M engagement scheduler status + recent post audit (owner only)\n` +
     `• \`!previewdailydigest\` / \`!previewweeklydigest\` / \`!previewmonthlydigest\` — **Discord preview** with **sample stats** (layout). Add \`live\` for real data.\n` +
     `• \`!testdailydigest\` / \`!test7ddigest\` / \`!testmonthlydigest\` — Live X test (**rolling** window). \`calendar\` = scheduler window. \`alltime\` = fill card from full desk history. \`sample\` = layout filler.\n` +
@@ -3291,6 +3292,43 @@ if (lowerContent === '!scanner off') {
         return;
       }
 
+      if (lowerContent.startsWith('!republishx ')) {
+        if (!isBotOwnerDiscordId(message.author.id)) {
+          return message.reply('❌ You do not have permission to use this command.');
+        }
+
+        const ca = content.split(/\s+/)[1]?.trim();
+        if (!ca) {
+          await replyText(message, '❌ Usage: `!republishx <sol_contract_address>`');
+          return;
+        }
+
+        try {
+          await replyText(message, `⏳ Republishing milestone to X for \`${ca}\`…`);
+          const result = await publishApprovedCoinToX(ca, { bypassAutomationGate: true });
+          if (result?.success) {
+            const parts = [
+              `✅ Posted to X`,
+              result.postId ? `Post ID: \`${result.postId}\`` : null,
+              result.milestoneX != null ? `Milestone: **${result.milestoneX}×**` : null,
+              result.reply ? '(quote update)' : result.postMode === 'anchor' ? '(anchor)' : null
+            ].filter(Boolean);
+            await replyText(message, parts.join('\n'));
+          } else {
+            await replyText(
+              message,
+              `❌ X republish failed: **${result?.reason || 'unknown'}**` +
+                (result?.error ? `\n\`${String(result.error).slice(0, 400)}\`` : '')
+            );
+          }
+        } catch (e) {
+          console.error('[!republishx]', e);
+          await replyText(message, `❌ ${e instanceof Error ? e.message : String(e)}`);
+        }
+
+        return;
+      }
+
       if (lowerContent === '!testweeklyrunner' || lowerContent === '!testtopcallermonth') {
         if (!isBotOwnerDiscordId(message.author.id)) {
           return message.reply('❌ You do not have permission to use this command.');
@@ -3365,7 +3403,9 @@ if (lowerContent === '!scanner off') {
             `Now: ${st.nowUtc}`,
             `Digest window (hour ${st.targetHour}–${st.targetHour + st.graceHours} UTC): **${st.inDigestWindow ? 'OPEN' : 'closed'}**`,
             '',
-            `X_LEADERBOARD_DIGEST_ENABLED: **${st.digestEnabled ? 'yes' : 'no'}**`,
+            `X automation paused (dashboard): **${st.xAutomationPaused ? 'yes' : 'no'}**`,
+            `Scheduled digests (dashboard): **${st.xScheduledDigestsEnabled ? 'enabled' : 'disabled'}**`,
+            `Digest scheduler active: **${st.digestEnabled ? 'yes' : 'no'}**`,
             `Daily / 7d / monthly digests: **${st.dailyDigestEnabled ? 'on' : 'off'}** / **${st.weeklyDigestEnabled ? 'on' : 'off'}** / **${st.monthlyDigestEnabled ? 'on' : 'off'}**`,
             `X_WEEKLY_STATS_SNAPSHOT_ENABLED: **${st.weeklyStatsEnabled ? 'yes' : 'no'}** (${wdayNames[st.weeklyStatsWeekday] ?? st.weeklyStatsWeekday}, hour ${st.weeklyStatsHour} UTC)`,
             `X_WEEKLY_RUNNER_ENABLED: **${st.weeklyRunnerEnabled ? 'yes' : 'no'}** (${wdayNames[st.weeklyRunnerWeekday] ?? st.weeklyRunnerWeekday})`,

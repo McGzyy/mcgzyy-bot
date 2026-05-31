@@ -198,6 +198,7 @@ function startReferralApiServer(discordClient = null, opts = {}) {
     }
 
     let outsideXCallsPoll = null;
+    let xAutomation = null;
     try {
       const { getOutsideXPollStatus } = require('./utils/outsideXCallerPoller');
       outsideXCallsPoll = getOutsideXPollStatus();
@@ -212,6 +213,19 @@ function startReferralApiServer(discordClient = null, opts = {}) {
         hint: e && e.message ? String(e.message) : 'outside_poll_status_unavailable'
       };
     }
+    try {
+      const {
+        getDashboardAutomationFlagsSync,
+        refreshDashboardAutomationFlags
+      } = require('./utils/dashboardAutomationFlags');
+      void refreshDashboardAutomationFlags().catch(() => {});
+      xAutomation = getDashboardAutomationFlagsSync();
+    } catch (e) {
+      xAutomation = {
+        checked: false,
+        hint: e && e.message ? String(e.message) : 'x_automation_status_unavailable'
+      };
+    }
 
     res.json({
       ok: true,
@@ -219,6 +233,7 @@ function startReferralApiServer(discordClient = null, opts = {}) {
       discordReady: Boolean(discordClient && discordClient.isReady && discordClient.isReady()),
       processUptimeSec: Math.floor(process.uptime()),
       outsideXCallsPoll,
+      xAutomation,
       endpoints: {
         modQueueGet: true,
         modStatsGet: true,

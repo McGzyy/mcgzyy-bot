@@ -364,6 +364,8 @@ async function processOneMention(discordClient, tweet, includes, usersById) {
  */
 async function pollMentionDeskCallsOnce(discordClient) {
   if (!mentionDeskEnabled()) return;
+  const { isXAutomationPaused } = require('./dashboardAutomationFlags');
+  if (await isXAutomationPaused()) return;
   if (!discordClient?.isReady?.()) return;
 
   const botUserId = await fetchBotUserId();

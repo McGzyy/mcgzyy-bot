@@ -105,13 +105,12 @@ function shouldStartPoller() {
 /** Set when `startOutsideXCallerPoller()` installed its interval (cleared on stop callback). */
 let outsidePollIntervalActive = false;
 
-/** Cached dashboard admin flags (15s TTL). */
-let dashboardSettingsCache = {
-  exp: 0,
-  outsideCallsEnabled: true,
-  outsideXPollingEnabled: true,
-  checked: false
-};
+const {
+  refreshDashboardAutomationFlags,
+  getDashboardAutomationFlagsSync,
+  isOutsideCallsProductEnabled,
+  isOutsideXPollingEnabled
+} = require('./dashboardAutomationFlags');
 
 /** Recent outside mint posts (in-process dedupe before Telegram). */
 const recentOutsideMintAt = new Map();
@@ -125,72 +124,12 @@ function envProductForceOff() {
 }
 
 async function refreshDashboardOutsideSettings() {
-  const now = Date.now();
-  if (dashboardSettingsCache.exp > now) {
-    return dashboardSettingsCache;
-  }
-
-  const sb = getSupabaseServiceRole();
-  if (!sb) {
-    dashboardSettingsCache = {
-      exp: now + 15_000,
-      outsideCallsEnabled: true,
-      outsideXPollingEnabled: true,
-      checked: true
-    };
-    return dashboardSettingsCache;
-  }
-
-  const { data, error } = await sb
-    .from('dashboard_admin_settings')
-    .select('outside_calls_enabled,outside_x_polling_enabled')
-    .eq('id', 1)
-    .maybeSingle();
-
-  if (error) {
-    const msg = (error.message || '').toLowerCase();
-    if (
-      msg.includes('outside_calls_enabled') ||
-      msg.includes('outside_x_polling_enabled') ||
-      error.code === '42703' ||
-      error.code === 'PGRST204'
-    ) {
-      dashboardSettingsCache = {
-        exp: now + 15_000,
-        outsideCallsEnabled: true,
-        outsideXPollingEnabled: true,
-        checked: true
-      };
-      return dashboardSettingsCache;
-    }
-    console.warn('[OutsideXPoll] dashboard_admin_settings read failed:', error.message);
-    dashboardSettingsCache = {
-      exp: now + 15_000,
-      outsideCallsEnabled: true,
-      outsideXPollingEnabled: true,
-      checked: true
-    };
-    return dashboardSettingsCache;
-  }
-
-  const outsideCallsEnabled = data == null ? true : data.outside_calls_enabled !== false;
-  const outsideXPollingEnabled =
-    data == null ? true : data.outside_x_polling_enabled !== false;
-  dashboardSettingsCache = {
-    exp: now + 15_000,
-    outsideCallsEnabled,
-    outsideXPollingEnabled,
-    checked: true
-  };
-  return dashboardSettingsCache;
+  return refreshDashboardAutomationFlags();
 }
 
 async function shouldPollXNow() {
   if (envProductForceOff() || pollDisabled()) return false;
-  const s = await refreshDashboardOutsideSettings();
-  if (!s.outsideCallsEnabled) return false;
-  if (!s.outsideXPollingEnabled) return false;
-  return true;
+  return isOutsideXPollingEnabled();
 }
 
 function markOutsideMintPosted(mint) {
@@ -211,10 +150,9 @@ function isOutsideMintRecentlyPosted(mint) {
   return true;
 }
 
-async function isOutsideCallsProductEnabled() {
+async function isOutsideCallsProductEnabledLocal() {
   if (envProductForceOff()) return false;
-  const s = await refreshDashboardOutsideSettings();
-  return s.outsideCallsEnabled;
+  return isOutsideCallsProductEnabled();
 }
 
 function resolvePollIntervalMs() {
@@ -259,14 +197,17 @@ function getOutsideXPollBlockers() {
  */
 function getOutsideXPollStatus() {
   const disabledByEnv = pollDisabled();
-  const settings = dashboardSettingsCache;
+  const settings = getDashboardAutomationFlagsSync();
+  const disabledByMasterPause = settings.checked && settings.xAutomationPaused === true;
   const disabledByProduct =
     settings.checked && settings.outsideCallsEnabled === false;
   const disabledByDashboardPolling =
     settings.checked &&
+    !disabledByMasterPause &&
     settings.outsideCallsEnabled !== false &&
     settings.outsideXPollingEnabled === false;
-  const disabledByDashboard = disabledByProduct || disabledByDashboardPolling;
+  const disabledByDashboard =
+    disabledByMasterPause || disabledByProduct || disabledByDashboardPolling;
   const blockers = getOutsideXPollBlockers();
   const readyToRun = !disabledByEnv && blockers.length === 0;
   const pollIntervalMs = resolvePollIntervalMs();
@@ -282,10 +223,28 @@ function getOutsideXPollStatus() {
     ? `Lean mode (~${intervalSec}s) — fewer X reads; CAs may appear ~30s–2m after post.`
     : `Legacy cadence (~${intervalSec}s).`;
 
+  if (disabledByMasterPause) {
+    return {
+      status: 'disabled',
+      disabledByEnv: false,
+      disabledByMasterPause: true,
+      readyToRun,
+      running: false,
+      pollIntervalMs,
+      leanMode,
+      disabledByDashboard: true,
+      disabledByDashboardPolling: false,
+      blockers: [],
+      hint:
+        'All X automation is paused in dashboard admin (Admin → Bot → X automation). Resume after loading credits.'
+    };
+  }
+
   if (disabledByEnv) {
     return {
       status: 'disabled',
       disabledByEnv: true,
+      disabledByMasterPause: false,
       readyToRun: false,
       running: false,
       pollIntervalMs,

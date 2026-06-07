@@ -93,6 +93,20 @@ function getHighestEligibleApprovalMilestone(currentX) {
   return Math.max(...eligible);
 }
 
+/** Mod decisions that must never re-open #mod-approvals. */
+function isTerminalApprovalStatus(status) {
+  const s = String(status || '').toLowerCase();
+  return s === 'approved' || s === 'denied' || s === 'excluded';
+}
+
+/** Active Discord card still awaiting mod action at this ladder rung (or higher). */
+function hasLiveModApprovalCard(trackedCall, nextMilestone) {
+  if (!trackedCall) return false;
+  if (String(trackedCall.approvalStatus || '').toLowerCase() !== 'pending') return false;
+  if (!trackedCall.approvalMessageId) return false;
+  return Number(trackedCall.lastApprovalTriggerX || 0) >= nextMilestone;
+}
+
 /**
  * @param {object} trackedCall
  * @param {number} [currentX] — if omitted, uses computeApprovalAthX(trackedCall)
@@ -101,7 +115,7 @@ function shouldCreateApprovalRequest(trackedCall, currentX = null) {
   if (!trackedCall) return { shouldSend: false, triggerX: 0 };
 
   const approvalStatus = String(trackedCall.approvalStatus || '').toLowerCase();
-  if (approvalStatus === 'approved' || approvalStatus === 'denied') {
+  if (isTerminalApprovalStatus(approvalStatus)) {
     return { shouldSend: false, triggerX: 0 };
   }
 
@@ -120,23 +134,18 @@ function shouldCreateApprovalRequest(trackedCall, currentX = null) {
     return { shouldSend: false, triggerX: 0 };
   }
 
-  const alreadyTriggered = Array.isArray(trackedCall.approvalMilestonesTriggered)
-    ? trackedCall.approvalMilestonesTriggered.includes(nextMilestone)
-    : false;
-
-  const currentlyPending =
-    trackedCall.approvalMessageId &&
-    trackedCall.approvalStatus === 'pending';
-
-  if (currentlyPending && Number(trackedCall.lastApprovalTriggerX || 0) >= nextMilestone) {
+  if (hasLiveModApprovalCard(trackedCall, nextMilestone)) {
     return { shouldSend: false, triggerX: 0 };
   }
 
-  if (alreadyTriggered && Number(trackedCall.lastApprovalTriggerX || 0) >= nextMilestone) {
-    return { shouldSend: false, triggerX: 0 };
+  const lastCardX = Number(trackedCall.lastApprovalTriggerX || 0);
+
+  // Higher ladder rung, or same rung after expire / missed card — re-queue for mods.
+  if (nextMilestone >= lastCardX) {
+    return { shouldSend: true, triggerX: nextMilestone };
   }
 
-  return { shouldSend: true, triggerX: nextMilestone };
+  return { shouldSend: false, triggerX: 0 };
 }
 
 module.exports = {
@@ -147,4 +156,6 @@ module.exports = {
   resolveAthMarketCapForApproval,
   computeApprovalAthX,
   shouldCreateApprovalRequest,
+  isTerminalApprovalStatus,
+  hasLiveModApprovalCard,
 };

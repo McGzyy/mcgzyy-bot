@@ -723,7 +723,8 @@ async function checkTrackedCoins(channel, sourceBucket = 'all') {
 
   for (const coin of activeCoins) {
     try {
-      if (String(coin.approvalStatus || '').toLowerCase() === 'denied') {
+      const approvalStatus = String(coin.approvalStatus || '').toLowerCase();
+      if (approvalStatus === 'denied' || approvalStatus === 'excluded') {
         continue;
       }
 
@@ -1084,6 +1085,7 @@ function startUserPerformanceSupabaseMirror(opts = {}) {
       const ct = String(coin.callSourceType || 'user_call');
       if (ct !== 'user_call' && ct !== 'bot_call') return false;
       if (String(coin.approvalStatus || '').toLowerCase() === 'denied') return false;
+      if (String(coin.approvalStatus || '').toLowerCase() === 'excluded') return false;
       if (!String(coin.callPerformanceId || '').trim()) return false;
       return true;
     });

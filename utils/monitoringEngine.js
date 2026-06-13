@@ -69,8 +69,12 @@ const DISCORD_MILESTONE_LEVELS = [
   { key: '100x', x: 100, threshold: 9900 }
 ];
 
-/** Pending bot-call reviews in #mod-approvals expire after this many minutes. */
+/** Pending user-call reviews in #mod-approvals expire after this many minutes. Bot calls never expire. */
 const APPROVAL_EXPIRY_MINUTES = 120;
+
+function isBotCallApproval(trackedCall) {
+  return String(trackedCall?.callSourceType || '') === 'bot_call';
+}
 
 // Top approval pool size
 const MAX_ACTIVE_APPROVALS = 3;
@@ -207,10 +211,37 @@ function getPublicCallerLabel(trackedCall, fallback = 'Unknown') {
   });
 }
 
+function getMilestonePublishBurstLimit() {
+  const n = Number(process.env.X_MILESTONE_BURST_ON_APPROVE ?? 4);
+  return Number.isFinite(n) && n > 0 ? Math.min(8, Math.floor(n)) : 4;
+}
+
 async function maybePublishApprovedMilestoneToX(trackedCall, latestScan = null) {
+  if (!trackedCall?.xApproved) return null;
+
   try {
     const { publishMilestoneToX } = require('./xMilestonePublish');
-    return await publishMilestoneToX(trackedCall, { latestScan });
+    const addr = String(trackedCall.contractAddress || '').trim();
+    const maxBurst = getMilestonePublishBurstLimit();
+    let last = null;
+
+    for (let i = 0; i < maxBurst; i += 1) {
+      const fresh = addr ? getTrackedCall(addr) || trackedCall : trackedCall;
+      if (!fresh?.xApproved) break;
+
+      last = await publishMilestoneToX(fresh, { latestScan });
+      if (!last?.success) {
+        if (last?.reason && last.reason !== 'no_broadcast_milestone') {
+          console.warn(
+            `[XMilestone] Publish skipped for ${fresh.tokenName || addr}: ${last.reason}` +
+              (last.error ? ` (${last.error})` : '')
+          );
+        }
+        break;
+      }
+    }
+
+    return last;
   } catch (error) {
     console.error('[XMilestone] Failed to publish approved milestone:', error.message);
     return {
@@ -483,6 +514,7 @@ async function pruneApprovalPool(client) {
 
   for (const trackedCall of remove) {
     if (keepSet.has(trackedCall.contractAddress)) continue;
+    if (isBotCallApproval(trackedCall)) continue;
 
     const pruneGuild = client ? await resolveGuildForTrackedApproval(client, trackedCall) : null;
     if (pruneGuild) {
@@ -520,7 +552,9 @@ async function postApprovalReview(channel, trackedCall, scan = null, triggerX = 
       clearApprovalRequest(trackedCall.contractAddress);
     }
 
-    const expiresAt = new Date(Date.now() + APPROVAL_EXPIRY_MINUTES * 60 * 1000).toISOString();
+    const expiresAt = isBotCallApproval(trackedCall)
+      ? null
+      : new Date(Date.now() + APPROVAL_EXPIRY_MINUTES * 60 * 1000).toISOString();
     const refreshed = markApprovalRequested(trackedCall.contractAddress, triggerX, expiresAt);
 
     const embed = buildApprovalStatusEmbed(refreshed, scan);

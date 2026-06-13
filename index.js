@@ -1420,6 +1420,7 @@ async function cleanupExpiredApprovals() {
     const now = Date.now();
 
     for (const trackedCall of allCalls) {
+      if (String(trackedCall.callSourceType || '') === 'bot_call') continue;
       if (!trackedCall.approvalMessageId || !trackedCall.approvalExpiresAt) continue;
       if (trackedCall.approvalStatus !== 'pending') continue;
 
